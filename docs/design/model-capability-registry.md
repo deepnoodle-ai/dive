@@ -34,6 +34,10 @@ normalization. Unknown future point releases, gateway IDs, deployments, and
 custom models remain unclassified even when a permissive runtime prefix matcher
 would pass their settings through or inherit a family rule.
 
+Live evidence is also scoped to the endpoint and API surface that was probed. A
+Vertex result never becomes an implicit guarantee for the public Gemini API,
+Anthropic Messages, Bedrock, or another adapter surface.
+
 ## Problem
 
 The current capability ownership is split:
@@ -72,12 +76,12 @@ quadratically as controls are added.
 2. Keep provider packages authoritative; the registry stores resolvers, not a
    second copy of per-model facts.
 3. Distinguish native effort support from effort-to-budget emulation.
-4. Publish fixed budget bounds while leaving request-dependent constraints to a
-   dry-run plan.
-5. Explain concrete control combinations from the same pure predicates used by
-   request construction.
-6. Preserve known-but-not-live-probed classifications without presenting them
-   as current live guarantees.
+4. Let a catalog consumer publish fixed budget bounds without misrepresenting
+   request-dependent constraints as model constants.
+5. Let an admission consumer determine how one concrete configuration will be
+   treated without copying provider request rules.
+6. Preserve endpoint-scoped verification evidence without presenting a probe on
+   one API surface as proof for another.
 7. Distinguish an unlinked provider package from a linked provider that does not
    classify a model.
 8. Define a conservative model-ID normalization contract that cannot silently
@@ -97,8 +101,9 @@ quadratically as controls are added.
    they are today.
 4. Strict validation inside normal Dive calls. Existing clamping, translation,
    omission, warnings, and unknown-model pass-through remain unchanged.
-5. A capability version or content hash. Consumers can derive a version from
-   the facts they publish.
+5. A separate capability version or content hash. Consumers can record the
+   loaded Dive module versions through `runtime/debug.ReadBuildInfo` when they
+   need to diff or roll back a published contract.
 6. Native-provider inference for gateways such as OpenRouter, Amazon Bedrock,
    or Vertex deployments. Those endpoints may expose different controls and
    must register their own provider classification if needed.
@@ -242,30 +247,43 @@ custom names return `ok=false` unless a separately registered provider owns
 their contract.
 
 The public classifier must use an exact map from canonical catalog model ID to
-the intended capability entry and the evidence state for that exact ID. The map
-does not copy capability facts; it records which authoritative entry applies
-and whether that mapping was live-probed. A classifier must not call a plain
+the intended capability entry and verification scopes for that exact ID. The
+map does not copy capability facts; it records which authoritative entry applies
+and where that mapping was live-probed. A classifier must not call a plain
 prefix matcher and assume the match itself is evidence. This is particularly
 important for Anthropic: the existing runtime deliberately documents that a
 future `claude-opus-4-9` would inherit the older `claude-opus-4` entry. That
 permissive runtime behavior remains, but the public classifier returns
 `ok=false` until the new ID has an explicit classification mapping.
 
-### Linked, classified, and verified are separate states
+The provider-private classification result includes the canonical model ID and
+matched capability-entry key so package tests can assert the exact mapping. The
+registered public projection omits that key: it is a testable source pointer,
+not a consumer contract, and private table refactors should not become public
+API changes.
+
+### Linked, classified, and verification scope are separate states
 
 `Providers()` returns the sorted canonical names registered in the current
 binary. It lets a caller distinguish "the provider package is not linked" from
 "the provider is linked but this model is not classified."
 
-`ClassificationFor` returns `ok=true` for an exact model mapping, including a
-mapping explicitly marked as not live-probed. `LiveVerified=false` means the
-facts are historical, documented, or inferred rather than confirmed against a
-live provider endpoint.
+`ClassificationFor` returns `ok=true` for an exact model mapping even when that
+mapping has no live verification scope. `VerificationScopes` names the API
+surfaces against which the exact classification was successfully probed. An
+empty list means the facts are historical, documented, inferred, or otherwise
+not live-probed.
 
-`LiveVerified` means "confirmed successfully against a live endpoint at least
-once." It is not a freshness, entitlement, regional availability, or
-served-model guarantee. Strict consumers normally fail closed on either
-`!ok` or `!LiveVerified` unless they have their own qualification evidence.
+Verification on one scope is not evidence for another. For example,
+`gemini-3.7-flash` currently carries `google:vertex-ai` but not
+`google:gemini-api`, because its documented probe was performed against Vertex
+AI. Anthropic's direct Messages API, Bedrock, and Vertex are likewise distinct
+surfaces. A strict consumer checks the scope it will actually call.
+
+Verification scope is not a freshness, entitlement, regional availability, or
+served-model guarantee. Consumers that need rollback provenance should record
+the loaded module versions from `runtime/debug.ReadBuildInfo` with the published
+contract.
 
 ## Public API
 
@@ -305,7 +323,9 @@ type ReasoningClassification struct {
 	// Budget is non-nil when Dive can send a manual reasoning budget.
 	Budget *ReasoningBudgetClassification
 
-	AdaptiveThinking   bool
+	AdaptiveThinking bool
+
+	// CanDisableThinking is false when the model has no reasoning support.
 	CanDisableThinking bool
 }
 
@@ -320,10 +340,23 @@ type Classification struct {
 
 	Reasoning ReasoningClassification
 
-	// LiveVerified reports whether this exact classification was confirmed
-	// against a live provider endpoint at least once.
-	LiveVerified bool
+	// VerificationScopes identifies the endpoint and API surfaces on which this
+	// exact classification was successfully live-probed. An empty slice makes no
+	// live-verification claim.
+	VerificationScopes []VerificationScope
 }
+
+// VerificationScope identifies a provider endpoint and API surface. It is an
+// extensible string so third-party providers can define their own scopes.
+type VerificationScope string
+
+const (
+	VerificationOpenAIResponses   VerificationScope = "openai:responses-api"
+	VerificationXAIResponses      VerificationScope = "xai:responses-api"
+	VerificationAnthropicMessages VerificationScope = "anthropic:messages-api"
+	VerificationGoogleGeminiAPI   VerificationScope = "google:gemini-api"
+	VerificationGoogleVertexAI    VerificationScope = "google:vertex-ai"
+)
 
 type ControlAction string
 
@@ -418,6 +451,10 @@ func Explain(provider string, config llm.Config) (Plan, bool)
 func (c Classification) SupportsNativeEffort(
 	effort llm.ReasoningEffort,
 ) bool
+
+// VerifiedOn reports whether the exact model classification was live-probed on
+// the requested endpoint and API surface.
+func (c Classification) VerifiedOn(scope VerificationScope) bool
 ```
 
 The unexported sentinel fields require external packages to use keyed composite
@@ -443,11 +480,16 @@ The registry uses a `sync.RWMutex` and a map keyed by normalized provider name.
 - Lookup copies the resolver while holding the read lock, releases the lock,
   and only then invokes it. A resolver therefore cannot deadlock the registry.
 - Returned values are deep-enough snapshots for public mutation. The registry
-  clones `NativeEfforts`, optional budget records and bounds, effective value
-  pointers, and reason-bearing plan values as necessary.
+  clones `NativeEfforts`, `VerificationScopes`, optional budget records and
+  bounds, effective value pointers, and reason-bearing plan values as necessary.
 - `Providers` returns a newly allocated, sorted slice.
 - Resolver registration normally happens during package initialization, but
-  the mutex keeps tests and plugin-style imports race-safe.
+  the mutex keeps concurrent lookups and plugin-style imports race-safe.
+
+Registration is process-lifetime state; there is no public `Unregister`. Tests
+outside `modelcaps` use unique fake provider names. Registry package tests use
+an unexported cleanup helper that restores the prior map entry with `t.Cleanup`,
+so repeated and parallel tests do not leak registrations into one another.
 
 The executable must import a provider package for its `init()` to run. The
 registry removes provider-specific dispatch from lookup sites; it does not make
@@ -467,8 +509,8 @@ For these providers:
 - `NativeEfforts` comes from `Entry.Caps.Efforts`.
 - `Temperature` comes from `Entry.Caps.Temperature`.
 - Reasoning budgets, adaptive thinking, and explicit disablement are absent.
-- `LiveVerified` requires both an exact mapping marked as live-probed and
-  `!Entry.Unverified`.
+- `VerificationScopes` comes from the exact model mapping and is empty when
+  `Entry.Unverified` is true.
 
 The classifier uses `LookupEntry`, not `Lookup`, because `Lookup` intentionally
 hides unverified entries for permissive runtime behavior. Prefix lookup may be
@@ -484,29 +526,32 @@ adaptive emulation.
 
 Add `providers/anthropic/capabilities_register.go`. The static projection is:
 
-| Public field             | Anthropic source                                      |
-| ------------------------ | ----------------------------------------------------- |
-| `NativeEfforts`          | `caps.efforts`                                        |
-| `EffortEmulatedAsBudget` | no native efforts and `caps.manualBudget`             |
-| `Budget`                 | present when `caps.manualBudget`                      |
-| Budget minimum           | `minThinkingBudget`                                   |
-| Budget maximum           | no fixed maximum                                      |
-| `AdaptiveThinking`       | `caps.adaptive`                                       |
-| `CanDisableThinking`     | whether Dive can make thinking inactive for the model |
-| `Temperature`            | `caps.temperature`                                    |
-| `LiveVerified`           | exact mapping evidence and private entry evidence     |
+| Public field             | Anthropic source                                |
+| ------------------------ | ----------------------------------------------- |
+| `NativeEfforts`          | `caps.efforts`                                  |
+| `EffortEmulatedAsBudget` | no native efforts and `caps.manualBudget`       |
+| `Budget`                 | present when `caps.manualBudget`                |
+| Budget minimum           | `minThinkingBudget`                             |
+| Budget maximum           | no fixed maximum                                |
+| `AdaptiveThinking`       | `caps.adaptive`                                 |
+| `CanDisableThinking`     | guarded semantic disablement                    |
+| `Temperature`            | `caps.temperature`                              |
+| `VerificationScopes`     | exact mapping scopes and private entry evidence |
 
-`CanDisableThinking` is semantic. It reports whether Dive can make thinking
-inactive, whether the wire representation is an explicit
-`thinking:{type:"disabled"}` object or omission. Private fields such as
-`thinkingOnByDefault`, `explicitDisable`, and `disabledEffortCap` continue to
-drive planning and are not exposed directly.
+`CanDisableThinking` is semantic and only meaningful for a model that can
+reason. The projection first requires at least one of native effort, manual
+budget, adaptive thinking, or thinking-on-by-default; only then does it report
+whether Dive can make thinking inactive. This guard keeps a non-reasoning model
+such as `claude-3-5-haiku` from vacuously reporting disablement. The wire
+representation may be an explicit `thinking:{type:"disabled"}` object or
+omission. Private fields such as `thinkingOnByDefault`, `explicitDisable`, and
+`disabledEffortCap` continue to drive planning and are not exposed directly.
 
 The private entry evidence marker is named `notLiveProbed`, not `unverified`,
 because Google's existing `unverified` field changes runtime lookup semantics.
-It combines with the exact mapping's evidence state to produce `LiveVerified`.
-The Anthropic marker affects only public evidence and must not accidentally
-turn a known runtime entry into passthrough.
+It suppresses the exact mapping's verification scopes. The Anthropic marker
+affects only public evidence and must not accidentally turn a known runtime
+entry into passthrough.
 
 The current `lookupCapabilities` prefix matcher remains on the runtime path.
 The public classifier uses an exact catalog-ID map and records the intended
@@ -533,15 +578,15 @@ Add `providers/google/capabilities_register.go`. The classifier projects the
 raw `lookupEntry`, not `lookupCapabilities`, because the latter converts
 not-live-probed entries into unknown runtime passthrough.
 
-| Public field             | Google source                                     |
-| ------------------------ | ------------------------------------------------- |
-| `NativeEfforts`          | `caps.efforts`                                    |
-| `EffortEmulatedAsBudget` | no native efforts on a live-verified budget model |
-| `Budget`                 | classified `caps.minBudget` and `caps.maxBudget`  |
-| `AdaptiveThinking`       | model accepts Dive's adaptive-thinking request    |
-| `CanDisableThinking`     | `caps.canDisableThinking`                         |
-| `Temperature`            | `modelAcceptsTemperature(model)`                  |
-| `LiveVerified`           | exact mapping evidence and `!caps.unverified`     |
+| Public field             | Google source                                    |
+| ------------------------ | ------------------------------------------------ |
+| `NativeEfforts`          | `caps.efforts`                                   |
+| `EffortEmulatedAsBudget` | no native efforts on a classified budget model   |
+| `Budget`                 | classified `caps.minBudget` and `caps.maxBudget` |
+| `AdaptiveThinking`       | model accepts Dive's adaptive-thinking request   |
+| `CanDisableThinking`     | `caps.canDisableThinking`                        |
+| `Temperature`            | `modelAcceptsTemperature(model)`                 |
+| `VerificationScopes`     | exact mapping scopes, empty if `caps.unverified` |
 
 There is no separate `Dynamic` field. Google's `-1` thinking budget is the wire
 encoding used when the provider-private planner applies
@@ -550,6 +595,11 @@ encoding used when the provider-private planner applies
 The temperature projection uses `modelAcceptsTemperature`, not raw status-code
 evidence. Some Gemini generations accept and range-check temperature but do not
 honor it; Dive deliberately omits it for those models.
+
+The exact `gemini-3.7-flash` mapping includes only
+`VerificationGoogleVertexAI`. Its table comment says it was verified on Vertex
+AI and was not probed against the public Gemini API. Other Gemini mappings list
+only scopes supported by their own probe evidence.
 
 As with Anthropic, exact catalog-ID membership and an explicit model-to-entry
 mapping precede any private prefix lookup. Vertex deployment and publisher
@@ -565,16 +615,19 @@ A strict catalog checks provider linkage, exact classification, and evidence:
 
 ```go
 if !slices.Contains(modelcaps.Providers(), "google") {
-	// The Google provider package is not linked into this binary.
+	return errors.New("google provider package is not linked")
 }
 
 class, ok := modelcaps.ClassificationFor("google", "gemini-3.7-flash")
-if !ok || !class.LiveVerified {
-	// Do not advertise controls without separate qualification evidence.
+if !ok {
+	return errors.New("model is not classified")
+}
+if !class.VerifiedOn(modelcaps.VerificationGoogleVertexAI) {
+	return errors.New("classification was not verified on Vertex AI")
 }
 
 if !class.SupportsNativeEffort(llm.ReasoningEffortHigh) {
-	// Do not label this effort as natively supported.
+	return errors.New("high effort is not natively supported")
 }
 ```
 
@@ -590,11 +643,14 @@ cfg := llm.Config{
 }
 
 plan, ok := modelcaps.Explain("anthropic", cfg)
-if !ok || plan.Rejected {
-	// Refuse the request or require separate qualification.
+if !ok {
+	return errors.New("model is not classified")
+}
+if plan.Rejected {
+	return errors.New(plan.RejectionReason)
 }
 if plan.Budget.Adjusted || plan.Temperature.Action == modelcaps.ControlOmitted {
-	// Tell the caller exactly which requested semantics would change.
+	return errors.New("Dive would change the requested control semantics")
 }
 ```
 
@@ -636,6 +692,10 @@ older nested provider simply will not register; `Providers()` makes that
 visible. A newer nested provider cannot compile against a root module lacking
 the required API, which is safer than silent schema skew.
 
+A strict catalog publisher asserts its expected provider set at startup and
+returns a visible health/configuration error when one is absent. It must not
+silently treat a missing resolver as an empty provider catalog.
+
 ## Package layout
 
 ```text
@@ -648,15 +708,17 @@ providers/
 ├── anthropic/
 │   ├── capabilities.go           # private source of truth and planner inputs
 │   ├── capabilities_register.go  # exact classification and explanation
-│   └── capabilities_test.go
+│   └── capabilities_test.go      # existing; extend coverage
 ├── google/
 │   ├── capabilities.go
 │   ├── capabilities_register.go
-│   └── capabilities_test.go
+│   └── capabilities_test.go      # existing; extend coverage
 ├── openai/
-│   └── capabilities_register.go
+│   ├── capabilities_register.go
+│   └── capabilities_test.go      # existing; extend coverage
 └── grok/
-    └── capabilities_register.go
+    ├── capabilities_register.go
+    └── capabilities_test.go      # existing; extend coverage
 ```
 
 No new top-level package or interface hierarchy is needed.
@@ -670,12 +732,12 @@ Add root-module tests covering:
 1. canonical and case-insensitive provider lookup;
 2. deterministic, defensive `Providers()` snapshots;
 3. unknown provider versus linked-provider/unknown-model behavior;
-4. known-but-not-live-probed entries returning `ok=true` and
-   `LiveVerified=false`;
+4. classified-but-not-live-probed entries returning `ok=true` with no
+   verification scopes;
 5. invalid and duplicate `Register` errors plus `MustRegister` panics;
 6. concurrent registration and lookup safety;
-7. defensive cloning of effort slices, budget records, bound pointers, and plan
-   effective-value pointers;
+7. defensive cloning of effort and verification-scope slices, budget records,
+   bound pointers, and plan effective-value pointers;
 8. resolvers being invoked outside the registry lock; and
 9. unchanged behavior of existing `Lookup`, `ResolveEffort`, and
    `AcceptsTemperature` APIs.
@@ -694,7 +756,8 @@ Each provider module verifies:
    authoritative table;
 4. effort-to-budget emulation remains distinct from native effort;
 5. temperature, adaptive thinking, and disablement match provider behavior;
-6. not-live-probed entries remain classified but are not marked live-verified;
+6. endpoint scopes reflect exact probe evidence, including Vertex-only
+   `gemini-3.7-flash`, while not-live-probed entries have no scopes;
 7. invented future point releases such as `claude-opus-4-9`, `gpt-5.7`, and
    `gemini-3.8-flash` return `ok=false`;
 8. arbitrary gateway and deployment paths return `ok=false`; and
@@ -724,6 +787,7 @@ go test ./providers/modelcaps ./providers/anthropic ./providers
 (cd providers/grok && go test ./...)
 make provider-catalog-check
 make fmt-md-check
+make check
 git diff --check
 ```
 
@@ -734,26 +798,30 @@ The normal GitHub workflow remains the final cross-module check.
 1. Add the public types, error-returning registry, `MustRegister`, defensive
    cloning, `Providers`, and registry unit tests to `providers/modelcaps`.
 2. Add exact catalog-ID registration in OpenAI and Grok provider packages,
-   including per-ID evidence, while projecting their existing `modelcaps`
-   entries.
-3. Add the Anthropic projection, exact model-to-entry-and-evidence map, and
-   private `notLiveProbed` entry marker.
+   including per-ID verification scopes, while projecting their existing
+   `modelcaps` entries.
+3. Add the Anthropic projection, exact model-to-entry-and-scope map, and private
+   `notLiveProbed` entry marker.
 4. Add the Google projection using raw entry lookup, exact
-   model-to-entry-and-evidence mapping, and effective temperature rules.
+   model-to-entry-and-scope mapping, and effective temperature rules.
 5. Extract or consolidate one pure control planner per provider; use it from
    both request construction and `Explain` without changing request behavior.
 6. Add exact-ID coverage, dry-run/request parity, and mutation-isolation tests.
 7. Create `docs/guides/model-control-classification.md` with provider import
-   requirements, model-ID rules, `go-cmp` guidance, and strict-consumer examples.
+   requirements, model-ID and verification-scope rules, `go-cmp` guidance, and
+   strict-consumer examples.
 8. Release the root and nested provider modules at the same Dive version and
    validate their declared root-module requirements.
 9. Migrate consumers separately. A consumer deletes copied facts only after its
    catalog and admission tests use both classification and planning
    successfully.
 
-Steps 1 through 7 land together so the first released API is useful for all
-four classified native providers and does not expose static combination guesses.
-Consumer adoption does not block the Dive release.
+Steps 1 through 4 form a reviewable static-classification phase. Steps 5 through
+7 are a second implementation phase for the real pure-planner refactor and
+public `Explain` contract. They may land as separate commits, but steps 1 through
+7 release together so the registry never substitutes static combination
+guesses or a parallel dry-run implementation for planner parity. Consumer
+adoption does not block the Dive release.
 
 ## Alternatives considered
 
@@ -779,6 +847,13 @@ derives combinations from the same planner as request construction.
 
 Rejected. `thinkingBudget: -1` is a provider wire encoding of Dive's existing
 `AdaptiveThinking` concept, not a second provider-neutral capability.
+
+### Publish one `LiveVerified` boolean
+
+Rejected. Verification belongs to an endpoint and API surface. A single bit
+would incorrectly let the Vertex-only `gemini-3.7-flash` probe stand in for the
+public Gemini API and would create the same ambiguity for Anthropic Messages,
+Bedrock, and Vertex. Exact mappings publish scoped evidence instead.
 
 ### Register OpenAI and Grok implicitly from `modelcaps`
 
@@ -829,8 +904,9 @@ initialization-order failure modes to runtime without removing data duplication.
   inspectable state instead of leaving `ok=false` ambiguous.
 - Sharing pure planners requires a careful provider-internal refactor, but it
   eliminates a permanent second matrix of combination rules.
-- `LiveVerified` is intentionally modest evidence. Contractual catalogs still
-  need account-specific and freshness qualification.
+- Verification scopes prevent cross-endpoint overclaiming but remain modest
+  evidence. Contractual catalogs still need account-specific and freshness
+  qualification.
 - Fixed budget bounds appear in per-model snapshots even when backed by a
   provider-wide constant. Documentation identifies them as effective bounds,
   while `Explain` owns request-dependent floors and ceilings.
@@ -842,13 +918,15 @@ initialization-order failure modes to runtime without removing data duplication.
 
 ## Resolved review questions
 
-Two issues that were open in the earlier draft are now explicit design
+Three issues that were open in the earlier draft are now explicit design
 decisions:
 
 1. Model-ID normalization is provider-specific, conservative, and exact at the
    public boundary; runtime prefix inheritance is not classification evidence.
 2. Combination behavior is derived by `Explain` from the provider's shared pure
    request planner, not maintained as static pairwise booleans.
+3. Verification evidence is scoped to a named endpoint and API surface; no
+   provider-wide boolean can promote a Vertex probe to a direct-API guarantee.
 
 Gateway registration and additional control families remain future proposals
 because they require their own verified source of truth and consumer need.
