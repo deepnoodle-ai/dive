@@ -5,14 +5,17 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 func TestIntegration_SimpleTextGeneration(t *testing.T) {
@@ -294,4 +297,120 @@ func setupIntegrationProvider(t *testing.T) *Provider {
 		WithModel("gpt-4o"),
 		WithMaxTokens(1000),
 	)
+}
+
+// TestIntegration_PhaseReplayedAcrossStatelessTurns qualifies faithful manual
+// continuation. A tool-inducing prompt makes the model emit a `commentary`
+// preamble alongside its tool calls; that turn is persisted, reloaded, and
+// resent as history without `previous_response_id`, together with the tool
+// results. Every phase OpenAI assigned must reach the wire unchanged, OpenAI
+// must accept the replayed history, and the concluding turn must arrive as
+// `final_answer`.
+func TestIntegration_PhaseReplayedAcrossStatelessTurns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+	provider := New(
+		WithAPIKey(apiKey),
+		WithModel(string(ModelGPT56Sol)),
+		WithMaxTokens(3000),
+	)
+
+	weather := llm.NewToolDefinition().
+		WithName("get_weather").
+		WithDescription("Get the current weather for a city.").
+		WithSchema(&schema.Schema{
+			Type:     "object",
+			Required: []string{"city"},
+			Properties: map[string]*schema.Property{
+				"city": {Type: "string", Description: "City name"},
+			},
+		})
+
+	prompt := "Check the weather in Paris and in Tokyo, telling me what you're " +
+		"doing as you go, then compare them."
+
+	first, err := provider.Generate(context.Background(),
+		llm.WithUserTextMessage(prompt),
+		llm.WithTools(weather),
+		llm.WithReasoningEffort(llm.ReasoningEffortLow),
+	)
+	assert.NoError(t, err)
+
+	// Persist and reload the assistant turn the way a durable runtime would.
+	stored, err := json.Marshal(first.Message())
+	assert.NoError(t, err)
+	var reloaded llm.Message
+	assert.NoError(t, json.Unmarshal(stored, &reloaded))
+
+	phases := phasesOf(&reloaded)
+	t.Logf("turn 1 phases from %s: %v", ModelGPT56Sol, phases)
+	if len(phases) == 0 {
+		t.Skip("model returned no phased output messages; nothing to qualify")
+	}
+
+	// Every phase the model assigned must survive into the replayed request.
+	replayed, err := encodeMessages([]*llm.Message{&reloaded})
+	assert.NoError(t, err)
+	replayedJSON, err := json.Marshal(replayed)
+	assert.NoError(t, err)
+	for _, phase := range phases {
+		assert.Contains(t, string(replayedJSON), `"phase":"`+phase+`"`)
+	}
+
+	// Answer whatever tool calls came back, so the conversation can conclude.
+	var toolResults []llm.Content
+	for _, content := range reloaded.Content {
+		if toolUse, ok := content.(*llm.ToolUseContent); ok {
+			toolResults = append(toolResults, &llm.ToolResultContent{
+				ToolUseID: toolUse.ID,
+				Content:   "18C, partly cloudy",
+			})
+		}
+	}
+	if len(toolResults) == 0 {
+		t.Skip("model made no tool calls; cannot continue the turn statelessly")
+	}
+
+	// OpenAI must accept the replayed history on a stateless follow-up turn.
+	second, err := provider.Generate(context.Background(),
+		llm.WithMessages(
+			llm.NewUserTextMessage(prompt),
+			&reloaded,
+			&llm.Message{Role: llm.User, Content: toolResults},
+		),
+		llm.WithTools(weather),
+		llm.WithReasoningEffort(llm.ReasoningEffortLow),
+	)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, second.Message().Text())
+
+	secondPhases := phasesOf(second.Message())
+	t.Logf("turn 2 phases from %s: %v", ModelGPT56Sol, secondPhases)
+
+	// Across the exchange the model should exercise both phases: a commentary
+	// preamble before the tool calls, and a final answer once they resolve.
+	allPhases := append(append([]string{}, phases...), secondPhases...)
+	assert.True(t, slices.Contains(allPhases, "commentary"),
+		"expected a commentary phase across the exchange, got %v", allPhases)
+	assert.True(t, slices.Contains(allPhases, "final_answer"),
+		"expected a final_answer phase across the exchange, got %v", allPhases)
+}
+
+// phasesOf returns the phase recorded on each of a message's text blocks, in
+// order, skipping blocks OpenAI left unlabeled.
+func phasesOf(message *llm.Message) []string {
+	var phases []string
+	for _, content := range message.Content {
+		if text, ok := content.(*llm.TextContent); ok {
+			if phase := text.Metadata[openAIPhaseMetadataKey]; phase != "" {
+				phases = append(phases, phase)
+			}
+		}
+	}
+	return phases
 }

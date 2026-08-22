@@ -173,3 +173,44 @@ func TestMessage_MarshalUnmarshalJSON(t *testing.T) {
 		assert.Equal(t, ContentTypeText, decoded.Content[1].Type())
 	})
 }
+
+// TestMessageJSONRoundTripPreservesProviderMetadata covers the durable-runtime
+// path: provider replay state attached to a content block must survive being
+// persisted and reloaded, and a Copy must own its metadata rather than alias it.
+func TestMessageJSONRoundTripPreservesProviderMetadata(t *testing.T) {
+	original := &Message{
+		Role: Assistant,
+		Content: []Content{
+			&TextContent{
+				Text:     "Checking that now.",
+				Metadata: ProviderMetadata{"example.phase": "commentary"},
+			},
+			&ToolUseContent{
+				ID:       "call_1",
+				Name:     "lookup",
+				Input:    json.RawMessage(`{}`),
+				Metadata: ProviderMetadata{"example.signature": "opaque"},
+			},
+			&ThinkingContent{
+				Thinking: "reasoning",
+				Metadata: ProviderMetadata{"example.replay": "opaque"},
+			},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	assert.NoError(t, err)
+
+	var reloaded Message
+	assert.NoError(t, json.Unmarshal(data, &reloaded))
+	assert.Equal(t, 3, len(reloaded.Content))
+	assert.Equal(t, "commentary", reloaded.Content[0].(*TextContent).Metadata["example.phase"])
+	assert.Equal(t, "opaque", reloaded.Content[1].(*ToolUseContent).Metadata["example.signature"])
+	assert.Equal(t, "opaque", reloaded.Content[2].(*ThinkingContent).Metadata["example.replay"])
+
+	copied := reloaded.Copy()
+	text := copied.Content[0].(*TextContent)
+	assert.Equal(t, "commentary", text.Metadata["example.phase"])
+	text.Metadata["example.phase"] = "final_answer"
+	assert.Equal(t, "commentary", reloaded.Content[0].(*TextContent).Metadata["example.phase"])
+}

@@ -19,6 +19,14 @@ const (
 const (
 	openAIReasoningSummaryMetadataKey = "openai.reasoning_summary"
 	openAIReasoningContentMetadataKey = "openai.reasoning_content"
+
+	// openAIPhaseMetadataKey carries the phase OpenAI assigned to the assistant
+	// output message a text block came from ("commentary" for intermediate
+	// updates, "final_answer" for the answer). Callers that replay history
+	// manually must resend it unchanged; dropping it degrades gpt-5.3-codex and
+	// later. Absent means OpenAI did not label the message, and Dive never
+	// infers one.
+	openAIPhaseMetadataKey = "openai.phase"
 )
 
 // // Request represents the OpenAI Responses API request structure

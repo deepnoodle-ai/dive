@@ -6,11 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenAI Responses assistant messages keep their `phase`.** The phase
+  (`commentary` or `final_answer`) now decodes onto each text block as
+  `openai.phase` provider metadata and is replayed on follow-up requests, so
+  runtimes that persist and resend history manually no longer silently drop it.
+  Unlabeled messages stay unphased.
+- **Compaction keeps provider metadata on truncated content.** Shrinking an
+  oversized text or `tool_use` block no longer strips replay state such as a
+  Google thought signature or an OpenAI message phase.
+
 ### Added
 
 - **The experimental `dive` CLI can skip tool approval prompts with
   `--dangerously-skip-permissions`.** The default approval flow is unchanged;
   use the bypass only in an externally sandboxed environment.
+
+### Changed
+
+- **OpenAI streaming closes a text block on its output item's done event**
+  rather than on `output_text.done`, so metadata that arrives only with the
+  done event — such as a late `phase` label — reaches consumers while the block
+  is still open. A response that ends without an item's done event now closes
+  every block it left open — text, reasoning, or tool call — before
+  `message_delta`, matching the other providers' event order.
+- **OpenAI-compatible chat completions streams always terminate cleanly.** A
+  stream that reaches `[DONE]` or EOF without a `finish_reason` — as seen
+  through Mistral and OpenRouter — now closes its open text and tool-call
+  blocks and emits `message_delta` and `message_stop`, instead of ending with
+  the message still open.
 
 ## [1.25.1] - 2026-08-15
 

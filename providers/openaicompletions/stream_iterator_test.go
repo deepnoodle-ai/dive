@@ -358,3 +358,56 @@ func TestStreamIteratorUsageDetails(t *testing.T) {
 	assert.Equal(t, 100, response.Usage.TotalInputTokens())
 	assert.Equal(t, 30, response.Usage.ReasoningTokens)
 }
+
+// TestStreamIteratorClosesDanglingBlocks verifies that a stream ending without
+// a finish_reason — at the [DONE] marker or at EOF — still closes every block it
+// opened and terminates with message_delta then message_stop, so consumers of
+// text and tool-call streams alike see a balanced block lifecycle.
+func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
+	textChunk := `data: {"id":"chatcmpl-6","object":"chat.completion.chunk","model":"mistral-large","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`
+	toolChunk := `data: {"id":"chatcmpl-6","object":"chat.completion.chunk","model":"mistral-large","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"calculator","arguments":"{\"a\":1}"}}]}}]}`
+
+	tests := []struct {
+		name    string
+		body    string
+		content llm.ContentType
+	}{
+		{name: "text at [DONE]", body: textChunk + "\n\ndata: [DONE]\n\n", content: llm.ContentTypeText},
+		{name: "text at EOF", body: textChunk + "\n\n", content: llm.ContentTypeText},
+		{name: "tool call at [DONE]", body: toolChunk + "\n\ndata: [DONE]\n\n", content: llm.ContentTypeToolUse},
+		{name: "tool call at EOF", body: toolChunk + "\n\n", content: llm.ContentTypeToolUse},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			iterator := newTestStreamIterator(tc.body)
+			defer iterator.Close()
+			events, accumulator := collectEvents(t, iterator)
+
+			var types []llm.EventType
+			starts, stops, stopIndex, deltaIndex := 0, 0, -1, -1
+			for i, event := range events {
+				types = append(types, event.Type)
+				switch event.Type {
+				case llm.EventTypeContentBlockStart:
+					starts++
+				case llm.EventTypeContentBlockStop:
+					stops++
+					stopIndex = i
+				case llm.EventTypeMessageDelta:
+					deltaIndex = i
+				}
+			}
+			assert.Equal(t, 1, starts)
+			assert.Equal(t, 1, stops)
+			assert.True(t, deltaIndex >= 0, "expected a message_delta event")
+			assert.True(t, stopIndex < deltaIndex, "content_block_stop must precede message_delta, got %v", types)
+			assert.Equal(t, llm.EventTypeMessageStop, types[len(types)-1])
+
+			// The partial block still reaches consumers as a well-formed message.
+			assert.True(t, accumulator.IsComplete())
+			message := accumulator.Response().Message()
+			assert.Equal(t, 1, len(message.Content))
+			assert.Equal(t, tc.content, message.Content[0].Type())
+		})
+	}
+}

@@ -3,6 +3,7 @@ package openai
 import (
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -47,6 +48,10 @@ type outputItemState struct {
 	ToolCallName      string
 	ToolCallID        string // The 'call_id' (e.g. call_xxxx)
 	ToolArgumentsJson string
+	// ToolCallStopped records that the function call's content_block_stop was
+	// emitted, so the block closes exactly once whether the item's done event
+	// or the end of the response closes it.
+	ToolCallStopped bool
 
 	// SummaryStreamedByIndex tracks which reasoning summary parts were streamed
 	// incrementally (keyed by SummaryIndex), so the OutputItemDone handler
@@ -59,6 +64,66 @@ type outputItemState struct {
 	// For message with text/reasoning content parts
 	// Keyed by ContentIndex
 	ContentParts map[int]*contentPartState
+
+	// Phase is the phase OpenAI assigned to a message item. It may be absent
+	// when the item is added and only appear on the done event, so the done
+	// event is treated as authoritative.
+	Phase string
+
+	// PhaseEmitted is the phase already carried to consumers on the text
+	// block's start event, so the done event only emits a metadata delta when
+	// OpenAI relabeled the message after the block opened.
+	PhaseEmitted string
+}
+
+// closeOpenBlocks emits content_block_stop, at the item's own event index, for
+// every block this item opened and has not closed yet: its text parts, its
+// reasoning block, or its function call. Each block closes exactly once, so
+// the item's done event and an early end of the response can both call this
+// and consumers always receive a balanced block lifecycle.
+func (s *outputItemState) closeOpenBlocks() []*llm.Event {
+	var events []*llm.Event
+	stop := func() {
+		idxStop := s.OutputIndex
+		events = append(events, &llm.Event{
+			Type:  llm.EventTypeContentBlockStop,
+			Index: &idxStop,
+		})
+	}
+
+	contentIndexes := make([]int, 0, len(s.ContentParts))
+	for contentIdx, part := range s.ContentParts {
+		if part.PartType == "output_text" && !part.BlockStopped {
+			contentIndexes = append(contentIndexes, contentIdx)
+		}
+	}
+	sort.Ints(contentIndexes)
+	for _, contentIdx := range contentIndexes {
+		s.ContentParts[contentIdx].BlockStopped = true
+		stop()
+	}
+
+	if s.ReasoningStarted && !s.ReasoningStopped {
+		s.ReasoningStopped = true
+		stop()
+	}
+
+	if s.ItemType == "function_call" && !s.ToolCallStopped {
+		s.ToolCallStopped = true
+		stop()
+	}
+	return events
+}
+
+// hasTextPart reports whether this item streamed an output_text part, meaning
+// the accumulator holds a text content block at this item's index.
+func (s *outputItemState) hasTextPart() bool {
+	for _, part := range s.ContentParts {
+		if part.PartType == "output_text" {
+			return true
+		}
+	}
+	return false
 }
 
 type contentPartState struct {
@@ -67,6 +132,10 @@ type contentPartState struct {
 	PartType     string // E.g., "output_text", "reasoning"
 	Text         string // Accumulated text for output_text or reasoning
 	IsComplete   bool
+
+	// BlockStopped records that this part's content_block_stop was emitted, so
+	// the item's done event closes each block exactly once.
+	BlockStopped bool
 }
 
 func newOpenAIStreamIterator(sdkStream StreamSource, config *llm.Config) *openaiStreamIterator {
@@ -184,6 +253,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			ContentParts: make(map[int]*contentPartState),
 		}
 
+		if data.Item.Type == "message" {
+			s.outputItemsState[outputIdx].Phase = string(data.Item.Phase)
+		}
+
 		if data.Item.Type == "function_call" {
 			fnCall := data.Item.AsFunctionCall()
 			s.outputItemsState[outputIdx].ToolCallName = fnCall.Name
@@ -225,12 +298,18 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			return diveEvents, nil
 		}
 
+		contentBlock := &llm.EventContentBlock{Type: diveContentType}
+		if diveContentType == llm.ContentTypeText {
+			// Surface the phase to live consumers as soon as it is known. When
+			// OpenAI only labels the message on the done event, the metadata
+			// delta emitted there fills it in.
+			contentBlock.Metadata = openAIPhaseMetadata(itemState.Phase)
+			itemState.PhaseEmitted = itemState.Phase
+		}
 		diveEvents = append(diveEvents, &llm.Event{
-			Type:  llm.EventTypeContentBlockStart,
-			Index: &outputIdx,
-			ContentBlock: &llm.EventContentBlock{
-				Type: diveContentType,
-			},
+			Type:         llm.EventTypeContentBlockStart,
+			Index:        &outputIdx,
+			ContentBlock: contentBlock,
 		})
 
 	case responses.ResponseTextDeltaEvent:
@@ -488,10 +567,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			if part, ok2 := item.ContentParts[contentIdx]; ok2 {
 				part.Text = data.Text
 				part.IsComplete = true
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &outputIdx,
-				})
+				// The block is closed by the item's done event rather than
+				// here: OpenAI sends output_text.done first, and closing now
+				// would push any metadata the done event carries (such as a
+				// late phase label) outside the block lifecycle.
 			}
 		}
 
@@ -580,25 +659,40 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 					},
 				})
 			}
-			if itemState.ReasoningStarted && !itemState.ReasoningStopped {
-				itemState.ReasoningStopped = true
-				idxStop := outputIdx
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &idxStop,
-				})
+		}
+
+		// The done event carries the authoritative phase for a message item:
+		// OpenAI may omit it when the item is added and only label it here.
+		if data.Item.Type == "message" {
+			if itemState, ok := s.outputItemsState[outputIdx]; ok {
+				if phase := string(data.Item.Phase); phase != "" {
+					itemState.Phase = phase
+				}
+				// A delta is only needed when the block's start event could not
+				// announce this phase, which keeps the stream free of redundant
+				// metadata for the common case of a message labeled up front.
+				if itemState.Phase != itemState.PhaseEmitted && itemState.hasTextPart() {
+					if metadata := openAIPhaseMetadata(itemState.Phase); metadata != nil {
+						itemState.PhaseEmitted = itemState.Phase
+						idxPhase := outputIdx
+						diveEvents = append(diveEvents, &llm.Event{
+							Type:  llm.EventTypeContentBlockDelta,
+							Index: &idxPhase,
+							Delta: &llm.EventDelta{
+								Type:     llm.EventDeltaTypeMetadata,
+								Metadata: metadata,
+							},
+						})
+					}
+				}
 			}
 		}
 
-		if item, ok := s.outputItemsState[outputIdx]; ok && !item.IsComplete {
-			item.IsComplete = true
-			if item.ItemType == "function_call" {
-				idxFnStop := outputIdx
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &idxFnStop,
-				})
-			}
+		// Close every block this item opened, after any metadata the done
+		// event contributed to them.
+		if itemState, ok := s.outputItemsState[outputIdx]; ok {
+			diveEvents = append(diveEvents, itemState.closeOpenBlocks()...)
+			itemState.IsComplete = true
 		}
 
 	case responses.ResponseCompletedEvent:
@@ -616,6 +710,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		}
 		stopReason := determineStopReason(&data.Response)
 
+		diveEvents = append(diveEvents, s.closeDanglingBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{
 			Type: llm.EventTypeMessageDelta,
 			Delta: &llm.EventDelta{
@@ -645,6 +740,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		}
 		stopReason := determineStopReason(&data.Response)
 
+		diveEvents = append(diveEvents, s.closeDanglingBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{
 			Type: llm.EventTypeMessageDelta,
 			Delta: &llm.EventDelta{
@@ -699,4 +795,24 @@ func reasoningContentTexts(reasoning responses.ResponseReasoningItem) []string {
 		texts = append(texts, part.Text)
 	}
 	return texts
+}
+
+// closeDanglingBlocks closes every block — text, reasoning, or function call —
+// left open because the response ended without the output_item.done event that
+// normally closes it, so the event stream always hands consumers a balanced
+// block lifecycle. It runs before message_delta, keeping the
+// content_block_stop → message_delta → message_stop order the other providers
+// emit.
+func (s *openaiStreamIterator) closeDanglingBlocks() []*llm.Event {
+	outputIndexes := make([]int, 0, len(s.outputItemsState))
+	for outputIdx := range s.outputItemsState {
+		outputIndexes = append(outputIndexes, outputIdx)
+	}
+	sort.Ints(outputIndexes)
+
+	var events []*llm.Event
+	for _, outputIdx := range outputIndexes {
+		events = append(events, s.outputItemsState[outputIdx].closeOpenBlocks()...)
+	}
+	return events
 }

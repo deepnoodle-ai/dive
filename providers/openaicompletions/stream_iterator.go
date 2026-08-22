@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 
@@ -32,6 +33,11 @@ type StreamIterator struct {
 	// usage chunk (stream_options.include_usage) has been consumed, so the
 	// message_delta carries the real token usage.
 	finalEvents []*llm.Event
+	// terminated records that the terminal message_delta and message_stop
+	// events have been returned, whether built from a finish_reason or
+	// synthesized at [DONE]/EOF, so a stream that signals its end more than
+	// once (finish_reason, then [DONE], then EOF) terminates exactly once.
+	terminated bool
 	// thinkingIndex and textIndex track the sequential content block index
 	// assigned to each block type, or -1 if not yet started.
 	thinkingIndex              int
@@ -100,10 +106,10 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	line, err := s.reader.ReadBytes('\n')
 	if err != nil {
 		// If the stream ends before a trailing usage chunk or [DONE] marker
-		// arrives, flush any deferred final events so the message still
-		// terminates with message_delta and message_stop.
+		// arrives, terminate the message here so it still ends with
+		// content_block_stop, message_delta, and message_stop.
 		if err == io.EOF {
-			if events := s.flushFinalEvents(); len(events) > 0 {
+			if events := s.endStream(); len(events) > 0 {
 				return events, nil
 			}
 		}
@@ -127,7 +133,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	line = bytes.TrimPrefix(line, []byte("data: "))
 	// Check for stream end
 	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-		return s.flushFinalEvents(), nil
+		return s.endStream(), nil
 	}
 	// Unmarshal the event
 	var event StreamResponse
@@ -225,28 +231,8 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 			// Map OpenAI tool call index to a sequential display index
 			index, known := s.toolCallIndices[toolCallDelta.Index]
 			if !known {
-				// Stop any previous content blocks that are still open
-				for prevIndex, prev := range s.contentBlocks {
-					if !prev.IsComplete {
-						stopIndex := prevIndex
-						events = append(events, &llm.Event{
-							Type:  llm.EventTypeContentBlockStop,
-							Index: &stopIndex,
-						})
-						prev.IsComplete = true
-					}
-				}
-				// Stop any previous tool calls that are still open
-				for prevIndex, prev := range s.toolCalls {
-					if !prev.IsComplete {
-						stopIndex := prevIndex
-						events = append(events, &llm.Event{
-							Type:  llm.EventTypeContentBlockStop,
-							Index: &stopIndex,
-						})
-						prev.IsComplete = true
-					}
-				}
+				// Stop any previous content blocks and tool calls still open
+				events = s.closeOpenBlocks(events)
 				index = s.nextBlockIndex
 				s.nextBlockIndex++
 				s.toolCallIndices[toolCallDelta.Index] = index
@@ -308,28 +294,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 		if processErr != nil {
 			return nil, processErr
 		}
-		// Stop any open content blocks
-		for index, block := range s.contentBlocks {
-			blockIndex := index
-			if !block.IsComplete {
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &blockIndex,
-				})
-				block.IsComplete = true
-			}
-		}
-		// Stop any open tool calls
-		for index, toolCall := range s.toolCalls {
-			blockIndex := index
-			if !toolCall.IsComplete {
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &blockIndex,
-				})
-				toolCall.IsComplete = true
-			}
-		}
+		events = s.closeOpenBlocks(events)
 		// Build the message_delta event with the stop reason, but defer it
 		// (along with message_stop) until the trailing usage chunk, [DONE]
 		// marker, or EOF, so the message_delta carries the real token usage.
@@ -448,26 +413,7 @@ func (s *StreamIterator) appendTextEvents(events []*llm.Event, text string) []*l
 	}
 	// If this is a new text block, stop any open blocks and start it.
 	if s.textIndex < 0 {
-		for prevIndex, prev := range s.contentBlocks {
-			if !prev.IsComplete {
-				stopIndex := prevIndex
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &stopIndex,
-				})
-				prev.IsComplete = true
-			}
-		}
-		for prevIndex, prev := range s.toolCalls {
-			if !prev.IsComplete {
-				stopIndex := prevIndex
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &stopIndex,
-				})
-				prev.IsComplete = true
-			}
-		}
+		events = s.closeOpenBlocks(events)
 		s.textIndex = s.nextBlockIndex
 		s.nextBlockIndex++
 		s.contentBlocks[s.textIndex] = &ContentBlockAccumulator{Type: "text"}
@@ -487,13 +433,42 @@ func (s *StreamIterator) appendTextEvents(events []*llm.Event, text string) []*l
 	})
 }
 
+// closeOpenBlocks appends a content_block_stop for every content block and
+// tool call still open, in block-index order, and marks each complete so it
+// closes exactly once.
+func (s *StreamIterator) closeOpenBlocks(events []*llm.Event) []*llm.Event {
+	indexes := make([]int, 0, len(s.contentBlocks)+len(s.toolCalls))
+	for index, block := range s.contentBlocks {
+		if !block.IsComplete {
+			block.IsComplete = true
+			indexes = append(indexes, index)
+		}
+	}
+	for index, toolCall := range s.toolCalls {
+		if !toolCall.IsComplete {
+			toolCall.IsComplete = true
+			indexes = append(indexes, index)
+		}
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		stopIndex := index
+		events = append(events, &llm.Event{
+			Type:  llm.EventTypeContentBlockStop,
+			Index: &stopIndex,
+		})
+	}
+	return events
+}
+
 // flushFinalEvents returns the deferred message_delta and message_stop events,
 // stamping the message_delta with the most recent usage. Returns nil if there
 // are no deferred events (or they were already flushed).
 func (s *StreamIterator) flushFinalEvents() []*llm.Event {
-	if len(s.finalEvents) == 0 {
+	if s.terminated || len(s.finalEvents) == 0 {
 		return nil
 	}
+	s.terminated = true
 	events := s.finalEvents
 	s.finalEvents = nil
 	for _, event := range events {
@@ -502,6 +477,34 @@ func (s *StreamIterator) flushFinalEvents() []*llm.Event {
 		}
 	}
 	return events
+}
+
+// endStream returns the terminal events for a stream that has signaled its end
+// with [DONE] or EOF. Final events deferred by a finish_reason are flushed with
+// the latest usage. When no finish_reason ever arrived, every block still open
+// is closed and a message_delta (carrying usage, with no stop reason) and
+// message_stop are synthesized, so consumers always receive a balanced block
+// lifecycle in the content_block_stop → message_delta → message_stop order the
+// other providers emit. Returns nil once the stream has terminated, or when no
+// message was ever started.
+func (s *StreamIterator) endStream() []*llm.Event {
+	if events := s.flushFinalEvents(); len(events) > 0 {
+		return events
+	}
+	if s.terminated || s.eventCount == 0 {
+		return nil
+	}
+	s.terminated = true
+	events := s.closeOpenBlocks(nil)
+	usage := s.llmUsage()
+	return append(events,
+		&llm.Event{
+			Type:  llm.EventTypeMessageDelta,
+			Delta: &llm.EventDelta{},
+			Usage: &usage,
+		},
+		&llm.Event{Type: llm.EventTypeMessageStop},
+	)
 }
 
 func (s *StreamIterator) llmUsage() llm.Usage {

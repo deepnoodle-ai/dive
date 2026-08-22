@@ -269,7 +269,14 @@ func encodeAssistantTextContent(c *llm.TextContent) (responses.ResponseInputItem
 			},
 		},
 	}
-	return responses.ResponseInputItemParamOfOutputMessage(content, "", ""), nil
+	item := responses.ResponseInputItemParamOfOutputMessage(content, "", "")
+	// Replay the phase OpenAI assigned to this block's output message. A block
+	// with no phase metadata came from an unlabeled message or another
+	// provider, and stays unphased rather than being assigned a guess.
+	if phase := c.Metadata[openAIPhaseMetadataKey]; phase != "" && item.OfOutputMessage != nil {
+		item.OfOutputMessage.Phase = responses.ResponseOutputMessagePhase(phase)
+	}
+	return item, nil
 }
 
 func encodeAssistantImageContent(c *llm.ImageContent) (responses.ResponseInputItemUnionParam, error) {
