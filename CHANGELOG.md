@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Exact model-control classification and network-free request planning.**
+  Provider packages can now register static reasoning, thinking, budget, and
+  temperature classifications in `providers/modelcaps`, including
+  endpoint-scoped verification evidence. Catalog and admission consumers can
+  use `ClassificationFor`, `Explain`, and `Providers` without copying provider
+  capability tables or request-combination rules.
+
 ## [1.26.0] - 2026-08-22
 
 ### Fixed

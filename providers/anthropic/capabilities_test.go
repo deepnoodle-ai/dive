@@ -1,9 +1,11 @@
 package anthropic
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -21,10 +23,29 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			_, known := lookupCapabilities(id)
+			spec, declared := anthropicClassificationSpecs[id]
+			assert.True(t, declared,
+				"model %q (%s) has no exact public classification mapping", id, model.GoName)
+
+			entry, known := lookupCapabilityEntry(id)
 			assert.True(t, known,
 				"model %q (%s) has no entry in modelCapabilityTable; add one so its "+
 					"reasoning and thinking parameters are gated", id, model.GoName)
+			assert.Equal(t, spec.entryPrefix, entry.prefix,
+				"model %q must name its intended capability entry, not merely match a prefix", id)
+
+			classification, classified := modelcaps.ClassificationFor(
+				"anthropic", " ANTHROPIC/"+strings.ToUpper(id)+" ")
+			assert.True(t, classified)
+			assert.Equal(t, id, classification.Model)
+			assert.Equal(t, !entry.notLiveProbed,
+				classification.VerifiedOn(modelcaps.VerificationAnthropicMessages))
+
+			plan, explained := modelcaps.Explain("ANTHROPIC", llm.Config{
+				Model: " ANTHROPIC/" + strings.ToUpper(id) + " ",
+			})
+			assert.True(t, explained)
+			assert.Equal(t, id, plan.Model)
 		})
 	}
 }
