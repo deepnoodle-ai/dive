@@ -31,6 +31,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   is still open. A response that ends without an item's done event now closes
   every block it left open — text, reasoning, or tool call — before
   `message_delta`, matching the other providers' event order.
+- **OpenAI-compatible chat completions streams always terminate cleanly.** A
+  stream that reaches `[DONE]` or EOF without a `finish_reason` — as seen
+  through Mistral and OpenRouter — now closes its open text and tool-call
+  blocks and emits `message_delta` and `message_stop`, instead of ending with
+  the message still open.
 
 ## [1.25.1] - 2026-08-15
 
