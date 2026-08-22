@@ -96,8 +96,9 @@ var (
 )
 
 type capabilityEntry struct {
-	prefix string
-	caps   modelCapabilities
+	prefix        string
+	caps          modelCapabilities
+	notLiveProbed bool
 }
 
 // modelCapabilityTable maps model-id prefixes to capabilities. Lookup takes the
@@ -110,20 +111,20 @@ type capabilityEntry struct {
 var modelCapabilityTable = []capabilityEntry{
 	// --- Retired. These return 404 at inference and are kept only so the
 	// catalog stays fully classified; the values are historical. ---
-	{prefix: "claude-3-5-haiku", caps: modelCapabilities{temperature: true}},
-	{prefix: "claude-3-5-sonnet", caps: modelCapabilities{temperature: true}},
+	{prefix: "claude-3-5-haiku", caps: modelCapabilities{temperature: true}, notLiveProbed: true},
+	{prefix: "claude-3-5-sonnet", caps: modelCapabilities{temperature: true}, notLiveProbed: true},
 	{prefix: "claude-3-7-sonnet", caps: modelCapabilities{
 		manualBudget: true, explicitDisable: true, temperature: true,
-	}},
+	}, notLiveProbed: true},
 	{prefix: "claude-sonnet-4", caps: modelCapabilities{
 		manualBudget: true, explicitDisable: true, temperature: true,
-	}},
+	}, notLiveProbed: true},
 	{prefix: "claude-opus-4", caps: modelCapabilities{
 		manualBudget: true, explicitDisable: true, temperature: true,
-	}},
+	}, notLiveProbed: true},
 	{prefix: "claude-opus-4-1", caps: modelCapabilities{
 		manualBudget: true, explicitDisable: true, temperature: true,
-	}},
+	}, notLiveProbed: true},
 
 	// --- 4.5: manual budgets only. No native effort, no adaptive thinking. ---
 	{prefix: "claude-haiku-4-5", caps: modelCapabilities{
@@ -176,10 +177,10 @@ var modelCapabilityTable = []capabilityEntry{
 	// mirrors Fable 5 and is untested against the live API.
 	{prefix: "claude-mythos-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
-	}},
+	}, notLiveProbed: true},
 	{prefix: "claude-mythos-preview", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
-	}},
+	}, notLiveProbed: true},
 }
 
 // sortedCapabilityTable is modelCapabilityTable ordered longest-prefix-first so
@@ -219,6 +220,17 @@ func effortsUpTo(efforts []llm.ReasoningEffort, capLevel llm.ReasoningEffort) []
 // nothing to key on. Adding a model to catalog.json therefore means checking
 // that it lands on the right entry, not only that it lands on one.
 func lookupCapabilities(model string) (modelCapabilities, bool) {
+	entry, ok := lookupCapabilityEntry(model)
+	if !ok {
+		return modelCapabilities{}, false
+	}
+	return entry.caps, true
+}
+
+// lookupCapabilityEntry returns the private source record used by both runtime
+// lookup and exact public classification. Runtime matching remains permissive;
+// public classification first requires an explicit exact catalog mapping.
+func lookupCapabilityEntry(model string) (capabilityEntry, bool) {
 	id := strings.ToLower(strings.TrimSpace(model))
 	// Accept vendor-qualified ids such as "anthropic/claude-sonnet-5" and
 	// doubly-qualified ones such as "openrouter/anthropic/claude-sonnet-5":
@@ -228,8 +240,8 @@ func lookupCapabilities(model string) (modelCapabilities, bool) {
 	}
 	for _, entry := range sortedCapabilityTable {
 		if strings.HasPrefix(id, entry.prefix) {
-			return entry.caps, true
+			return entry, true
 		}
 	}
-	return modelCapabilities{}, false
+	return capabilityEntry{}, false
 }

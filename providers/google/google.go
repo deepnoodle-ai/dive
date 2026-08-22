@@ -291,14 +291,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.Tools = tools
 	}
 
-	if modelAcceptsTemperature(req.Model) {
-		req.Temperature = config.Temperature
-	} else if config.Temperature != nil && config.Logger != nil {
-		config.Logger.Warn("temperature is not supported by this Google model and will be ignored",
-			"model", req.Model)
-	}
-
-	req.Thinking = buildThinkingConfig(req.Model, config)
+	controls := planRequestControls(req.Model, config)
+	req.Temperature = controls.temperature
+	req.Thinking = controls.thinking
 	req.System = config.SystemPrompt
 	switch strings.ToLower(config.ServiceTier) {
 	case "", "default":

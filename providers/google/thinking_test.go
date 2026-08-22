@@ -2,9 +2,11 @@ package google
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"google.golang.org/genai"
 )
@@ -23,10 +25,31 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			_, found := lookupEntry(id)
+			spec, declared := googleClassificationSpecs[id]
+			assert.True(t, declared,
+				"model %q (%s) has no exact public classification mapping", id, model.GoName)
+
+			entry, found := lookupEntry(id)
 			assert.True(t, found,
 				"model %q (%s) has no entry in modelCapabilityTable; add one so "+
 					"its thinking parameters are gated", id, model.GoName)
+			assert.Equal(t, spec.entryPrefix, entry.prefix,
+				"model %q must name its intended capability entry, not merely match a prefix", id)
+
+			classification, classified := modelcaps.ClassificationFor(
+				"google", " MODELS/"+strings.ToUpper(id)+" ")
+			assert.True(t, classified)
+			assert.Equal(t, id, classification.Model)
+			assert.Equal(t, !entry.caps.unverified && id != ModelGemini37Flash,
+				classification.VerifiedOn(modelcaps.VerificationGoogleGeminiAPI))
+			assert.Equal(t, id == ModelGemini37Flash,
+				classification.VerifiedOn(modelcaps.VerificationGoogleVertexAI))
+
+			plan, explained := modelcaps.Explain("GOOGLE", llm.Config{
+				Model: " MODELS/" + strings.ToUpper(id) + " ",
+			})
+			assert.True(t, explained)
+			assert.Equal(t, id, plan.Model)
 		})
 	}
 }

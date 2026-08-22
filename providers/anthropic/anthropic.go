@@ -645,12 +645,13 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.MaxTokens = &p.maxTokens
 	}
 
-	if err := applyReasoningConfig(req, config); err != nil {
-		return err
+	controls := planRequestControls(req.Model, req.MaxTokens, config)
+	if controls.err != nil {
+		return controls.err
 	}
-	if requestHasThinkingEnabled(req.Model, req.Thinking) && config.Prefill != "" {
-		return fmt.Errorf("anthropic extended thinking cannot be used with prefilled assistant responses")
-	}
+	req.Thinking = controls.thinking
+	req.OutputConfig = controls.outputConfig
+	req.Temperature = controls.temperature
 
 	if config.Speed != "" {
 		req.Speed = string(config.Speed)
@@ -683,9 +684,6 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if config.ToolChoice != nil && len(config.Tools) > 0 {
-		if requestThinkingBlocksForcedToolChoice(req.Model, req.Thinking) && forcedToolChoice(config.ToolChoice.Type) {
-			return fmt.Errorf("anthropic extended thinking only supports tool_choice auto or none; got %q", config.ToolChoice.Type)
-		}
 		req.ToolChoice = &ToolChoice{
 			Type: ToolChoiceType(config.ToolChoice.Type),
 			Name: config.ToolChoice.Name,
@@ -703,12 +701,6 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.ContextManagement = config.ContextManagement
 	}
 
-	if modelAcceptsTemperature(req.Model) && !requestHasThinkingEnabled(req.Model, req.Thinking) {
-		req.Temperature = config.Temperature
-	} else if config.Temperature != nil && config.Logger != nil {
-		config.Logger.Warn("temperature is not supported by this Anthropic request and will be ignored",
-			"model", req.Model)
-	}
 	if config.SystemPrompt != "" {
 		req.System = []*SystemBlock{{Type: "text", Text: config.SystemPrompt}}
 	}
