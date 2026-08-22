@@ -271,45 +271,99 @@ func TestStreamIteratorPreservesRawReasoningText(t *testing.T) {
 	assert.Contains(t, string(replayedJSON), `"content":[{"text":"raw reasoning","type":"reasoning_text"}]`)
 }
 
-// TestStreamIteratorClosesTextBlockWithoutItemDone covers a response that ends
-// without the output_item.done event that normally closes a text block, which
-// must still leave consumers with a balanced block lifecycle.
-func TestStreamIteratorClosesTextBlockWithoutItemDone(t *testing.T) {
-	payloads := []string{
-		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
-		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
-		`{"type":"response.content_part.added","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}`,
-		`{"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"Partial"}`,
-		`{"type":"response.incomplete","sequence_number":5,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}}`,
-	}
+// parseStreamPayloads decodes raw SSE event payloads into SDK stream events.
+func parseStreamPayloads(t *testing.T, payloads ...string) []responses.ResponseStreamEventUnion {
+	t.Helper()
 	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
 	for _, payload := range payloads {
 		var event responses.ResponseStreamEventUnion
 		assert.NoError(t, json.Unmarshal([]byte(payload), &event))
 		events = append(events, event)
 	}
+	return events
+}
 
-	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
-	defer iterator.Close()
+// TestStreamIteratorClosesDanglingBlocks covers a response that ends without
+// the output_item.done event that normally closes a block. Whichever kind of
+// block was left open — text, function call, or reasoning — the iterator must
+// close it exactly once, and before message_delta, so consumers always see a
+// balanced block lifecycle in the same order the other providers emit.
+func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
+	created := `{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`
+	incomplete := `{"type":"response.incomplete","sequence_number":9,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}}`
 
-	var starts, stops, stopBeforeMessageStop int
-	var sawMessageStop bool
-	for iterator.Next() {
-		switch iterator.Event().Type {
-		case llm.EventTypeContentBlockStart:
-			starts++
-		case llm.EventTypeContentBlockStop:
-			stops++
-			if !sawMessageStop {
-				stopBeforeMessageStop++
-			}
-		case llm.EventTypeMessageStop:
-			sawMessageStop = true
-		}
+	cases := []struct {
+		name     string
+		payloads []string
+		content  llm.ContentType
+	}{
+		{
+			name: "text",
+			payloads: []string{
+				`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+				`{"type":"response.content_part.added","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}`,
+				`{"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"Partial"}`,
+			},
+			content: llm.ContentTypeText,
+		},
+		{
+			name: "function_call",
+			payloads: []string{
+				`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"","status":"in_progress"}}`,
+				`{"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_1","output_index":0,"delta":"{\"q\":\"x\"}"}`,
+			},
+			content: llm.ContentTypeToolUse,
+		},
+		{
+			name: "reasoning",
+			payloads: []string{
+				`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"status":"in_progress"}}`,
+				`{"type":"response.reasoning_summary_part.added","sequence_number":3,"item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}`,
+				`{"type":"response.reasoning_summary_text.delta","sequence_number":4,"item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Thinking"}`,
+			},
+			content: llm.ContentTypeThinking,
+		},
 	}
-	assert.NoError(t, iterator.Err())
 
-	assert.Equal(t, 1, starts)
-	assert.Equal(t, 1, stops)
-	assert.Equal(t, 1, stopBeforeMessageStop)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payloads := append(append([]string{created}, tc.payloads...), incomplete)
+			iterator := newOpenAIStreamIterator(&mockStreamSource{events: parseStreamPayloads(t, payloads...)}, &llm.Config{})
+			defer iterator.Close()
+
+			accumulator := llm.NewResponseAccumulator()
+			var types []llm.EventType
+			for iterator.Next() {
+				event := iterator.Event()
+				types = append(types, event.Type)
+				assert.NoError(t, accumulator.AddEvent(event))
+			}
+			assert.NoError(t, iterator.Err())
+
+			var starts, stops int
+			stopIndex, deltaIndex := -1, -1
+			for i, eventType := range types {
+				switch eventType {
+				case llm.EventTypeContentBlockStart:
+					starts++
+				case llm.EventTypeContentBlockStop:
+					stops++
+					stopIndex = i
+				case llm.EventTypeMessageDelta:
+					deltaIndex = i
+				}
+			}
+			assert.Equal(t, 1, starts)
+			assert.Equal(t, 1, stops)
+			assert.True(t, deltaIndex >= 0, "expected a message_delta event")
+			assert.True(t, stopIndex < deltaIndex, "content_block_stop must precede message_delta, got %v", types)
+			assert.Equal(t, llm.EventTypeMessageStop, types[len(types)-1])
+
+			// The partial block still reaches consumers as a well-formed message.
+			assert.True(t, accumulator.IsComplete())
+			message := accumulator.Response().Message()
+			assert.Equal(t, 1, len(message.Content))
+			assert.Equal(t, tc.content, message.Content[0].Type())
+		})
+	}
 }

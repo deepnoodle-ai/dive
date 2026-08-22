@@ -28,7 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **OpenAI streaming closes a text block on its output item's done event**
   rather than on `output_text.done`, so metadata that arrives only with the
   done event — such as a late `phase` label — reaches consumers while the block
-  is still open.
+  is still open. A response that ends without an item's done event now closes
+  every block it left open — text, reasoning, or tool call — before
+  `message_delta`, matching the other providers' event order.
 
 ## [1.25.1] - 2026-08-15
 

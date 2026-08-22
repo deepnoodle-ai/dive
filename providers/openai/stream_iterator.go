@@ -48,6 +48,10 @@ type outputItemState struct {
 	ToolCallName      string
 	ToolCallID        string // The 'call_id' (e.g. call_xxxx)
 	ToolArgumentsJson string
+	// ToolCallStopped records that the function call's content_block_stop was
+	// emitted, so the block closes exactly once whether the item's done event
+	// or the end of the response closes it.
+	ToolCallStopped bool
 
 	// SummaryStreamedByIndex tracks which reasoning summary parts were streamed
 	// incrementally (keyed by SummaryIndex), so the OutputItemDone handler
@@ -72,11 +76,21 @@ type outputItemState struct {
 	PhaseEmitted string
 }
 
-// hasTextPart reports whether this item streamed an output_text part, meaning
-// the accumulator holds a text content block at this item's index.
-// closeTextBlocks emits content_block_stop for every text block this item
-// opened and has not closed yet, at the item's own event index.
-func (s *outputItemState) closeTextBlocks(outputIdx int) []*llm.Event {
+// closeOpenBlocks emits content_block_stop, at the item's own event index, for
+// every block this item opened and has not closed yet: its text parts, its
+// reasoning block, or its function call. Each block closes exactly once, so
+// the item's done event and an early end of the response can both call this
+// and consumers always receive a balanced block lifecycle.
+func (s *outputItemState) closeOpenBlocks() []*llm.Event {
+	var events []*llm.Event
+	stop := func() {
+		idxStop := s.OutputIndex
+		events = append(events, &llm.Event{
+			Type:  llm.EventTypeContentBlockStop,
+			Index: &idxStop,
+		})
+	}
+
 	contentIndexes := make([]int, 0, len(s.ContentParts))
 	for contentIdx, part := range s.ContentParts {
 		if part.PartType == "output_text" && !part.BlockStopped {
@@ -84,19 +98,25 @@ func (s *outputItemState) closeTextBlocks(outputIdx int) []*llm.Event {
 		}
 	}
 	sort.Ints(contentIndexes)
-
-	events := make([]*llm.Event, 0, len(contentIndexes))
 	for _, contentIdx := range contentIndexes {
 		s.ContentParts[contentIdx].BlockStopped = true
-		idxStop := outputIdx
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeContentBlockStop,
-			Index: &idxStop,
-		})
+		stop()
+	}
+
+	if s.ReasoningStarted && !s.ReasoningStopped {
+		s.ReasoningStopped = true
+		stop()
+	}
+
+	if s.ItemType == "function_call" && !s.ToolCallStopped {
+		s.ToolCallStopped = true
+		stop()
 	}
 	return events
 }
 
+// hasTextPart reports whether this item streamed an output_text part, meaning
+// the accumulator holds a text content block at this item's index.
 func (s *outputItemState) hasTextPart() bool {
 	for _, part := range s.ContentParts {
 		if part.PartType == "output_text" {
@@ -639,14 +659,6 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 					},
 				})
 			}
-			if itemState.ReasoningStarted && !itemState.ReasoningStopped {
-				itemState.ReasoningStopped = true
-				idxStop := outputIdx
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &idxStop,
-				})
-			}
 		}
 
 		// The done event carries the authoritative phase for a message item:
@@ -676,21 +688,11 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			}
 		}
 
-		// Close the text blocks this item opened, after any metadata the done
+		// Close every block this item opened, after any metadata the done
 		// event contributed to them.
 		if itemState, ok := s.outputItemsState[outputIdx]; ok {
-			diveEvents = append(diveEvents, itemState.closeTextBlocks(outputIdx)...)
-		}
-
-		if item, ok := s.outputItemsState[outputIdx]; ok && !item.IsComplete {
-			item.IsComplete = true
-			if item.ItemType == "function_call" {
-				idxFnStop := outputIdx
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &idxFnStop,
-				})
-			}
+			diveEvents = append(diveEvents, itemState.closeOpenBlocks()...)
+			itemState.IsComplete = true
 		}
 
 	case responses.ResponseCompletedEvent:
@@ -708,6 +710,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		}
 		stopReason := determineStopReason(&data.Response)
 
+		diveEvents = append(diveEvents, s.closeDanglingBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{
 			Type: llm.EventTypeMessageDelta,
 			Delta: &llm.EventDelta{
@@ -715,7 +718,6 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			},
 			Usage: s.finalUsage,
 		})
-		diveEvents = append(diveEvents, s.closeDanglingTextBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{Type: llm.EventTypeMessageStop})
 		s.isClosed = true
 
@@ -738,6 +740,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		}
 		stopReason := determineStopReason(&data.Response)
 
+		diveEvents = append(diveEvents, s.closeDanglingBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{
 			Type: llm.EventTypeMessageDelta,
 			Delta: &llm.EventDelta{
@@ -745,7 +748,6 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			},
 			Usage: s.finalUsage,
 		})
-		diveEvents = append(diveEvents, s.closeDanglingTextBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{Type: llm.EventTypeMessageStop})
 		s.isClosed = true
 
@@ -795,10 +797,13 @@ func reasoningContentTexts(reasoning responses.ResponseReasoningItem) []string {
 	return texts
 }
 
-// closeDanglingTextBlocks closes any text block left open because the response
-// ended without the output_item.done event that normally closes it, so the
-// event stream always hands consumers a balanced block lifecycle.
-func (s *openaiStreamIterator) closeDanglingTextBlocks() []*llm.Event {
+// closeDanglingBlocks closes every block — text, reasoning, or function call —
+// left open because the response ended without the output_item.done event that
+// normally closes it, so the event stream always hands consumers a balanced
+// block lifecycle. It runs before message_delta, keeping the
+// content_block_stop → message_delta → message_stop order the other providers
+// emit.
+func (s *openaiStreamIterator) closeDanglingBlocks() []*llm.Event {
 	outputIndexes := make([]int, 0, len(s.outputItemsState))
 	for outputIdx := range s.outputItemsState {
 		outputIndexes = append(outputIndexes, outputIdx)
@@ -807,7 +812,7 @@ func (s *openaiStreamIterator) closeDanglingTextBlocks() []*llm.Event {
 
 	var events []*llm.Event
 	for _, outputIdx := range outputIndexes {
-		events = append(events, s.outputItemsState[outputIdx].closeTextBlocks(outputIdx)...)
+		events = append(events, s.outputItemsState[outputIdx].closeOpenBlocks()...)
 	}
 	return events
 }
