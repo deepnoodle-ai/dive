@@ -1,14 +1,16 @@
 package anthropic
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 // TestEveryCatalogModelHasCapabilities is the drift guard for
-// modelCapabilityTable: adding a model to catalog.json without classifying its
+// modelCapabilityTable: adding a model to catalog.json without recording its
 // reasoning, thinking, and sampling support fails here rather than at runtime
 // against the API.
 func TestEveryCatalogModelHasCapabilities(t *testing.T) {
@@ -21,10 +23,29 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			_, known := lookupCapabilities(id)
+			spec, declared := anthropicControlsSpecs[id]
+			assert.True(t, declared,
+				"model %q (%s) has no published model-controls mapping", id, model.GoName)
+
+			entry, known := lookupCapabilityEntry(id)
 			assert.True(t, known,
 				"model %q (%s) has no entry in modelCapabilityTable; add one so its "+
 					"reasoning and thinking parameters are gated", id, model.GoName)
+			assert.Equal(t, spec.entryPrefix, entry.prefix,
+				"model %q must name its intended capability entry, not merely match a prefix", id)
+
+			controls, known := modelcaps.ControlsFor(
+				"anthropic", " ANTHROPIC/"+strings.ToUpper(id)+" ")
+			assert.True(t, known)
+			assert.Equal(t, id, controls.Model)
+			assert.Equal(t, !entry.notLiveProbed,
+				controls.VerifiedOn(modelcaps.VerificationAnthropicMessages))
+
+			plan, previewed := modelcaps.Preview("ANTHROPIC", llm.Config{
+				Model: " ANTHROPIC/" + strings.ToUpper(id) + " ",
+			})
+			assert.True(t, previewed)
+			assert.Equal(t, id, plan.Model)
 		})
 	}
 }

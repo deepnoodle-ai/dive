@@ -17,7 +17,8 @@ func buildReq(t *testing.T, model string, opts ...llm.Option) *Request {
 	cfg.Apply(append([]llm.Option{llm.WithModel(model)}, opts...)...)
 	p := New()
 	var req Request
-	assert.NoError(t, p.applyRequestConfig(&req, cfg))
+	_, err := p.applyRequestConfig(&req, cfg)
+	assert.NoError(t, err)
 	return &req
 }
 
@@ -149,7 +150,7 @@ func TestThinkingWithPrefillErrors(t *testing.T) {
 		llm.WithPrefill("prefilled answer", ""),
 	)
 	var req Request
-	err := New().applyRequestConfig(&req, cfg)
+	_, err := New().applyRequestConfig(&req, cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "prefilled assistant responses")
 }
@@ -166,7 +167,7 @@ func TestThinkingWithForcedToolChoiceErrors(t *testing.T) {
 		}),
 	)
 	var req Request
-	err := New().applyRequestConfig(&req, cfg)
+	_, err := New().applyRequestConfig(&req, cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "tool_choice auto or none")
 }
@@ -179,7 +180,7 @@ func TestDefaultThinkingWithForcedToolChoiceErrors(t *testing.T) {
 		llm.WithToolChoice(llm.ToolChoiceAny),
 	)
 	var req Request
-	err := New().applyRequestConfig(&req, cfg)
+	_, err := New().applyRequestConfig(&req, cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "tool_choice auto or none")
 }
@@ -209,7 +210,7 @@ func TestExplicitThinkingWithForcedToolChoiceStillErrors(t *testing.T) {
 		llm.WithToolChoice(llm.ToolChoiceAny),
 	)
 	var req Request
-	err := New().applyRequestConfig(&req, cfg)
+	_, err := New().applyRequestConfig(&req, cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "tool_choice auto or none")
 }

@@ -117,7 +117,7 @@ func TestBuildRequestParams_ToolIncludes(t *testing.T) {
 		}),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 
 	found := false
@@ -146,7 +146,7 @@ func TestBuildRequestParams_GPT56PromptCaching(t *testing.T) {
 		),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	body, err := json.Marshal(params)
 	assert.NoError(t, err)
@@ -163,7 +163,7 @@ func TestBuildRequestParams_OlderModelOmitsExplicitPromptCaching(t *testing.T) {
 		llm.WithMessages(llm.NewUserTextMessage("one")),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	body, err := json.Marshal(params)
 	assert.NoError(t, err)
@@ -184,7 +184,7 @@ func TestBuildRequestParams_CompatibleProviderOptsIntoPromptCacheKey(t *testing.
 		llm.WithMessages(llm.NewUserTextMessage("one")),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.True(t, params.PromptCacheKey.Valid())
 	assert.Equal(t, "stable-session-key", params.PromptCacheKey.Value)
@@ -202,7 +202,7 @@ func TestBuildRequestParams_CompatibleProviderOmitsUnsupportedPromptCacheKey(t *
 		llm.WithMessages(llm.NewUserTextMessage("one")),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.False(t, params.PromptCacheKey.Valid())
 }
@@ -216,7 +216,7 @@ func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {
 		llm.WithTools(&fakeIncludeTool{includes: nil}),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Empty(t, params.Include)
 }
@@ -227,7 +227,7 @@ func TestProviderDefaultModel(t *testing.T) {
 	config := &llm.Config{}
 	config.Apply(llm.WithMessages(llm.NewUserTextMessage("hi")))
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Equal(t, ModelGPT56Sol, string(params.Model))
 }
@@ -241,7 +241,7 @@ func TestBuildRequestParams_ReasoningEffortNone(t *testing.T) {
 		llm.WithReasoningEffort(llm.ReasoningEffortNone),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Equal(t, responses.ReasoningEffort("none"), params.Reasoning.Effort)
 }
@@ -294,7 +294,7 @@ func TestBuildRequestParams_NormalizesOpenAIReasoningEffort(t *testing.T) {
 				llm.WithReasoningEffort(tt.effort),
 			)
 
-			params, err := provider.buildRequestParams(config)
+			params, _, err := provider.buildRequestParams(config)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, params.Reasoning.Effort)
 		})
@@ -311,7 +311,7 @@ func TestBuildRequestParams_ReasoningEffortUnsupportedForOpenAIModel(t *testing.
 		llm.WithReasoningEffort(llm.ReasoningEffortNone),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Equal(t, responses.ReasoningEffort("minimal"), params.Reasoning.Effort)
 }
@@ -327,7 +327,7 @@ func TestBuildRequestParams_ModelWithoutReasoningOmitsEffort(t *testing.T) {
 		llm.WithReasoningEffort(llm.ReasoningEffortMedium),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Equal(t, responses.ReasoningEffort(""), params.Reasoning.Effort)
 }
@@ -340,7 +340,7 @@ func TestBuildRequestParams_ModelWithoutTemperatureOmitsIt(t *testing.T) {
 		llm.WithTemperature(0.5),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.False(t, params.Temperature.Valid())
 }
@@ -411,7 +411,7 @@ func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 				llm.WithReasoningEffort(tt.effort),
 			)
 
-			params, err := provider.buildRequestParams(config)
+			params, _, err := provider.buildRequestParams(config)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, params.Reasoning.Effort)
 		})
@@ -426,7 +426,7 @@ func TestBuildRequestParams_UnknownModelPassesReasoningEffortThrough(t *testing.
 		llm.WithReasoningEffort(llm.ReasoningEffort("superdeep")),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Equal(t, responses.ReasoningEffort("superdeep"), params.Reasoning.Effort)
 }
@@ -439,7 +439,7 @@ func TestBuildRequestParams_UnknownReasoningEffortPassesThroughKnownModel(t *tes
 		llm.WithReasoningEffort(llm.ReasoningEffort("superdeep")),
 	)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Equal(t, responses.ReasoningEffort("superdeep"), params.Reasoning.Effort)
 }

@@ -37,7 +37,7 @@ func TestLatestGeminiFlashModelsOmitTemperature(t *testing.T) {
 		t.Run(model, func(t *testing.T) {
 			logger := &recordingWarningLogger{}
 			var request Request
-			err := provider.applyRequestConfig(&request, &llm.Config{
+			_, err := provider.applyRequestConfig(&request, &llm.Config{
 				Model:       model,
 				Temperature: &temperature,
 				Logger:      logger,
@@ -80,7 +80,7 @@ func TestGemini35FlashKeepsTemperature(t *testing.T) {
 	temperature := 0.8
 	provider := New()
 	var request Request
-	err := provider.applyRequestConfig(&request, &llm.Config{
+	_, err := provider.applyRequestConfig(&request, &llm.Config{
 		Model:       ModelGemini35Flash,
 		Temperature: &temperature,
 	})

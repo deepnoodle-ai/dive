@@ -2,9 +2,11 @@ package google
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"google.golang.org/genai"
 )
@@ -12,7 +14,7 @@ import (
 // TestEveryCatalogModelHasCapabilities is the drift guard for
 // modelCapabilityTable. Thinking support varies within a family rather than by
 // generation — gemini-3.5-flash can disable thinking and gemini-3.5-flash-lite
-// cannot — so a new model has to be classified deliberately.
+// cannot — so a new model has to be mapped deliberately.
 func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 	for _, model := range Catalog().Models {
 		if model.Kind != "" && model.Kind != "text" {
@@ -23,10 +25,31 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			_, found := lookupEntry(id)
+			spec, declared := googleControlsSpecs[id]
+			assert.True(t, declared,
+				"model %q (%s) has no published model-controls mapping", id, model.GoName)
+
+			entry, found := lookupEntry(id)
 			assert.True(t, found,
 				"model %q (%s) has no entry in modelCapabilityTable; add one so "+
 					"its thinking parameters are gated", id, model.GoName)
+			assert.Equal(t, spec.entryPrefix, entry.prefix,
+				"model %q must name its intended capability entry, not merely match a prefix", id)
+
+			controls, known := modelcaps.ControlsFor(
+				"google", " MODELS/"+strings.ToUpper(id)+" ")
+			assert.True(t, known)
+			assert.Equal(t, id, controls.Model)
+			assert.Equal(t, !entry.caps.unverified && id != ModelGemini37Flash,
+				controls.VerifiedOn(modelcaps.VerificationGoogleGeminiAPI))
+			assert.Equal(t, id == ModelGemini37Flash,
+				controls.VerifiedOn(modelcaps.VerificationGoogleVertexAI))
+
+			plan, previewed := modelcaps.Preview("GOOGLE", llm.Config{
+				Model: " MODELS/" + strings.ToUpper(id) + " ",
+			})
+			assert.True(t, previewed)
+			assert.Equal(t, id, plan.Model)
 		})
 	}
 }
@@ -36,7 +59,8 @@ func buildThinking(t *testing.T, model string, opts ...llm.Option) *genai.Thinki
 	cfg := &llm.Config{}
 	cfg.Apply(append([]llm.Option{llm.WithModel(model)}, opts...)...)
 	var req Request
-	assert.NoError(t, New().applyRequestConfig(&req, cfg))
+	_, err := New().applyRequestConfig(&req, cfg)
+	assert.NoError(t, err)
 	return req.Thinking
 }
 
@@ -239,7 +263,8 @@ func TestThinkingConfigReachesGenAIConfig(t *testing.T) {
 		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
 	)
 	var req Request
-	assert.NoError(t, New().applyRequestConfig(&req, cfg))
+	_, err := New().applyRequestConfig(&req, cfg)
+	assert.NoError(t, err)
 
 	genConfig, err := buildGenAIGenerateConfig(&req)
 	assert.NoError(t, err)

@@ -1,11 +1,14 @@
 // Package modelcaps records which reasoning and sampling parameters each model
-// accepts, so providers can clamp or drop a setting a model cannot take instead
-// of sending a request the API will reject.
+// accepts. Its compatibility tables let providers clamp or drop settings a
+// model cannot take, while its provider-registered inspection API publishes
+// exact per-model controls and network-free control previews.
 //
-// Every entry is a fact about the API, verified by sending the parameter to the
-// live endpoint and recording whether it returned 200 or 400. Nothing here is
-// inferred from a model's name or generation — several models contradict what
-// their names suggest, and a few contradict their own families.
+// Every OpenAI and Grok compatibility-table entry is a fact about the API,
+// verified by sending the parameter to the live endpoint and recording whether
+// it returned 200 or 400. Nothing in those tables is inferred from a model's
+// name or generation — several models contradict what their names suggest, and
+// a few contradict their own families. Controls published by other provider
+// packages carry their own endpoint-scoped verification evidence.
 //
 // The tables live here rather than in each provider package because the OpenAI
 // Responses API, the Chat Completions API, and OpenRouter all serve the same

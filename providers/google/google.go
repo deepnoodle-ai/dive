@@ -116,7 +116,8 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	var request Request
-	if err := p.applyRequestConfig(&request, config); err != nil {
+	controls, err := p.applyRequestConfig(&request, config)
+	if err != nil {
 		return nil, err
 	}
 
@@ -161,6 +162,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		if convErr != nil {
 			return fmt.Errorf("error converting response: %w", convErr)
 		}
+		result.Usage.Controls = controls
 		populateGoogleCost(result.Model, resp.UsageMetadata, &result.Usage, p.pricingContext(request.ServiceTier))
 		return nil
 	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
@@ -198,7 +200,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	}
 
 	var request Request
-	if err := p.applyRequestConfig(&request, config); err != nil {
+	controls, err := p.applyRequestConfig(&request, config)
+	if err != nil {
 		return nil, err
 	}
 
@@ -234,7 +237,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		// sequence. The shared iterator consumes the first result as part of
 		// the provider's pre-event retry boundary.
 		streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
-		return newStreamIteratorFromSeq(ctx, streamSeq, request.Model, p.pricingContext(request.ServiceTier)), nil
+		return newStreamIteratorFromSeq(ctx, streamSeq, request.Model,
+			p.pricingContext(request.ServiceTier), controls), nil
 	})
 
 	return stream, nil
@@ -263,7 +267,10 @@ func wrapGoogleError(err error) error {
 	return err
 }
 
-func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
+// applyRequestConfig fills the wire request and returns the reasoning and
+// sampling controls it resolved, so the caller can report them on the response
+// beside the token counts.
+func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) (*llm.EffectiveControls, error) {
 	req.Model = config.Model
 	if req.Model == "" {
 		req.Model = p.model
@@ -291,14 +298,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.Tools = tools
 	}
 
-	if modelAcceptsTemperature(req.Model) {
-		req.Temperature = config.Temperature
-	} else if config.Temperature != nil && config.Logger != nil {
-		config.Logger.Warn("temperature is not supported by this Google model and will be ignored",
-			"model", req.Model)
-	}
-
-	req.Thinking = buildThinkingConfig(req.Model, config)
+	controls := planRequestControls(req.Model, config)
+	req.Temperature = controls.temperature
+	req.Thinking = controls.thinking
+	effective := controls.plan.Effective.Clone()
 	req.System = config.SystemPrompt
 	switch strings.ToLower(config.ServiceTier) {
 	case "", "default":
@@ -310,10 +313,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	case string(genai.ServiceTierStandard):
 		req.ServiceTier = genai.ServiceTierStandard
 	case string(genai.ServiceTierFlex), string(genai.ServiceTierPriority):
-		return fmt.Errorf("google service tier %q is not supported until tier-specific billing is cataloged", config.ServiceTier)
+		return nil, fmt.Errorf("google service tier %q is not supported until tier-specific billing is cataloged", config.ServiceTier)
 	default:
-		return fmt.Errorf("invalid Google service tier: %s", config.ServiceTier)
+		return nil, fmt.Errorf("invalid Google service tier: %s", config.ServiceTier)
 	}
 
-	return nil
+	return &effective, nil
 }

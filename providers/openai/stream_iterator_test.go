@@ -65,7 +65,7 @@ func loadFixtureEvents(t *testing.T, path string) []responses.ResponseStreamEven
 // must carry index 0 (never -1).
 func TestStreamIteratorZeroBasedIndices(t *testing.T) {
 	source := &mockStreamSource{events: loadFixtureEvents(t, "fixtures/events-hello.txt")}
-	iterator := newOpenAIStreamIterator(source, &llm.Config{})
+	iterator := newOpenAIStreamIterator(source, &llm.Config{}, nil)
 	defer iterator.Close()
 
 	accumulator := llm.NewResponseAccumulator()
@@ -133,7 +133,7 @@ func TestStreamIteratorNormalizesUsageBuckets(t *testing.T) {
 				}
 			}`, tt.eventType, eventStatus(tt.eventType), tt.prompt, tt.cached, tt.written)), &event))
 
-			iterator := newOpenAIStreamIterator(&mockStreamSource{}, &llm.Config{})
+			iterator := newOpenAIStreamIterator(&mockStreamSource{}, &llm.Config{}, nil)
 			events, err := iterator.processOpenAIEvent(event)
 			assert.NoError(t, err)
 			assert.NotEmpty(t, events)
@@ -165,7 +165,7 @@ func TestStreamIteratorAccumulatorPricesDisjointUsage(t *testing.T) {
 		events = append(events, event)
 	}
 
-	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{}, nil)
 	t.Cleanup(func() {
 		assert.NoError(t, iterator.Close())
 	})
@@ -205,7 +205,7 @@ func TestStreamIteratorPreservesReplayableReasoning(t *testing.T) {
 		events = append(events, event)
 	}
 
-	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{}, nil)
 	t.Cleanup(func() {
 		assert.NoError(t, iterator.Close())
 	})
@@ -249,7 +249,7 @@ func TestStreamIteratorPreservesRawReasoningText(t *testing.T) {
 		events = append(events, event)
 	}
 
-	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{}, nil)
 	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
 	accumulator := llm.NewResponseAccumulator()
 	for iterator.Next() {
@@ -328,7 +328,7 @@ func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			payloads := append(append([]string{created}, tc.payloads...), incomplete)
-			iterator := newOpenAIStreamIterator(&mockStreamSource{events: parseStreamPayloads(t, payloads...)}, &llm.Config{})
+			iterator := newOpenAIStreamIterator(&mockStreamSource{events: parseStreamPayloads(t, payloads...)}, &llm.Config{}, nil)
 			defer iterator.Close()
 
 			accumulator := llm.NewResponseAccumulator()
@@ -366,4 +366,41 @@ func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
 			assert.Equal(t, tc.content, message.Content[0].Type())
 		})
 	}
+}
+
+func TestStreamIteratorReportsEffectiveControls(t *testing.T) {
+	payloads := []string{
+		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
+		`{"type":"response.completed","sequence_number":2,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":1,"output_tokens":2}}}`,
+	}
+	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
+	for _, payload := range payloads {
+		var event responses.ResponseStreamEventUnion
+		assert.NoError(t, json.Unmarshal([]byte(payload), &event))
+		events = append(events, event)
+	}
+
+	temperature := 0.4
+	controls := &llm.EffectiveControls{
+		ReasoningEffort: llm.ReasoningEffortXHigh,
+		Temperature:     &temperature,
+	}
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{}, controls)
+	t.Cleanup(func() {
+		assert.NoError(t, iterator.Close())
+	})
+	accumulator := llm.NewResponseAccumulator()
+	for iterator.Next() {
+		assert.NoError(t, accumulator.AddEvent(iterator.Event()))
+	}
+	assert.NoError(t, iterator.Err())
+
+	usage := accumulator.Response().Usage
+	assert.NotNil(t, usage.Controls)
+	assert.True(t, usage.Controls.Equal(*controls))
+
+	// Each frame carries its own copy, so a consumer that mutates the
+	// accumulated usage cannot reach back into the iterator's controls.
+	*usage.Controls.Temperature = 1
+	assert.Equal(t, 0.4, *controls.Temperature)
 }

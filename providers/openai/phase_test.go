@@ -181,7 +181,7 @@ func streamPhase(t *testing.T, addedPhase, donePhase string) (*llm.Message, []*l
 		events = append(events, event)
 	}
 
-	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{}, nil)
 	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
 
 	accumulator := llm.NewResponseAccumulator()

@@ -203,7 +203,8 @@ func TestProviderServiceTierValidation(t *testing.T) {
 	for _, tier := range []string{"", "default", "standard", "STANDARD"} {
 		t.Run("accepted/"+tier, func(t *testing.T) {
 			var request Request
-			assert.NoError(t, provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tier}))
+			_, err := provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tier})
+			assert.NoError(t, err)
 			if strings.EqualFold(tier, "standard") {
 				assert.Equal(t, genai.ServiceTierStandard, request.ServiceTier)
 			} else {
@@ -225,7 +226,7 @@ func TestProviderServiceTierValidation(t *testing.T) {
 	} {
 		t.Run("rejected/"+tt.tier, func(t *testing.T) {
 			var request Request
-			err := provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tt.tier})
+			_, err := provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tt.tier})
 			assert.Error(t, err)
 			assert.Equal(t, tt.wantErr, err.Error())
 		})
