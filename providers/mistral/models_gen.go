@@ -3,18 +3,22 @@
 package mistral
 
 const (
-	ModelMistralMedium       = "mistral-medium-latest"
-	ModelMistralLarge3       = "mistral-large-2512"
-	ModelMistralLarge        = "mistral-large-latest"
-	ModelMistralLarge2411    = "mistral-large-2411"
-	ModelMistralSmall        = "mistral-small-latest"
-	ModelMinistral3_14B      = "ministral-14b-2512"
-	ModelMinistral3_8B       = "ministral-8b-2512"
-	ModelMinistral3_3B       = "ministral-3b-2512"
-	ModelDevstral2           = "devstral-2512"
-	ModelDevstralSmall2      = "labs-devstral-small-2512"
+	ModelMistralMedium    = "mistral-medium-latest"
+	ModelMistralLarge3    = "mistral-large-2512"
+	ModelMistralLarge     = "mistral-large-latest"
+	ModelMistralLarge2411 = "mistral-large-2411"
+	ModelMistralSmall     = "mistral-small-latest"
+	ModelMinistral3_14B   = "ministral-14b-2512"
+	ModelMinistral3_8B    = "ministral-8b-2512"
+	ModelMinistral3_3B    = "ministral-3b-2512"
+	// Deprecated: Mistral has retired the Devstral family; use ModelCodestralLatest for coding.
+	ModelDevstral2 = "devstral-2512"
+	// Deprecated: Mistral has retired the Devstral family; use ModelCodestralLatest for coding.
+	ModelDevstralSmall2 = "labs-devstral-small-2512"
+	// Deprecated: Mistral no longer serves or documents this alias; use ModelCodestralLatest for coding.
 	ModelDevstralSmallLatest = "devstral-small-latest"
 	ModelCodestralLatest     = "codestral-latest"
+	ModelCodestral2508       = "codestral-2508"
 	ModelCodestral2501       = "codestral-2501"
 	ModelCodestralMamba      = "open-codestral-mamba"
 	ModelMistral7B           = "open-mistral-7b"

@@ -56,3 +56,27 @@ func TestWithCachePricing(t *testing.T) {
 	assert.Equal(t, 0.4, out.CacheReadPrice)
 	assert.Equal(t, 5.0, out.CacheWritePrice)
 }
+
+// Fable 5.1 and Mythos 5.1 bill cache hits at 0.025x base input, not the 0.1x
+// every other Claude model uses. The catalog states that rate outright; this
+// pins that withCachePricing leaves it alone instead of deriving over it.
+func TestFable51CacheReadPricingIsNotDerived(t *testing.T) {
+	for _, model := range []string{ModelClaudeFable51, ModelClaudeMythos51} {
+		t.Run(model, func(t *testing.T) {
+			p, ok := providers.PricingFor(model, false)
+			assert.True(t, ok, "pricing should be registered")
+			assert.Equal(t, 10.0, p.InputPrice)
+			assert.Equal(t, 50.0, p.OutputPrice)
+			assert.Equal(t, 0.25, p.CacheReadPrice)   // 0.025x input, not 1.0
+			assert.Equal(t, 12.50, p.CacheWritePrice) // 1.25x input, as everywhere
+		})
+	}
+}
+
+func TestSonnet5StandardPricing(t *testing.T) {
+	p, ok := providers.PricingFor(ModelClaudeSonnet5, false)
+	assert.True(t, ok, "Sonnet 5 pricing should be registered")
+	assert.Equal(t, 2.0, p.InputPrice)
+	assert.Equal(t, 10.0, p.OutputPrice)
+	assert.Equal(t, 0.2, p.CacheReadPrice)
+}

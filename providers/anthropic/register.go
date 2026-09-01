@@ -34,6 +34,10 @@ func registerPricing() {
 // input price: cache reads bill at 0.1x, and cache writes at the default
 // 5-minute TTL bill at 1.25x. (The 1-hour TTL is 2x, but usage does not carry
 // a per-TTL split, so the default rate is used.)
+//
+// Only zero fields are filled, so a model whose published rate departs from the
+// multipliers states it in catalog.json instead: Fable 5.1 and Mythos 5.1 bill
+// cache reads at 0.025x, and deriving 0.1x there would overcharge by 4x.
 func withCachePricing(p llm.PricingInfo) llm.PricingInfo {
 	if p.CacheReadPrice == 0 {
 		p.CacheReadPrice = p.InputPrice * 0.10

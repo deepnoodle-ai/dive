@@ -6,21 +6,23 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	// Rates billed today. Google lists a scheduled increase to $1.50/$7.50 ($0.15 cache read) on 2027-01-01; revisit then.
 	ModelGemini37Flash: {
 		Model:          ModelGemini37Flash,
-		InputPrice:     1.50,
-		OutputPrice:    7.50,
-		CacheReadPrice: 0.15,
+		InputPrice:     0.75,
+		OutputPrice:    3.75,
+		CacheReadPrice: 0.075,
 		Currency:       "USD",
-		UpdatedAt:      "2026-08-15",
+		UpdatedAt:      "2026-09-01",
 	},
+	// Rates billed today. Google lists a scheduled increase to $1.50/$7.50 ($0.15 cache read) on 2027-01-01; revisit then.
 	ModelGemini36Flash: {
 		Model:          ModelGemini36Flash,
-		InputPrice:     1.50,
-		OutputPrice:    7.50,
-		CacheReadPrice: 0.15,
+		InputPrice:     0.75,
+		OutputPrice:    3.75,
+		CacheReadPrice: 0.075,
 		Currency:       "USD",
-		UpdatedAt:      "2026-07-21",
+		UpdatedAt:      "2026-09-01",
 	},
 	ModelGemini35Flash: {
 		Model:                    ModelGemini35Flash,

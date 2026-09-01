@@ -104,6 +104,23 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-08-09",
 	},
+	// Cache hits bill at 0.025x base input on Fable 5.1 and Mythos 5.1, not the 0.1x every other Claude model uses, so the rate is stated rather than derived.
+	ModelClaudeFable51: {
+		Model:          ModelClaudeFable51,
+		InputPrice:     10.00,
+		OutputPrice:    50.00,
+		CacheReadPrice: 0.25,
+		Currency:       "USD",
+		UpdatedAt:      "2026-09-01",
+	},
+	ModelClaudeMythos51: {
+		Model:          ModelClaudeMythos51,
+		InputPrice:     10.00,
+		OutputPrice:    50.00,
+		CacheReadPrice: 0.25,
+		Currency:       "USD",
+		UpdatedAt:      "2026-09-01",
+	},
 	ModelClaudeFable5: {
 		Model:       ModelClaudeFable5,
 		InputPrice:  10.00,
@@ -118,13 +135,13 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-06-09",
 	},
-	// Sonnet 5 standard pricing. Introductory rates of $2/$10 per MTok are in effect through 2026-08-31; we use the long-term $3/$15 rates here to avoid a silent price cliff when the introductory period ends.
+	// $2/$10 per MTok launched as introductory pricing through 2026-08-31 and is now the standard price; Anthropic cancelled the scheduled increase to $3/$15.
 	ModelClaudeSonnet5: {
 		Model:       ModelClaudeSonnet5,
-		InputPrice:  3.00,
-		OutputPrice: 15.00,
+		InputPrice:  2.00,
+		OutputPrice: 10.00,
 		Currency:    "USD",
-		UpdatedAt:   "2026-06-30",
+		UpdatedAt:   "2026-09-01",
 	},
 }
 

@@ -152,14 +152,28 @@
       "description": "Complex agentic coding and long-horizon work"
     },
     {
+      "go_name": "ModelClaudeFable51",
+      "id": "claude-fable-5-1",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Fable 5.1",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Most capable for demanding reasoning and long-horizon agentic work"
+    },
+    {
+      "go_name": "ModelClaudeMythos51",
+      "id": "claude-mythos-5-1",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Mythos 5.1"
+    },
+    {
       "go_name": "ModelClaudeFable5",
       "id": "claude-fable-5",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Fable 5",
-      "recommended": true,
-      "cli_order": 2,
-      "description": "Most capable for the hardest reasoning, at premium pricing"
+      "display_name": "Fable 5"
     },
     {
       "go_name": "ModelClaudeMythos5",
@@ -281,6 +295,23 @@
         "updated_at": "2026-08-09"
       },
       {
+        "model": "claude-fable-5-1",
+        "input_price_per_1m_tokens": "10.00",
+        "output_price_per_1m_tokens": "50.00",
+        "cache_read_price_per_1m_tokens": "0.25",
+        "currency": "USD",
+        "updated_at": "2026-09-01",
+        "note": "Cache hits bill at 0.025x base input on Fable 5.1 and Mythos 5.1, not the 0.1x every other Claude model uses, so the rate is stated rather than derived."
+      },
+      {
+        "model": "claude-mythos-5-1",
+        "input_price_per_1m_tokens": "10.00",
+        "output_price_per_1m_tokens": "50.00",
+        "cache_read_price_per_1m_tokens": "0.25",
+        "currency": "USD",
+        "updated_at": "2026-09-01"
+      },
+      {
         "model": "claude-fable-5",
         "input_price_per_1m_tokens": "10.00",
         "output_price_per_1m_tokens": "50.00",
@@ -296,11 +327,11 @@
       },
       {
         "model": "claude-sonnet-5",
-        "input_price_per_1m_tokens": "3.00",
-        "output_price_per_1m_tokens": "15.00",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "10.00",
         "currency": "USD",
-        "updated_at": "2026-06-30",
-        "note": "Sonnet 5 standard pricing. Introductory rates of $2/$10 per MTok are in effect through 2026-08-31; we use the long-term $3/$15 rates here to avoid a silent price cliff when the introductory period ends."
+        "updated_at": "2026-09-01",
+        "note": "$2/$10 per MTok launched as introductory pricing through 2026-08-31 and is now the standard price; Anthropic cancelled the scheduled increase to $3/$15."
       }
     ],
     "fast_text": [

@@ -140,3 +140,29 @@ func TestUnknownModelKeepsParametersUntouched(t *testing.T) {
 	req := buildReq(t, "my-proxy-claude", llm.WithTemperature(0.5))
 	assert.NotNil(t, req.Temperature)
 }
+
+// The 5.1 point releases have no entry of their own and inherit the Fable and
+// Mythos ones by prefix. Landing on *an* entry is not enough — a wrong match
+// would hand them explicitDisable or a manual budget, both of which the API
+// answers with a 400 — so pin the classification they actually resolve to.
+func TestFableAndMythos51InheritTheirFamilyEntries(t *testing.T) {
+	for _, model := range []string{ModelClaudeFable51, ModelClaudeMythos51} {
+		t.Run(model, func(t *testing.T) {
+			caps, known := lookupCapabilities(model)
+			assert.True(t, known)
+			assert.Equal(t, reasoningNative, caps.reasoningKind())
+			assert.True(t, caps.adaptive)
+			assert.True(t, caps.thinkingOnByDefault)
+			assert.False(t, caps.explicitDisable, "5.1 rejects thinking:{type:disabled}")
+			assert.False(t, caps.manualBudget, "5.1 rejects budget_tokens")
+			assert.False(t, caps.temperature, "5.1 rejects temperature")
+		})
+	}
+}
+
+// Forced tool_choice returns a 400 on Fable 5.1 and Mythos 5.1. Dive rejects it
+// before the request leaves, via the always-thinking classification above.
+func TestForcedToolChoiceRejectedOnFable51(t *testing.T) {
+	assert.True(t, requestThinkingBlocksForcedToolChoice(ModelClaudeFable51, nil))
+	assert.True(t, requestThinkingBlocksForcedToolChoice(ModelClaudeMythos51, nil))
+}

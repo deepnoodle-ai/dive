@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Fable 5.1 and Mythos 5.1** — new `ModelClaudeFable51` and
+  `ModelClaudeMythos51` constants (1M context, $10/$50 per MTok). Fable 5.1
+  replaces Fable 5 in the CLI recommendations; Fable 5 and Mythos 5 remain
+  available.
+- **OpenRouter catalog picks up the current frontier ids** —
+  `anthropic/claude-fable-5.1`, `openai/gpt-5.6-sol` / `-terra` / `-luna`,
+  `google/gemini-3.7-flash`, and `x-ai/grok-4.6`.
+- **`ModelCodestral2508`** — the current Codestral release, and
+  `ModelCodestralLatest` now carries the Mistral CLI's coding recommendation.
+
+### Fixed
+
+- **Claude Sonnet 5 was priced 50% too high.** Its $2/$10 per MTok launch rate
+  became the standard price; Anthropic cancelled the increase to $3/$15 that
+  the catalog had pre-applied.
+- **Gemini 3.7 and 3.6 Flash were priced 2x too high.** Both now record the
+  $0.75/$3.75 per MTok rate billed today rather than the $1.50/$7.50 scheduled
+  for 2027-01-01. Catalogs record the price in effect, not a future one.
+- **Fable 5.1 and Mythos 5.1 cache reads bill at 0.025x base input**, not the
+  0.1x Dive derives for every other Claude model, so the $0.25 per MTok rate is
+  stated in the catalog instead of derived 4x too high.
+
+### Changed
+
+- **Mistral's Devstral models are marked deprecated.** Mistral has retired the
+  family, and `devstral-small-latest` no longer resolves upstream at all; the
+  constants remain for compatibility.
+
 ## [1.26.0] - 2026-08-22
 
 ### Fixed
