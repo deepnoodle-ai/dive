@@ -15,16 +15,16 @@ import (
 func TestRegisterValidationAndDuplicateProtection(t *testing.T) {
 	valid := testResolver("model")
 	assert.ErrorIs(t, Register(" ", valid), ErrInvalidProvider)
-	assert.ErrorIs(t, Register("registry-invalid-classifier", Resolver{Explain: valid.Explain}), ErrInvalidResolver)
-	assert.ErrorIs(t, Register("registry-invalid-explainer", Resolver{Classify: valid.Classify}), ErrInvalidResolver)
+	assert.ErrorIs(t, Register("registry-invalid-controls", Resolver{Preview: valid.Preview}), ErrInvalidResolver)
+	assert.ErrorIs(t, Register("registry-invalid-preview", Resolver{Controls: valid.Controls}), ErrInvalidResolver)
 
 	provider := "registry-duplicate"
 	assert.NoError(t, Register(provider, valid))
 	assert.ErrorIs(t, Register(" REGISTRY-DUPLICATE ", testResolver("replacement")), ErrProviderRegistered)
 
-	classification, ok := ClassificationFor(provider, "model")
+	controls, ok := ControlsFor(provider, "model")
 	assert.True(t, ok)
-	assert.Equal(t, "model", classification.Model)
+	assert.Equal(t, "model", controls.Model)
 }
 
 func TestMustRegisterPanicsOnInvalidRegistration(t *testing.T) {
@@ -37,12 +37,12 @@ func TestProviderLookupIsCanonicalAndProvidersAreSortedSnapshots(t *testing.T) {
 	MustRegister("registry-zulu", testResolver("model-z"))
 	MustRegister(" Registry-Alpha ", testResolver("model-a"))
 
-	classification, ok := ClassificationFor(" REGISTRY-ALPHA ", "model-a")
+	controls, ok := ControlsFor(" REGISTRY-ALPHA ", "model-a")
 	assert.True(t, ok)
-	assert.Equal(t, "model-a", classification.Model)
-	_, ok = ClassificationFor("registry-alpha", "unknown")
+	assert.Equal(t, "model-a", controls.Model)
+	_, ok = ControlsFor("registry-alpha", "unknown")
 	assert.False(t, ok)
-	_, ok = ClassificationFor("registry-missing", "model-a")
+	_, ok = ControlsFor("registry-missing", "model-a")
 	assert.False(t, ok)
 
 	providers := Providers()
@@ -53,15 +53,15 @@ func TestProviderLookupIsCanonicalAndProvidersAreSortedSnapshots(t *testing.T) {
 	assert.False(t, slices.Contains(Providers(), "mutated"))
 }
 
-func TestClassificationForReturnsDefensiveSnapshot(t *testing.T) {
+func TestControlsForReturnsDefensiveSnapshot(t *testing.T) {
 	minimum, maximum := 1, 32
-	classification := Classification{
+	controls := ModelControls{
 		Model:       "model",
 		Temperature: true,
-		Reasoning: ReasoningClassification{
+		Reasoning: ReasoningControls{
 			NativeEfforts:   []llm.ReasoningEffort{llm.ReasoningEffortLow},
 			EmulatedEfforts: []llm.ReasoningEffort{llm.ReasoningEffortMedium},
-			Budget: &ReasoningBudgetClassification{
+			Budget: &BudgetBounds{
 				Minimum: &minimum,
 				Maximum: &maximum,
 			},
@@ -70,13 +70,13 @@ func TestClassificationForReturnsDefensiveSnapshot(t *testing.T) {
 	}
 	provider := "registry-classification-clone"
 	MustRegister(provider, Resolver{
-		Classify: func(model string) (Classification, bool) {
-			return classification, model == "model"
+		Controls: func(model string) (ModelControls, bool) {
+			return controls, model == "model"
 		},
-		Explain: testResolver("model").Explain,
+		Preview: testResolver("model").Preview,
 	})
 
-	first, ok := ClassificationFor(provider, "model")
+	first, ok := ControlsFor(provider, "model")
 	assert.True(t, ok)
 	assert.True(t, first.SupportsNativeEffort(llm.ReasoningEffortLow))
 	assert.True(t, first.VerifiedOn(VerificationOpenAIResponses))
@@ -86,7 +86,7 @@ func TestClassificationForReturnsDefensiveSnapshot(t *testing.T) {
 	*first.Reasoning.Budget.Maximum = 200
 	first.VerificationScopes[0] = VerificationGoogleVertexAI
 
-	second, ok := ClassificationFor(provider, "model")
+	second, ok := ControlsFor(provider, "model")
 	assert.True(t, ok)
 	assert.Equal(t, llm.ReasoningEffortLow, second.Reasoning.NativeEfforts[0])
 	assert.Equal(t, llm.ReasoningEffortMedium, second.Reasoning.EmulatedEfforts[0])
@@ -95,7 +95,7 @@ func TestClassificationForReturnsDefensiveSnapshot(t *testing.T) {
 	assert.Equal(t, VerificationOpenAIResponses, second.VerificationScopes[0])
 }
 
-func TestExplainReturnsDefensiveSnapshot(t *testing.T) {
+func TestPreviewReturnsDefensiveSnapshot(t *testing.T) {
 	budget := 2048
 	temperature := 0.5
 	plan := Plan{
@@ -111,18 +111,18 @@ func TestExplainReturnsDefensiveSnapshot(t *testing.T) {
 	}
 	provider := "registry-plan-clone"
 	MustRegister(provider, Resolver{
-		Classify: testResolver("model").Classify,
-		Explain: func(config llm.Config) (Plan, bool) {
+		Controls: testResolver("model").Controls,
+		Preview: func(config llm.Config) (Plan, bool) {
 			return plan, config.Model == "model"
 		},
 	})
 
-	first, ok := Explain(provider, llm.Config{Model: "model"})
+	first, ok := Preview(provider, llm.Config{Model: "model"})
 	assert.True(t, ok)
 	*first.Effective.ReasoningBudget = 1
 	*first.Effective.Temperature = 1
 
-	second, ok := Explain(provider, llm.Config{Model: "model"})
+	second, ok := Preview(provider, llm.Config{Model: "model"})
 	assert.True(t, ok)
 	assert.Equal(t, 2048, *second.Effective.ReasoningBudget)
 	assert.Equal(t, 0.5, *second.Effective.Temperature)
@@ -132,24 +132,24 @@ func TestResolverRunsOutsideRegistryLock(t *testing.T) {
 	provider := "registry-unlocked-parent"
 	child := "registry-unlocked-child"
 	MustRegister(provider, Resolver{
-		Classify: func(model string) (Classification, bool) {
+		Controls: func(model string) (ModelControls, bool) {
 			if err := Register(child, testResolver("child-model")); err != nil && !errors.Is(err, ErrProviderRegistered) {
 				t.Fatalf("register child resolver: %v", err)
 			}
-			return Classification{Model: model}, true
+			return ModelControls{Model: model}, true
 		},
-		Explain: testResolver("model").Explain,
+		Preview: testResolver("model").Preview,
 	})
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = ClassificationFor(provider, "model")
+		_, _ = ControlsFor(provider, "model")
 	}()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("classifier was invoked while the registry lock was held")
+		t.Fatal("controls func was invoked while the registry lock was held")
 	}
 }
 
@@ -166,9 +166,9 @@ func TestConcurrentRegistrationAndLookup(t *testing.T) {
 				t.Errorf("register %s: %v", provider, err)
 				return
 			}
-			classification, ok := ClassificationFor(provider, model)
-			if !ok || classification.Model != model {
-				t.Errorf("lookup %s: got %#v, %v", provider, classification, ok)
+			controls, ok := ControlsFor(provider, model)
+			if !ok || controls.Model != model {
+				t.Errorf("lookup %s: got %#v, %v", provider, controls, ok)
 			}
 		}()
 	}
@@ -177,10 +177,10 @@ func TestConcurrentRegistrationAndLookup(t *testing.T) {
 
 func testResolver(model string) Resolver {
 	return Resolver{
-		Classify: func(candidate string) (Classification, bool) {
-			return Classification{Model: model}, candidate == model
+		Controls: func(candidate string) (ModelControls, bool) {
+			return ModelControls{Model: model}, candidate == model
 		},
-		Explain: func(config llm.Config) (Plan, bool) {
+		Preview: func(config llm.Config) (Plan, bool) {
 			if config.Model != model {
 				return Plan{}, false
 			}

@@ -141,7 +141,7 @@ func TestStreamIteratorUsesServedModelAndPreservesRegionalCost(t *testing.T) {
 		chunkSeq(textChunk("starting "), final), "gemini-request-alias", googlePricingContext{
 			vertexAI: true,
 			location: "us-central1",
-		})
+		}, nil)
 	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
 
 	_, accumulator := collectStreamEvents(t, iterator)
@@ -460,4 +460,33 @@ func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
 			assert.Equal(t, tc.content, message.Content[0].Type())
 		})
 	}
+}
+
+func TestStreamIteratorReportsEffectiveControls(t *testing.T) {
+	final := textChunk("done")
+	final.Candidates[0].FinishReason = genai.FinishReasonStop
+	final.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     10,
+		CandidatesTokenCount: 5,
+		TotalTokenCount:      15,
+	}
+
+	budget := 4096
+	controls := &llm.EffectiveControls{
+		ReasoningBudget: &budget,
+		Thinking:        llm.ThinkingTypeEnabled,
+	}
+	iterator := newStreamIteratorFromSeq(context.Background(),
+		chunkSeq(textChunk("all "), final), ModelGemini25Pro, googlePricingContext{}, controls)
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+
+	_, accumulator := collectStreamEvents(t, iterator)
+	usage := accumulator.Response().Usage
+	assert.NotNil(t, usage.Controls)
+	assert.True(t, usage.Controls.Equal(*controls))
+
+	// Each frame carries its own copy, so a consumer that mutates the
+	// accumulated usage cannot reach back into the iterator's controls.
+	*usage.Controls.ReasoningBudget = 1
+	assert.Equal(t, 4096, budget)
 }

@@ -10,18 +10,18 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-// ReasoningBudgetClassification describes fixed manual reasoning-budget
-// bounds. Nil means Dive has no fixed bound to publish.
-type ReasoningBudgetClassification struct {
+// BudgetBounds describes fixed manual reasoning-budget bounds. Nil means Dive
+// has no fixed bound to publish.
+type BudgetBounds struct {
 	noUnkeyedLiterals struct{}
 
 	Minimum *int
 	Maximum *int
 }
 
-// ReasoningClassification describes independent reasoning controls Dive can
-// express for an exact catalog model.
-type ReasoningClassification struct {
+// ReasoningControls describes independent reasoning controls Dive can express
+// for an exact catalog model.
+type ReasoningControls struct {
 	noUnkeyedLiterals struct{}
 
 	// NativeEfforts lists provider-native effort or thinking-level values from
@@ -34,7 +34,7 @@ type ReasoningClassification struct {
 	EmulatedEfforts []llm.ReasoningEffort
 
 	// Budget is non-nil when Dive can send a manual reasoning budget.
-	Budget *ReasoningBudgetClassification
+	Budget *BudgetBounds
 
 	AdaptiveThinking bool
 
@@ -42,9 +42,9 @@ type ReasoningClassification struct {
 	CanDisableThinking bool
 }
 
-// Classification describes independent model controls Dive can publish
-// without applying product policy or evaluating a complete request.
-type Classification struct {
+// ModelControls describes independent model controls Dive can publish without
+// applying product policy or evaluating a complete request.
+type ModelControls struct {
 	noUnkeyedLiterals struct{}
 
 	// Model is the normalized, exact canonical provider catalog ID.
@@ -54,10 +54,10 @@ type Classification struct {
 	// control when no other requested control suppresses it.
 	Temperature bool
 
-	Reasoning ReasoningClassification
+	Reasoning ReasoningControls
 
 	// VerificationScopes identifies the endpoint and API surfaces on which this
-	// entire exact classification was successfully live-probed. An empty slice
+	// entire exact control set was successfully live-probed. An empty slice
 	// makes no live-verification claim.
 	VerificationScopes []VerificationScope
 }
@@ -97,15 +97,9 @@ type ControlDecision struct {
 }
 
 // EffectiveControls is the provider-neutral result of control planning. It is
-// not a serialized provider request.
-type EffectiveControls struct {
-	noUnkeyedLiterals struct{}
-
-	ReasoningEffort llm.ReasoningEffort
-	ReasoningBudget *int
-	Thinking        llm.ThinkingType
-	Temperature     *float64
-}
+// defined in the llm package so a provider can report the same value on
+// llm.Usage that Preview reports before the call.
+type EffectiveControls = llm.EffectiveControls
 
 // Plan explains how Dive would treat the model controls in a concrete config.
 // When Rejected is true, the normal provider request builder would return an
@@ -126,19 +120,19 @@ type Plan struct {
 	RejectionReason string
 }
 
-// Classifier returns static facts for one exact catalog model.
-type Classifier func(model string) (Classification, bool)
+// ControlsFunc returns static facts for one exact catalog model.
+type ControlsFunc func(model string) (ModelControls, bool)
 
-// Explainer performs a network-free dry run for one exact catalog model.
-type Explainer func(config llm.Config) (Plan, bool)
+// PreviewFunc performs a network-free dry run for one exact catalog model.
+type PreviewFunc func(config llm.Config) (Plan, bool)
 
-// Resolver projects one provider's authoritative classification and pure
+// Resolver projects one provider's authoritative model controls and pure
 // request-control planner.
 type Resolver struct {
 	noUnkeyedLiterals struct{}
 
-	Classify Classifier
-	Explain  Explainer
+	Controls ControlsFunc
+	Preview  PreviewFunc
 }
 
 var (
@@ -160,7 +154,7 @@ func Register(provider string, resolver Resolver) error {
 	if provider == "" {
 		return ErrInvalidProvider
 	}
-	if resolver.Classify == nil || resolver.Explain == nil {
+	if resolver.Controls == nil || resolver.Preview == nil {
 		return ErrInvalidResolver
 	}
 
@@ -194,29 +188,30 @@ func Providers() []string {
 	return providers
 }
 
-// ClassificationFor returns static facts for an exact catalog model. ok is
-// false when the provider is not registered or the normalized model is not an
-// exact classified catalog ID. The returned Model is that canonical ID.
-func ClassificationFor(provider, model string) (Classification, bool) {
+// ControlsFor returns static facts for an exact catalog model. ok is false
+// when the provider is not registered or the normalized model is not an exact
+// mapped catalog ID. The returned Model is that canonical ID.
+func ControlsFor(provider, model string) (ModelControls, bool) {
 	resolver, ok := lookupResolver(provider)
 	if !ok {
-		return Classification{}, false
+		return ModelControls{}, false
 	}
-	classification, ok := resolver.Classify(model)
+	controls, ok := resolver.Controls(model)
 	if !ok {
-		return Classification{}, false
+		return ModelControls{}, false
 	}
-	return cloneClassification(classification), true
+	return cloneModelControls(controls), true
 }
 
-// Explain performs a network-free dry run for config.Model. ok has the same
-// exact-model meaning as ClassificationFor, and Plan.Model is canonical.
-func Explain(provider string, config llm.Config) (Plan, bool) {
+// Preview performs a network-free dry run for config.Model, reporting what
+// Dive would send without sending it. ok has the same exact-model meaning as
+// ControlsFor, and Plan.Model is canonical.
+func Preview(provider string, config llm.Config) (Plan, bool) {
 	resolver, ok := lookupResolver(provider)
 	if !ok {
 		return Plan{}, false
 	}
-	plan, ok := resolver.Explain(config)
+	plan, ok := resolver.Preview(config)
 	if !ok {
 		return Plan{}, false
 	}
@@ -225,13 +220,13 @@ func Explain(provider string, config llm.Config) (Plan, bool) {
 
 // SupportsNativeEffort reports native provider support. Budget emulation does
 // not count.
-func (c Classification) SupportsNativeEffort(effort llm.ReasoningEffort) bool {
+func (c ModelControls) SupportsNativeEffort(effort llm.ReasoningEffort) bool {
 	return slices.Contains(c.Reasoning.NativeEfforts, effort)
 }
 
-// VerifiedOn reports whether the exact model classification was live-probed on
+// VerifiedOn reports whether the exact model control set was live-probed on
 // the requested endpoint and API surface.
-func (c Classification) VerifiedOn(scope VerificationScope) bool {
+func (c ModelControls) VerifiedOn(scope VerificationScope) bool {
 	return slices.Contains(c.VerificationScopes, scope)
 }
 
@@ -246,15 +241,15 @@ func lookupResolver(provider string) (Resolver, bool) {
 	return resolver, ok
 }
 
-func cloneClassification(classification Classification) Classification {
-	classification.Reasoning.NativeEfforts = slices.Clone(classification.Reasoning.NativeEfforts)
-	classification.Reasoning.EmulatedEfforts = slices.Clone(classification.Reasoning.EmulatedEfforts)
-	classification.Reasoning.Budget = cloneBudgetClassification(classification.Reasoning.Budget)
-	classification.VerificationScopes = slices.Clone(classification.VerificationScopes)
-	return classification
+func cloneModelControls(controls ModelControls) ModelControls {
+	controls.Reasoning.NativeEfforts = slices.Clone(controls.Reasoning.NativeEfforts)
+	controls.Reasoning.EmulatedEfforts = slices.Clone(controls.Reasoning.EmulatedEfforts)
+	controls.Reasoning.Budget = cloneBudgetBounds(controls.Reasoning.Budget)
+	controls.VerificationScopes = slices.Clone(controls.VerificationScopes)
+	return controls
 }
 
-func cloneBudgetClassification(budget *ReasoningBudgetClassification) *ReasoningBudgetClassification {
+func cloneBudgetBounds(budget *BudgetBounds) *BudgetBounds {
 	if budget == nil {
 		return nil
 	}
@@ -265,11 +260,7 @@ func cloneBudgetClassification(budget *ReasoningBudgetClassification) *Reasoning
 }
 
 func clonePlan(plan Plan) Plan {
-	plan.Effective.ReasoningBudget = cloneInt(plan.Effective.ReasoningBudget)
-	if plan.Effective.Temperature != nil {
-		temperature := *plan.Effective.Temperature
-		plan.Effective.Temperature = &temperature
-	}
+	plan.Effective = plan.Effective.Clone()
 	return plan
 }
 

@@ -10,7 +10,7 @@ import (
 )
 
 // TestEveryCatalogModelHasCapabilities is the drift guard for
-// modelCapabilityTable: adding a model to catalog.json without classifying its
+// modelCapabilityTable: adding a model to catalog.json without recording its
 // reasoning, thinking, and sampling support fails here rather than at runtime
 // against the API.
 func TestEveryCatalogModelHasCapabilities(t *testing.T) {
@@ -23,9 +23,9 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			spec, declared := anthropicClassificationSpecs[id]
+			spec, declared := anthropicControlsSpecs[id]
 			assert.True(t, declared,
-				"model %q (%s) has no exact public classification mapping", id, model.GoName)
+				"model %q (%s) has no published model-controls mapping", id, model.GoName)
 
 			entry, known := lookupCapabilityEntry(id)
 			assert.True(t, known,
@@ -34,17 +34,17 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			assert.Equal(t, spec.entryPrefix, entry.prefix,
 				"model %q must name its intended capability entry, not merely match a prefix", id)
 
-			classification, classified := modelcaps.ClassificationFor(
+			controls, known := modelcaps.ControlsFor(
 				"anthropic", " ANTHROPIC/"+strings.ToUpper(id)+" ")
-			assert.True(t, classified)
-			assert.Equal(t, id, classification.Model)
+			assert.True(t, known)
+			assert.Equal(t, id, controls.Model)
 			assert.Equal(t, !entry.notLiveProbed,
-				classification.VerifiedOn(modelcaps.VerificationAnthropicMessages))
+				controls.VerifiedOn(modelcaps.VerificationAnthropicMessages))
 
-			plan, explained := modelcaps.Explain("ANTHROPIC", llm.Config{
+			plan, previewed := modelcaps.Preview("ANTHROPIC", llm.Config{
 				Model: " ANTHROPIC/" + strings.ToUpper(id) + " ",
 			})
-			assert.True(t, explained)
+			assert.True(t, previewed)
 			assert.Equal(t, id, plan.Model)
 		})
 	}

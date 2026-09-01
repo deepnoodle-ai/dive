@@ -94,7 +94,7 @@ func (p *Provider) buildConfig(opts ...llm.Option) *llm.Config {
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	config := p.buildConfig(opts...)
 
-	params, err := p.buildRequestParams(config)
+	params, controls, err := p.buildRequestParams(config)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +134,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 
+	result.Usage.Controls = controls
 	llm.PopulateCost(result.Model, result.Usage.Speed == string(llm.SpeedFast), &result.Usage)
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
@@ -155,7 +156,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := p.buildConfig(opts...)
 
-	params, err := p.buildRequestParams(config)
+	params, controls, err := p.buildRequestParams(config)
 	if err != nil {
 		return nil, err
 	}
@@ -184,17 +185,19 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		},
 		func() (llm.StreamIterator, error) {
 			streamSDK := p.client.Responses.NewStreaming(ctx, params, streamOpts...)
-			return newOpenAIStreamIterator(streamSDK, config), nil
+			return newOpenAIStreamIterator(streamSDK, config, controls), nil
 		},
 	)
 
 	return stream, nil
 }
 
-// buildRequestParams converts llm.Config to responses.ResponseNewParams
-func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNewParams, error) {
+// buildRequestParams converts llm.Config to responses.ResponseNewParams. It
+// also returns the reasoning and sampling controls it resolved, so the caller
+// can report them on the response beside the token counts.
+func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNewParams, *llm.EffectiveControls, error) {
 	if len(config.Messages) == 0 {
-		return responses.ResponseNewParams{}, fmt.Errorf("no messages provided")
+		return responses.ResponseNewParams{}, nil, fmt.Errorf("no messages provided")
 	}
 
 	// Convert input messages to the OpenAI SDK input type
@@ -205,7 +208,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		return llm.User, false
 	})
 	if err != nil {
-		return responses.ResponseNewParams{}, err
+		return responses.ResponseNewParams{}, nil, err
 	}
 	model := string(p.model)
 	if config.Model != "" {
@@ -216,7 +219,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		input, err = encodeMessagesWithPromptCacheBreakpoints(rendered)
 	}
 	if err != nil {
-		return responses.ResponseNewParams{}, err
+		return responses.ResponseNewParams{}, nil, err
 	}
 	params := responses.ResponseNewParams{
 		Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input},
@@ -264,7 +267,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			case llm.ReasoningSummaryDetailed:
 				params.Reasoning.Summary = responses.ReasoningSummaryDetailed
 			default:
-				return responses.ResponseNewParams{},
+				return responses.ResponseNewParams{}, nil,
 					fmt.Errorf("invalid reasoning summary: %s", config.ReasoningSummary)
 			}
 		}
@@ -291,7 +294,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		case "flex":
 			params.ServiceTier = responses.ResponseNewParamsServiceTierFlex
 		default:
-			return responses.ResponseNewParams{},
+			return responses.ResponseNewParams{}, nil,
 				fmt.Errorf("invalid service tier: %s", config.ServiceTier)
 		}
 	}
@@ -299,7 +302,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	// Handle response format
 	if config.ResponseFormat != nil {
 		if err := applyResponseFormat(&params, config); err != nil {
-			return responses.ResponseNewParams{}, err
+			return responses.ResponseNewParams{}, nil, err
 		}
 	}
 
@@ -325,7 +328,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 				},
 			}
 		default:
-			return responses.ResponseNewParams{},
+			return responses.ResponseNewParams{}, nil,
 				fmt.Errorf("invalid tool choice: %s", config.ToolChoice)
 		}
 	}
@@ -396,7 +399,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 				}
 			}
 			if toolConfig.ApprovalMode != "" && toolConfig.ApprovalFilter != nil {
-				return responses.ResponseNewParams{}, fmt.Errorf("tool approval and tool approval filter cannot be used together")
+				return responses.ResponseNewParams{}, nil, fmt.Errorf("tool approval and tool approval filter cannot be used together")
 			}
 			if toolConfig.ApprovalMode != "" {
 				mcpParam.RequireApproval = responses.ToolMcpRequireApprovalUnionParam{
@@ -437,7 +440,8 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			params.Include = append(params.Include, responses.ResponseIncludable(include))
 		}
 	}
-	return params, nil
+	effective := controls.Effective.Clone()
+	return params, &effective, nil
 }
 
 func isNativeOpenAIEndpoint(providerName, endpoint string) bool {

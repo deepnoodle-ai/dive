@@ -8,8 +8,8 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
-func TestStaticClassificationsPreserveProviderSemantics(t *testing.T) {
-	legacy, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeSonnet45)
+func TestPublishedModelControlsPreserveProviderSemantics(t *testing.T) {
+	legacy, ok := modelcaps.ControlsFor("anthropic", ModelClaudeSonnet45)
 	assert.True(t, ok)
 	assert.Equal(t, []llm.ReasoningEffort(nil), legacy.Reasoning.NativeEfforts)
 	assert.Equal(t, legacyEmulatedEfforts, legacy.Reasoning.EmulatedEfforts)
@@ -20,7 +20,7 @@ func TestStaticClassificationsPreserveProviderSemantics(t *testing.T) {
 	assert.True(t, legacy.Reasoning.CanDisableThinking)
 	assert.True(t, legacy.Temperature)
 
-	adaptive, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeOpus48)
+	adaptive, ok := modelcaps.ControlsFor("anthropic", ModelClaudeOpus48)
 	assert.True(t, ok)
 	assert.Equal(t, effortsFull, adaptive.Reasoning.NativeEfforts)
 	assert.Nil(t, adaptive.Reasoning.EmulatedEfforts)
@@ -29,43 +29,43 @@ func TestStaticClassificationsPreserveProviderSemantics(t *testing.T) {
 	assert.True(t, adaptive.Reasoning.CanDisableThinking)
 	assert.False(t, adaptive.Temperature)
 
-	nonReasoning, ok := modelcaps.ClassificationFor("anthropic", ModelClaude35Haiku20241022)
+	nonReasoning, ok := modelcaps.ControlsFor("anthropic", ModelClaude35Haiku20241022)
 	assert.True(t, ok)
 	assert.False(t, nonReasoning.Reasoning.CanDisableThinking)
 	assert.False(t, nonReasoning.VerifiedOn(modelcaps.VerificationAnthropicMessages))
 
-	alwaysThinking, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeFable5)
+	alwaysThinking, ok := modelcaps.ControlsFor("anthropic", ModelClaudeFable5)
 	assert.True(t, ok)
 	assert.False(t, alwaysThinking.Reasoning.CanDisableThinking)
 
-	mythos, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeMythos5)
+	mythos, ok := modelcaps.ControlsFor("anthropic", ModelClaudeMythos5)
 	assert.True(t, ok)
 	assert.False(t, mythos.VerifiedOn(modelcaps.VerificationAnthropicMessages))
 }
 
-func TestClassificationReturnsMutationIsolatedSnapshots(t *testing.T) {
-	classification, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeOpus48)
+func TestControlsForReturnsMutationIsolatedSnapshots(t *testing.T) {
+	controls, ok := modelcaps.ControlsFor("anthropic", ModelClaudeOpus48)
 	assert.True(t, ok)
-	classification.Reasoning.NativeEfforts[0] = llm.ReasoningEffortMax
-	classification.VerificationScopes[0] = modelcaps.VerificationGoogleVertexAI
+	controls.Reasoning.NativeEfforts[0] = llm.ReasoningEffortMax
+	controls.VerificationScopes[0] = modelcaps.VerificationGoogleVertexAI
 
-	again, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeOpus48)
+	again, ok := modelcaps.ControlsFor("anthropic", ModelClaudeOpus48)
 	assert.True(t, ok)
 	assert.Equal(t, llm.ReasoningEffortLow, again.Reasoning.NativeEfforts[0])
 	assert.Equal(t, modelcaps.VerificationAnthropicMessages, again.VerificationScopes[0])
 
-	legacy, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeSonnet45)
+	legacy, ok := modelcaps.ControlsFor("anthropic", ModelClaudeSonnet45)
 	assert.True(t, ok)
 	*legacy.Reasoning.Budget.Minimum = 1
 	legacy.Reasoning.EmulatedEfforts[0] = llm.ReasoningEffortMax
 
-	legacyAgain, ok := modelcaps.ClassificationFor("anthropic", ModelClaudeSonnet45)
+	legacyAgain, ok := modelcaps.ControlsFor("anthropic", ModelClaudeSonnet45)
 	assert.True(t, ok)
 	assert.Equal(t, minThinkingBudget, *legacyAgain.Reasoning.Budget.Minimum)
 	assert.Equal(t, llm.ReasoningEffortMinimal, legacyAgain.Reasoning.EmulatedEfforts[0])
 }
 
-func TestClassificationRejectsInheritedAndGatewayModelIDs(t *testing.T) {
+func TestControlsForRejectsInheritedAndGatewayModelIDs(t *testing.T) {
 	for _, model := range []string{
 		"claude-opus-4-9",
 		"openrouter/anthropic/claude-opus-4-8",
@@ -73,14 +73,14 @@ func TestClassificationRejectsInheritedAndGatewayModelIDs(t *testing.T) {
 		"us.anthropic.claude-opus-4-8-v1:0",
 		"publishers/anthropic/models/claude-opus-4-8",
 	} {
-		_, ok := modelcaps.ClassificationFor("anthropic", model)
+		_, ok := modelcaps.ControlsFor("anthropic", model)
 		assert.False(t, ok, "model %q", model)
-		_, ok = modelcaps.Explain("anthropic", llm.Config{Model: model})
+		_, ok = modelcaps.Preview("anthropic", llm.Config{Model: model})
 		assert.False(t, ok, "model %q", model)
 	}
 }
 
-func TestExplainMatchesConstructedAnthropicControls(t *testing.T) {
+func TestPreviewMatchesConstructedAnthropicControls(t *testing.T) {
 	tests := []struct {
 		name           string
 		config         llm.Config
@@ -176,12 +176,16 @@ func TestExplainMatchesConstructedAnthropicControls(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := tt.config
-			plan, ok := modelcaps.Explain("anthropic", config)
+			plan, ok := modelcaps.Preview("anthropic", config)
 			assert.True(t, ok)
 			assert.False(t, plan.Rejected)
 
 			var request Request
-			assert.NoError(t, New().applyRequestConfig(&request, &config))
+			effective, err := New().applyRequestConfig(&request, &config)
+			assert.NoError(t, err)
+			assert.NotNil(t, effective)
+			assert.True(t, effective.Equal(plan.Effective),
+				"controls reported for the response must match the previewed plan")
 			assertPlanMatchesAnthropicRequest(t, plan, config, &request)
 			assert.Equal(t, tt.effortAction, plan.Effort.Action)
 			assert.Equal(t, tt.effortAdjusted, plan.Effort.Adjusted)
@@ -193,7 +197,7 @@ func TestExplainMatchesConstructedAnthropicControls(t *testing.T) {
 	}
 }
 
-func TestExplainMatchesAnthropicControlRejections(t *testing.T) {
+func TestPreviewMatchesAnthropicControlRejections(t *testing.T) {
 	tests := []llm.Config{
 		{
 			Model: ModelClaudeOpus46, ReasoningBudget: intPointer(8000),
@@ -213,7 +217,7 @@ func TestExplainMatchesAnthropicControlRejections(t *testing.T) {
 
 	for i, config := range tests {
 		t.Run(config.Model+string(rune('a'+i)), func(t *testing.T) {
-			plan, ok := modelcaps.Explain("anthropic", config)
+			plan, ok := modelcaps.Preview("anthropic", config)
 			assert.True(t, ok)
 			assert.True(t, plan.Rejected)
 			assert.NotEqual(t, "", plan.RejectionReason)
@@ -225,7 +229,7 @@ func TestExplainMatchesAnthropicControlRejections(t *testing.T) {
 			assert.Nil(t, plan.Effective.Temperature)
 
 			var request Request
-			err := New().applyRequestConfig(&request, &config)
+			_, err := New().applyRequestConfig(&request, &config)
 			assert.Error(t, err)
 			assert.Equal(t, err.Error(), plan.RejectionReason)
 		})

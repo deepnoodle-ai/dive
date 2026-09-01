@@ -9,8 +9,8 @@ import (
 	"google.golang.org/genai"
 )
 
-func TestStaticClassificationsPreserveGoogleSemantics(t *testing.T) {
-	vertex, ok := modelcaps.ClassificationFor("google", ModelGemini37Flash)
+func TestPublishedModelControlsPreserveGoogleSemantics(t *testing.T) {
+	vertex, ok := modelcaps.ControlsFor("google", ModelGemini37Flash)
 	assert.True(t, ok)
 	assert.Equal(t, effortsLowThroughHigh, vertex.Reasoning.NativeEfforts)
 	assert.Nil(t, vertex.Reasoning.EmulatedEfforts)
@@ -23,7 +23,7 @@ func TestStaticClassificationsPreserveGoogleSemantics(t *testing.T) {
 	assert.True(t, vertex.VerifiedOn(modelcaps.VerificationGoogleVertexAI))
 	assert.False(t, vertex.VerifiedOn(modelcaps.VerificationGoogleGeminiAPI))
 
-	budgetOnly, ok := modelcaps.ClassificationFor("google", ModelGemini25Pro)
+	budgetOnly, ok := modelcaps.ControlsFor("google", ModelGemini25Pro)
 	assert.True(t, ok)
 	assert.Nil(t, budgetOnly.Reasoning.NativeEfforts)
 	assert.Equal(t, budgetEmulatedEfforts, budgetOnly.Reasoning.EmulatedEfforts)
@@ -33,28 +33,28 @@ func TestStaticClassificationsPreserveGoogleSemantics(t *testing.T) {
 	assert.False(t, budgetOnly.Reasoning.CanDisableThinking)
 	assert.True(t, budgetOnly.Temperature)
 
-	unverified, ok := modelcaps.ClassificationFor("google", ModelGemini3ProPreview)
+	unverified, ok := modelcaps.ControlsFor("google", ModelGemini3ProPreview)
 	assert.True(t, ok)
 	assert.Nil(t, unverified.Reasoning.Budget)
 	assert.Nil(t, unverified.VerificationScopes)
 
-	keepsTemperature, ok := modelcaps.ClassificationFor("google", ModelGemini35Flash)
+	keepsTemperature, ok := modelcaps.ControlsFor("google", ModelGemini35Flash)
 	assert.True(t, ok)
 	assert.True(t, keepsTemperature.Temperature)
-	omitsTemperature, ok := modelcaps.ClassificationFor("google", ModelGemini36Flash)
+	omitsTemperature, ok := modelcaps.ControlsFor("google", ModelGemini36Flash)
 	assert.True(t, ok)
 	assert.False(t, omitsTemperature.Temperature)
 }
 
-func TestClassificationReturnsMutationIsolatedSnapshots(t *testing.T) {
-	classification, ok := modelcaps.ClassificationFor("google", ModelGemini37Flash)
+func TestControlsForReturnsMutationIsolatedSnapshots(t *testing.T) {
+	controls, ok := modelcaps.ControlsFor("google", ModelGemini37Flash)
 	assert.True(t, ok)
-	classification.Reasoning.NativeEfforts[0] = llm.ReasoningEffortMax
-	*classification.Reasoning.Budget.Minimum = 100
-	*classification.Reasoning.Budget.Maximum = 200
-	classification.VerificationScopes[0] = modelcaps.VerificationGoogleGeminiAPI
+	controls.Reasoning.NativeEfforts[0] = llm.ReasoningEffortMax
+	*controls.Reasoning.Budget.Minimum = 100
+	*controls.Reasoning.Budget.Maximum = 200
+	controls.VerificationScopes[0] = modelcaps.VerificationGoogleGeminiAPI
 
-	again, ok := modelcaps.ClassificationFor("google", ModelGemini37Flash)
+	again, ok := modelcaps.ControlsFor("google", ModelGemini37Flash)
 	assert.True(t, ok)
 	assert.Equal(t, llm.ReasoningEffortLow, again.Reasoning.NativeEfforts[0])
 	assert.Equal(t, 1, *again.Reasoning.Budget.Minimum)
@@ -62,7 +62,7 @@ func TestClassificationReturnsMutationIsolatedSnapshots(t *testing.T) {
 	assert.Equal(t, modelcaps.VerificationGoogleVertexAI, again.VerificationScopes[0])
 }
 
-func TestClassificationRejectsInheritedAndDeploymentModelIDs(t *testing.T) {
+func TestControlsForRejectsInheritedAndDeploymentModelIDs(t *testing.T) {
 	for _, model := range []string{
 		"gemini-3.8-flash",
 		"publishers/google/models/gemini-3.7-flash",
@@ -70,14 +70,14 @@ func TestClassificationRejectsInheritedAndDeploymentModelIDs(t *testing.T) {
 		"models/models/gemini-3.7-flash",
 		"tunedModels/gemini-3.7-flash",
 	} {
-		_, ok := modelcaps.ClassificationFor("google", model)
+		_, ok := modelcaps.ControlsFor("google", model)
 		assert.False(t, ok, "model %q", model)
-		_, ok = modelcaps.Explain("google", llm.Config{Model: model})
+		_, ok = modelcaps.Preview("google", llm.Config{Model: model})
 		assert.False(t, ok, "model %q", model)
 	}
 }
 
-func TestExplainMatchesConstructedGoogleControls(t *testing.T) {
+func TestPreviewMatchesConstructedGoogleControls(t *testing.T) {
 	tests := []struct {
 		name           string
 		config         llm.Config
@@ -209,12 +209,16 @@ func TestExplainMatchesConstructedGoogleControls(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := tt.config
-			plan, ok := modelcaps.Explain("google", config)
+			plan, ok := modelcaps.Preview("google", config)
 			assert.True(t, ok)
 			assert.False(t, plan.Rejected)
 
 			var request Request
-			assert.NoError(t, New().applyRequestConfig(&request, &config))
+			effective, err := New().applyRequestConfig(&request, &config)
+			assert.NoError(t, err)
+			assert.NotNil(t, effective)
+			assert.True(t, effective.Equal(plan.Effective),
+				"controls reported for the response must match the previewed plan")
 			assertPlanMatchesGoogleRequest(t, plan, config, &request)
 			assert.Equal(t, tt.effortAction, plan.Effort.Action)
 			assert.Equal(t, tt.effortAdjusted, plan.Effort.Adjusted)

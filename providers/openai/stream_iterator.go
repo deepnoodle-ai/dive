@@ -28,6 +28,7 @@ type openaiStreamIterator struct {
 	responseID    string
 	responseModel string
 	finalUsage    *llm.Usage
+	controls      *llm.EffectiveControls
 
 	// Accumulators and state for current item being processed
 	// Keyed by OutputIndex (from OpenAI events)
@@ -138,10 +139,15 @@ type contentPartState struct {
 	BlockStopped bool
 }
 
-func newOpenAIStreamIterator(sdkStream StreamSource, config *llm.Config) *openaiStreamIterator {
+func newOpenAIStreamIterator(
+	sdkStream StreamSource,
+	config *llm.Config,
+	controls *llm.EffectiveControls,
+) *openaiStreamIterator {
 	return &openaiStreamIterator{
 		sdkStream:        sdkStream,
 		config:           config,
+		controls:         controls,
 		outputItemsState: make(map[int]*outputItemState),
 		eventQueue:       make([]*llm.Event, 0),
 	}
@@ -241,6 +247,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 				Type:  "message",
 				Role:  llm.Assistant,
 				Model: s.responseModel,
+				Usage: llm.Usage{Controls: s.cloneControls()},
 			},
 		})
 
@@ -707,6 +714,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			CacheReadInputTokens:     cacheReadInputTokens,
 			CacheCreationInputTokens: cacheCreationInputTokens,
 			ReasoningTokens:          int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
+			Controls:                 s.cloneControls(),
 		}
 		stopReason := determineStopReason(&data.Response)
 
@@ -737,6 +745,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			CacheReadInputTokens:     cacheReadInputTokens,
 			CacheCreationInputTokens: cacheCreationInputTokens,
 			ReasoningTokens:          int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
+			Controls:                 s.cloneControls(),
 		}
 		stopReason := determineStopReason(&data.Response)
 
@@ -815,4 +824,14 @@ func (s *openaiStreamIterator) closeDanglingBlocks() []*llm.Event {
 		events = append(events, s.outputItemsState[outputIdx].closeOpenBlocks()...)
 	}
 	return events
+}
+
+// cloneControls hands each usage frame its own copy of the controls this
+// request carried, so a consumer mutating one frame cannot reach the others.
+func (s *openaiStreamIterator) cloneControls() *llm.EffectiveControls {
+	if s.controls == nil {
+		return nil
+	}
+	controls := s.controls.Clone()
+	return &controls
 }

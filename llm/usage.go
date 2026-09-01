@@ -57,6 +57,15 @@ type Usage struct {
 	// Speed indicates which inference speed served the request, either "fast"
 	// or "standard". Populated by Anthropic when fast mode is requested.
 	Speed string `json:"speed,omitempty"`
+	// Controls records the reasoning and sampling controls Dive actually sent,
+	// so a caller can see that a request was clamped, translated, or dropped
+	// rather than served exactly as asked. Nil means the provider reports no
+	// effective controls for this request.
+	Controls *EffectiveControls `json:"controls,omitempty"`
+	// ControlsMixed distinguishes an aggregate whose requests were served with
+	// different controls from one that has no controls to report. Controls is
+	// nil in both cases; this flag says which, the way ServiceTier says "mixed".
+	ControlsMixed bool `json:"controls_mixed,omitempty"`
 	// Cost is the monetary cost of this usage. Providers attach an authoritative
 	// charge when they report one; otherwise Dive may estimate from cataloged
 	// list prices. Nil means cost is unknown, distinct from a known zero.
@@ -155,6 +164,11 @@ func (u *Usage) Copy() *Usage {
 		CacheCreationInputTokensUnavailable:     u.CacheCreationInputTokensUnavailable,
 		CostEstimateUnavailable:                 u.CostEstimateUnavailable,
 	}
+	cp.ControlsMixed = u.ControlsMixed
+	if u.Controls != nil {
+		controlsCopy := u.Controls.Clone()
+		cp.Controls = &controlsCopy
+	}
 	if len(u.ModalityTokens) > 0 {
 		cp.ModalityTokens = make(map[string]ModalityTokenUsage, len(u.ModalityTokens))
 		for modality, usage := range u.ModalityTokens {
@@ -205,6 +219,11 @@ func (u *Usage) Absorb(other *Usage) {
 	if other.Speed != "" {
 		u.Speed = other.Speed
 	}
+	if other.Controls != nil {
+		controlsCopy := other.Controls.Clone()
+		u.Controls = &controlsCopy
+		u.ControlsMixed = false
+	}
 	u.CacheCreationInputTokensUnavailable = u.CacheCreationInputTokensUnavailable || other.CacheCreationInputTokensUnavailable
 	u.InputModalityTokenDetailsIncomplete = u.InputModalityTokenDetailsIncomplete || other.InputModalityTokenDetailsIncomplete
 	u.OutputModalityTokenDetailsIncomplete = u.OutputModalityTokenDetailsIncomplete || other.OutputModalityTokenDetailsIncomplete
@@ -248,6 +267,23 @@ func (u *Usage) Add(other *Usage) {
 		u.ServiceTier = other.ServiceTier
 	} else if other.ServiceTier != "" && other.ServiceTier != u.ServiceTier {
 		u.ServiceTier = "mixed"
+	}
+	// Effective controls describe a single request, so an aggregate reports
+	// them only while the requests that reported any agreed. A disagreement is
+	// sticky: it clears the field and latches ControlsMixed rather than letting
+	// a later request speak for the sum, the same way ServiceTier stays "mixed".
+	u.ControlsMixed = u.ControlsMixed || other.ControlsMixed
+	switch {
+	case u.ControlsMixed:
+		u.Controls = nil
+	case u.Controls == nil:
+		if other.Controls != nil {
+			controlsCopy := other.Controls.Clone()
+			u.Controls = &controlsCopy
+		}
+	case other.Controls != nil && !u.Controls.Equal(*other.Controls):
+		u.Controls = nil
+		u.ControlsMixed = true
 	}
 	u.CacheCreationInputTokensUnavailable = u.CacheCreationInputTokensUnavailable || other.CacheCreationInputTokensUnavailable
 	u.InputModalityTokenDetailsIncomplete = u.InputModalityTokenDetailsIncomplete || other.InputModalityTokenDetailsIncomplete

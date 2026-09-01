@@ -15,7 +15,7 @@ func TestOpenAIReminderRendering(t *testing.T) {
 
 	t.Run("first party uses developer role", func(t *testing.T) {
 		provider := New(WithModel("gpt-5.4-mini"))
-		params, err := provider.buildRequestParams(&llm.Config{
+		params, _, err := provider.buildRequestParams(&llm.Config{
 			Messages: []*llm.Message{llm.NewUserTextMessage("continue"), message},
 		})
 		assert.NoError(t, err)
@@ -27,7 +27,7 @@ func TestOpenAIReminderRendering(t *testing.T) {
 
 	t.Run("embedded provider falls back to user", func(t *testing.T) {
 		provider := New(WithName("grok"), WithEndpoint("https://api.x.ai/v1"))
-		params, err := provider.buildRequestParams(&llm.Config{Messages: []*llm.Message{message}})
+		params, _, err := provider.buildRequestParams(&llm.Config{Messages: []*llm.Message{message}})
 		assert.NoError(t, err)
 		body, err := json.Marshal(params)
 		assert.NoError(t, err)
@@ -37,7 +37,7 @@ func TestOpenAIReminderRendering(t *testing.T) {
 	t.Run("custom endpoint from environment falls back to user", func(t *testing.T) {
 		t.Setenv("OPENAI_BASE_URL", "https://proxy.example.test/v1")
 		provider := New()
-		params, err := provider.buildRequestParams(&llm.Config{Messages: []*llm.Message{message}})
+		params, _, err := provider.buildRequestParams(&llm.Config{Messages: []*llm.Message{message}})
 		assert.NoError(t, err)
 		body, err := json.Marshal(params)
 		assert.NoError(t, err)

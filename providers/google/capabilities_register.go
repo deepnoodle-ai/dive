@@ -8,7 +8,7 @@ import (
 	"google.golang.org/genai"
 )
 
-type classificationSpec struct {
+type controlsSpec struct {
 	entryPrefix string
 	scopes      []modelcaps.VerificationScope
 }
@@ -22,7 +22,7 @@ var (
 	}
 )
 
-var googleClassificationSpecs = map[string]classificationSpec{
+var googleControlsSpecs = map[string]controlsSpec{
 	"gemini-3.7-flash":                   {entryPrefix: "gemini-3.7-flash", scopes: googleVertexAIScopes},
 	"gemini-3.6-flash":                   {entryPrefix: "gemini-3.6-flash", scopes: googleGeminiAPIScopes},
 	"gemini-3.5-flash":                   {entryPrefix: "gemini-3.5-flash", scopes: googleGeminiAPIScopes},
@@ -53,36 +53,36 @@ var budgetEmulatedEfforts = []llm.ReasoningEffort{
 type requestControlPlan struct {
 	thinking    *genai.ThinkingConfig
 	temperature *float64
-	explanation modelcaps.Plan
+	plan        modelcaps.Plan
 }
 
 func init() {
 	modelcaps.MustRegister("google", modelcaps.Resolver{
-		Classify: classifyModelControls,
-		Explain:  explainModelControls,
+		Controls: modelControlsFor,
+		Preview:  previewModelControls,
 	})
 }
 
-func classifyModelControls(model string) (modelcaps.Classification, bool) {
-	canonical := normalizeClassificationModel(model)
-	spec, ok := googleClassificationSpecs[canonical]
+func modelControlsFor(model string) (modelcaps.ModelControls, bool) {
+	canonical := normalizeControlsModel(model)
+	spec, ok := googleControlsSpecs[canonical]
 	if !ok {
-		return modelcaps.Classification{}, false
+		return modelcaps.ModelControls{}, false
 	}
 	entry, ok := lookupEntry(canonical)
 	if !ok || entry.prefix != spec.entryPrefix {
-		return modelcaps.Classification{}, false
+		return modelcaps.ModelControls{}, false
 	}
 
 	caps := entry.caps
-	reasoning := modelcaps.ReasoningClassification{
+	reasoning := modelcaps.ReasoningControls{
 		NativeEfforts:      caps.efforts,
 		AdaptiveThinking:   !caps.unverified && caps.maxBudget > 0,
 		CanDisableThinking: caps.canDisableThinking,
 	}
 	if !caps.unverified && caps.maxBudget > 0 {
 		minimum, maximum := caps.minBudget, caps.maxBudget
-		reasoning.Budget = &modelcaps.ReasoningBudgetClassification{
+		reasoning.Budget = &modelcaps.BudgetBounds{
 			Minimum: &minimum,
 			Maximum: &maximum,
 		}
@@ -94,7 +94,7 @@ func classifyModelControls(model string) (modelcaps.Classification, bool) {
 	if caps.unverified {
 		scopes = nil
 	}
-	return modelcaps.Classification{
+	return modelcaps.ModelControls{
 		Model:              canonical,
 		Temperature:        modelAcceptsTemperature(canonical),
 		Reasoning:          reasoning,
@@ -102,14 +102,14 @@ func classifyModelControls(model string) (modelcaps.Classification, bool) {
 	}, true
 }
 
-func explainModelControls(config llm.Config) (modelcaps.Plan, bool) {
-	classification, ok := classifyModelControls(config.Model)
+func previewModelControls(config llm.Config) (modelcaps.Plan, bool) {
+	controls, ok := modelControlsFor(config.Model)
 	if !ok {
 		return modelcaps.Plan{}, false
 	}
-	config.Model = classification.Model
+	config.Model = controls.Model
 	config.Logger = nil
-	return planRequestControls(config.Model, &config).explanation, true
+	return planRequestControls(config.Model, &config).plan, true
 }
 
 func planRequestControls(model string, config *llm.Config) requestControlPlan {
@@ -124,7 +124,7 @@ func planRequestControls(model string, config *llm.Config) requestControlPlan {
 	return requestControlPlan{
 		thinking:    thinking,
 		temperature: temperature,
-		explanation: projectControlPlan(model, config, thinking, temperature),
+		plan:        projectControlPlan(model, config, thinking, temperature),
 	}
 }
 
@@ -290,7 +290,7 @@ func thinkingEffort(thinking *genai.ThinkingConfig) (llm.ReasoningEffort, bool) 
 	}
 }
 
-func normalizeClassificationModel(model string) string {
+func normalizeControlsModel(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.TrimPrefix(model, "models/")
 }

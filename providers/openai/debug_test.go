@@ -58,7 +58,7 @@ func TestDebugRawStreamEvents(t *testing.T) {
 	}
 	config.Apply(opts...)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 
 	t.Logf("Model: %s", model)
@@ -66,7 +66,7 @@ func TestDebugRawStreamEvents(t *testing.T) {
 
 	ctx := testContext(t)
 	sdkStream := provider.client.Responses.NewStreaming(ctx, params)
-	iter := newOpenAIStreamIterator(sdkStream, config)
+	iter := newOpenAIStreamIterator(sdkStream, config, nil)
 	defer iter.Close()
 
 	for sdkStream.Next() {
@@ -164,7 +164,7 @@ func TestDebugNonStreamingResponse(t *testing.T) {
 	}
 	config.Apply(opts...)
 
-	params, err := provider.buildRequestParams(config)
+	params, _, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 
 	ctx := testContext(t)

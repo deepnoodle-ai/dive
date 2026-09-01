@@ -8,12 +8,12 @@ import (
 	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 )
 
-type classificationSpec struct {
+type controlsSpec struct {
 	entryPrefix string
 	scopes      []modelcaps.VerificationScope
 }
 
-var openAIClassificationSpecs = map[string]classificationSpec{
+var openAIControlsSpecs = map[string]controlsSpec{
 	"gpt-5.6":               {entryPrefix: "gpt-5.6", scopes: openAIVerificationScopes},
 	"gpt-5.6-sol":           {entryPrefix: "gpt-5.6-sol", scopes: openAIVerificationScopes},
 	"gpt-5.6-terra":         {entryPrefix: "gpt-5.6-terra", scopes: openAIVerificationScopes},
@@ -54,42 +54,42 @@ var openAIVerificationScopes = []modelcaps.VerificationScope{
 
 func init() {
 	modelcaps.MustRegister("openai", modelcaps.Resolver{
-		Classify: classifyModelControls,
-		Explain:  explainModelControls,
+		Controls: modelControlsFor,
+		Preview:  previewModelControls,
 	})
 }
 
-func classifyModelControls(model string) (modelcaps.Classification, bool) {
-	canonical := normalizeClassificationModel(model, "openai/")
-	spec, ok := openAIClassificationSpecs[canonical]
+func modelControlsFor(model string) (modelcaps.ModelControls, bool) {
+	canonical := normalizeControlsModel(model, "openai/")
+	spec, ok := openAIControlsSpecs[canonical]
 	if !ok {
-		return modelcaps.Classification{}, false
+		return modelcaps.ModelControls{}, false
 	}
 	entry, ok := modelcaps.LookupEntry("openai", canonical)
 	if !ok || entry.Prefix != spec.entryPrefix {
-		return modelcaps.Classification{}, false
+		return modelcaps.ModelControls{}, false
 	}
-	return modelcaps.Classification{
+	return modelcaps.ModelControls{
 		Model:       canonical,
 		Temperature: entry.Caps.Temperature,
-		Reasoning: modelcaps.ReasoningClassification{
+		Reasoning: modelcaps.ReasoningControls{
 			NativeEfforts: entry.Caps.Efforts,
 		},
 		VerificationScopes: spec.scopes,
 	}, true
 }
 
-func explainModelControls(config llm.Config) (modelcaps.Plan, bool) {
-	classification, ok := classifyModelControls(config.Model)
+func previewModelControls(config llm.Config) (modelcaps.Plan, bool) {
+	controls, ok := modelControlsFor(config.Model)
 	if !ok {
 		return modelcaps.Plan{}, false
 	}
-	config.Model = classification.Model
+	config.Model = controls.Model
 	config.Logger = nil
 	return responsescontrol.Plan("openai", config.Model, &config), true
 }
 
-func normalizeClassificationModel(model, qualifier string) string {
+func normalizeControlsModel(model, qualifier string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.TrimPrefix(model, qualifier)
 }

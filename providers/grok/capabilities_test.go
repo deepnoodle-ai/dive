@@ -17,7 +17,7 @@ import (
 // TestEveryCatalogModelHasCapabilities is the drift guard for the Grok table.
 // Four Grok models reject the reasoning parameter outright — including
 // grok-4.20-0309-reasoning, whose name suggests otherwise — so a new model must
-// be classified deliberately rather than inheriting a family default.
+// be mapped deliberately rather than inheriting a family default.
 func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 	for _, model := range Catalog().Models {
 		if model.Kind != "" && model.Kind != "text" {
@@ -28,8 +28,8 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			spec, declared := grokClassificationSpecs[id]
-			assert.True(t, declared, "model %q (%s) has no exact public classification mapping", id, model.GoName)
+			spec, declared := grokControlsSpecs[id]
+			assert.True(t, declared, "model %q (%s) has no published model-controls mapping", id, model.GoName)
 
 			entry, found := modelcaps.LookupEntry("grok", id)
 			assert.True(t, found,
@@ -38,33 +38,33 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			assert.Equal(t, spec.entryPrefix, entry.Prefix,
 				"model %q must name its intended capability entry, not merely match a prefix", id)
 
-			classification, classified := modelcaps.ClassificationFor("grok", " X-AI/"+strings.ToUpper(id)+" ")
-			assert.True(t, classified)
-			assert.Equal(t, id, classification.Model)
-			assert.True(t, classification.VerifiedOn(modelcaps.VerificationXAIResponses))
+			controls, known := modelcaps.ControlsFor("grok", " X-AI/"+strings.ToUpper(id)+" ")
+			assert.True(t, known)
+			assert.Equal(t, id, controls.Model)
+			assert.True(t, controls.VerifiedOn(modelcaps.VerificationXAIResponses))
 
-			plan, explained := modelcaps.Explain("GROK", llm.Config{Model: " X-AI/" + strings.ToUpper(id) + " "})
-			assert.True(t, explained)
+			plan, previewed := modelcaps.Preview("GROK", llm.Config{Model: " X-AI/" + strings.ToUpper(id) + " "})
+			assert.True(t, previewed)
 			assert.Equal(t, id, plan.Model)
 		})
 	}
 }
 
-func TestClassificationRejectsInheritedAndGatewayModelIDs(t *testing.T) {
+func TestControlsForRejectsInheritedAndGatewayModelIDs(t *testing.T) {
 	for _, model := range []string{
 		"grok-4.7",
 		"openrouter/x-ai/grok-4.6",
 		"x-ai/x-ai/grok-4.6",
 		"deployment/grok-4.6",
 	} {
-		_, ok := modelcaps.ClassificationFor("grok", model)
+		_, ok := modelcaps.ControlsFor("grok", model)
 		assert.False(t, ok, "model %q", model)
-		_, ok = modelcaps.Explain("grok", llm.Config{Model: model})
+		_, ok = modelcaps.Preview("grok", llm.Config{Model: model})
 		assert.False(t, ok, "model %q", model)
 	}
 }
 
-func TestExplainMatchesConstructedResponsesControls(t *testing.T) {
+func TestPreviewMatchesConstructedResponsesControls(t *testing.T) {
 	temperature := 0.4
 	budget := 4096
 	tests := []struct {
@@ -102,7 +102,7 @@ func TestExplainMatchesConstructedResponsesControls(t *testing.T) {
 				Thinking:        llm.ThinkingTypeAdaptive,
 				Temperature:     &temperature,
 			}
-			plan, ok := modelcaps.Explain("grok", config)
+			plan, ok := modelcaps.Preview("grok", config)
 			assert.True(t, ok)
 
 			provider := New(
@@ -111,7 +111,7 @@ func TestExplainMatchesConstructedResponsesControls(t *testing.T) {
 				WithModel(tt.model),
 				WithMaxRetries(0),
 			)
-			_, err := provider.Generate(context.Background(),
+			response, err := provider.Generate(context.Background(),
 				llm.WithMessages(llm.NewUserTextMessage("hello")),
 				llm.WithReasoningEffort(tt.effort),
 				llm.WithReasoningBudget(budget),
@@ -120,6 +120,11 @@ func TestExplainMatchesConstructedResponsesControls(t *testing.T) {
 			)
 			assert.NoError(t, err)
 			request := <-captured
+
+			// The response reports the same controls the dry run predicted,
+			// so a caller can see a clamp without wiring a logger.
+			assert.NotNil(t, response.Usage.Controls)
+			assert.True(t, response.Usage.Controls.Equal(plan.Effective))
 
 			assert.Equal(t, string(tt.want), request.Reasoning.Effort)
 			assert.Equal(t, tt.want, plan.Effective.ReasoningEffort)

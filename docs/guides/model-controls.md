@@ -1,13 +1,22 @@
-# Model Control Classification and Planning
+# Model Controls
 
-Dive can describe which reasoning and temperature controls it supports for an
-exact provider model, and it can explain how one concrete `llm.Config` would be
-translated before a request is sent.
+Dive clamps, translates, and drops reasoning and sampling controls a model
+cannot take, and the request succeeds. That keeps one set of options useful
+when it is pointed at a different model, but it means the request you sent is
+not always the request you wrote. The `modelcaps` package answers the three
+questions that follow from that, in the order they arise:
 
-Use these APIs when publishing a strict model catalog or validating controls at
-an admission boundary. Normal Dive requests remain permissive: known models are
-clamped or translated when needed, while unknown and custom models retain their
-existing pass-through behavior.
+| Question                            | API                     |
+| ----------------------------------- | ----------------------- |
+| What does this exact model take?    | `modelcaps.ControlsFor` |
+| What would Dive send for my config? | `modelcaps.Preview`     |
+| What did Dive actually send?        | `llm.Usage.Controls`    |
+
+`ControlsFor` and `Preview` are for publishing a model catalog or validating
+controls at an admission boundary. `Usage.Controls` is for every request: it is
+how a caller sees a clamp without wiring a logger. Normal Dive requests remain
+permissive — known models are clamped or translated when needed, and unknown or
+custom models retain their existing pass-through behavior.
 
 ## Link the providers you inspect
 
@@ -43,21 +52,18 @@ for _, provider := range expected {
 Provider names are trimmed and compared case-insensitively. Dive's canonical
 xAI provider name is `grok`, not `xai`.
 
-## Classify an exact catalog model
+## What an exact model takes
 
-`ClassificationFor` returns independent facts for an exact model in the
-linked provider's generated catalog:
+`ControlsFor` returns independent facts for an exact model in the linked
+provider's generated catalog:
 
 ```go
-classification, ok := modelcaps.ClassificationFor(
-    "google",
-    "gemini-3.7-flash",
-)
+controls, ok := modelcaps.ControlsFor("google", "gemini-3.7-flash")
 if !ok {
-    return errors.New("model is not classified")
+    return errors.New("model has no published controls")
 }
 
-if !classification.SupportsNativeEffort(llm.ReasoningEffortHigh) {
+if !controls.SupportsNativeEffort(llm.ReasoningEffortHigh) {
     return errors.New("high effort is not natively supported")
 }
 ```
@@ -76,8 +82,8 @@ accepted:
 The boundary is deliberately conservative. OpenRouter paths, Bedrock IDs,
 Vertex publisher or deployment paths, fine-tunes, arbitrary gateway IDs, and
 unreleased point releases return `ok=false`. A runtime prefix matcher may still
-handle those values permissively; prefix inheritance is not classification
-evidence.
+handle those values permissively; prefix inheritance is not evidence about a
+model.
 
 ### Reasoning fields
 
@@ -94,19 +100,19 @@ evidence.
 - `Temperature` reports whether temperature is meaningful when no other
   requested control suppresses it.
 
-These fields are static facts, not a compatibility matrix. Use `Explain` for
+These fields are static facts, not a compatibility matrix. Use `Preview` for
 interactions among effort, budget, thinking, temperature, maximum output,
 prefill, tool choice, and provider features.
 
 ## Require evidence for the endpoint you use
 
 `VerificationScopes` identifies the endpoint and API surface on which the
-entire exact classification snapshot was live-probed. A strict publisher checks
-the same surface it will call:
+entire exact control set was live-probed. A strict publisher checks the same
+surface it will call:
 
 ```go
-if !classification.VerifiedOn(modelcaps.VerificationGoogleVertexAI) {
-    return errors.New("classification was not verified on Vertex AI")
+if !controls.VerifiedOn(modelcaps.VerificationGoogleVertexAI) {
+    return errors.New("controls were not verified on Vertex AI")
 }
 ```
 
@@ -120,8 +126,8 @@ Available built-in scopes are:
 
 Evidence does not transfer between scopes. For example,
 `gemini-3.7-flash` is verified on Vertex AI and does not claim public Gemini API
-verification. An empty scope list means the model is deliberately classified
-but the snapshot is historical, inferred, or otherwise not live-probed.
+verification. An empty scope list means the model is deliberately mapped but the
+snapshot is historical, inferred, or otherwise not live-probed.
 
 A scope is not proof of current account entitlement, regional availability,
 freshness, or successful serving. Record module versions with the published
@@ -137,11 +143,11 @@ if info, ok := debug.ReadBuildInfo(); ok {
 }
 ```
 
-## Explain a concrete configuration
+## What Dive would send
 
-`Explain` runs the same provider-private control planner used by request
+`Preview` runs the same provider-private control planner used by request
 construction. It performs no network I/O and does not mutate the supplied
-configuration:
+configuration, so it is the way to reject a request before it costs money:
 
 ```go
 maxTokens := 4096
@@ -154,9 +160,9 @@ config := llm.Config{
     ReasoningBudget: &budget,
 }
 
-plan, ok := modelcaps.Explain("anthropic", config)
+plan, ok := modelcaps.Preview("anthropic", config)
 if !ok {
-    return errors.New("model is not classified")
+    return errors.New("model has no published controls")
 }
 if plan.Rejected {
     return errors.New(plan.RejectionReason)
@@ -194,6 +200,52 @@ with a prefilled assistant response or a forced tool choice. Other provider
 validation errors outside the model-control contract are still returned by
 normal request construction.
 
+## What Dive actually sent
+
+Anthropic, Google, OpenAI, and Grok report the controls the request carried on
+`Response.Usage.Controls`, beside `Usage.Speed` and `Usage.ServiceTier`. The
+value is an `llm.EffectiveControls` — the same type `Plan.Effective` carries,
+produced by the same planner — so a caller can compare what it asked for
+against what was served without parsing a provider payload:
+
+```go
+response, err := provider.Generate(ctx,
+    llm.WithMessages(llm.NewUserTextMessage("hello")),
+    llm.WithReasoningEffort(llm.ReasoningEffortMedium),
+    llm.WithTemperature(0.7),
+)
+if err != nil {
+    return err
+}
+
+if served := response.Usage.Controls; served != nil {
+    if served.ReasoningEffort != llm.ReasoningEffortMedium {
+        log.Printf("effort was not served natively: budget=%v thinking=%q",
+            served.ReasoningBudget, served.Thinking)
+    }
+    if served.Temperature == nil {
+        log.Print("temperature was dropped for this request")
+    }
+}
+```
+
+A zero-valued field means Dive sent nothing for that control: on Sonnet 4.5 a
+requested `medium` effort arrives as `ReasoningEffort: ""` with a populated
+`ReasoningBudget`, because that model has no native effort parameter. A nil
+`Controls` means the provider reports no effective controls at all — providers
+outside the four above do not populate it.
+
+Streamed responses report the same value. The controls ride on the usage frames,
+so `llm.ResponseAccumulator` carries them onto the accumulated response.
+
+`Usage.Controls` survives aggregation only while the requests agree.
+`Usage.Absorb` supersedes, matching cumulative streaming frames. `Usage.Add`
+keeps the value while every contributing request that reported controls reported
+the same ones; on a disagreement it clears the value and sets
+`Usage.ControlsMixed`, which stays set, so a later agreeing request cannot make
+one turn's controls stand for a whole run. Check `ControlsMixed` to tell a mixed
+aggregate from one that simply has nothing to report.
+
 ## Native support versus portable emulation
 
 Do not advertise `EmulatedEfforts` as native provider support. Emulation keeps a
@@ -201,27 +253,29 @@ portable Dive configuration useful across providers, but token-budget mappings
 do not guarantee identical effort semantics.
 
 Custom `llm.ReasoningEffort` strings are a permissive runtime compatibility
-feature. They are intentionally absent from strict static classification even
-when a provider's runtime fallback forwards or maps them.
+feature. They are intentionally absent from the published control set even when
+a provider's runtime fallback forwards or maps them.
 
 ## Snapshot and comparison behavior
 
-Classification and plan values are defensive snapshots. Callers may mutate
-slices and pointers without changing provider tables, request behavior, or later
-lookups.
+`ControlsFor`, `Preview`, and `Usage.Controls` all return defensive snapshots.
+Callers may mutate slices and pointers without changing provider tables, request
+behavior, later lookups, or another usage frame.
 
 The public structs contain an unexported compatibility sentinel, so configure
 `go-cmp` when comparing them outside Dive:
 
 ```go
 diff := cmp.Diff(want, got, cmpopts.IgnoreUnexported(
-    modelcaps.ReasoningBudgetClassification{},
-    modelcaps.ReasoningClassification{},
-    modelcaps.Classification{},
+    modelcaps.BudgetBounds{},
+    modelcaps.ReasoningControls{},
+    modelcaps.ModelControls{},
     modelcaps.ControlDecision{},
-    modelcaps.EffectiveControls{},
+    llm.EffectiveControls{},
     modelcaps.Plan{},
 ))
 ```
 
 A bare `cmp.Diff` will panic when it encounters those unexported fields.
+`llm.EffectiveControls` also has an `Equal` method, which is usually what you
+want for comparing a served control set against a previewed one.

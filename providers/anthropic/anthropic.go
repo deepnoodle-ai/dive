@@ -73,7 +73,8 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	config.Apply(opts...)
 
 	var request Request
-	if err := p.applyRequestConfig(&request, config); err != nil {
+	controls, err := p.applyRequestConfig(&request, config)
+	if err != nil {
 		return nil, err
 	}
 	rendered, err := p.renderReminders(config.Messages, request.Model)
@@ -140,7 +141,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
-	finalizeUsage(config, request.Model, &result.Usage)
+	finalizeUsage(config, request.Model, controls, &result.Usage)
 	if config.Prefill != "" {
 		if err := addPrefill(result.Content, config.Prefill, config.PrefillClosingTag); err != nil {
 			return nil, err
@@ -168,7 +169,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	config.Apply(opts...)
 
 	var request Request
-	if err := p.applyRequestConfig(&request, config); err != nil {
+	controls, err := p.applyRequestConfig(&request, config)
+	if err != nil {
 		return nil, err
 	}
 	rendered, err := p.renderReminders(config.Messages, request.Model)
@@ -227,6 +229,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 				WithSSECallback(config.SSECallback),
 			prefill:           config.Prefill,
 			prefillClosingTag: config.PrefillClosingTag,
+			controls:          controls,
 		}, nil
 	})
 	return stream, nil
@@ -477,12 +480,13 @@ func logCacheThrash(config *llm.Config, usage *llm.Usage) {
 }
 
 // finalizeUsage runs post-response usage bookkeeping for the non-streaming
-// path: it logs cache thrash and attaches an estimated cost from registered
-// model pricing. Fast mode is detected from the served speed or the request so
+// path: it logs cache thrash, records the controls the request actually
+// carried, and attaches an estimated cost from registered model pricing. Fast mode is detected from the served speed or the request so
 // premium fast-mode pricing is used when applicable. (Streamed responses get
 // the same cost treatment centrally via llm.ResponseAccumulator.)
-func finalizeUsage(config *llm.Config, model string, usage *llm.Usage) {
+func finalizeUsage(config *llm.Config, model string, controls *llm.EffectiveControls, usage *llm.Usage) {
 	logCacheThrash(config, usage)
+	usage.Controls = controls
 	fast := usage.Speed == string(llm.SpeedFast) ||
 		config.Speed == llm.SpeedFast ||
 		config.IsFeatureEnabled(FeatureFastMode)
@@ -633,7 +637,10 @@ func placeCacheAnchors(messages []*llm.Message, maxAnchors int, ttl string) {
 	}
 }
 
-func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
+// applyRequestConfig fills the wire request and returns the reasoning and
+// sampling controls it resolved, so the caller can report them on the response
+// beside the token counts.
+func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) (*llm.EffectiveControls, error) {
 	if model := config.Model; model != "" {
 		req.Model = model
 	} else {
@@ -647,11 +654,12 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 
 	controls := planRequestControls(req.Model, req.MaxTokens, config)
 	if controls.err != nil {
-		return controls.err
+		return nil, controls.err
 	}
 	req.Thinking = controls.thinking
 	req.OutputConfig = controls.outputConfig
 	req.Temperature = controls.temperature
+	effective := controls.plan.Effective.Clone()
 
 	if config.Speed != "" {
 		req.Speed = string(config.Speed)
@@ -704,7 +712,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	if config.SystemPrompt != "" {
 		req.System = []*SystemBlock{{Type: "text", Text: config.SystemPrompt}}
 	}
-	return nil
+	return &effective, nil
 }
 
 // defaultThinkingBudget is the budget used when a caller asks for thinking

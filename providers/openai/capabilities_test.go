@@ -10,9 +10,9 @@ import (
 )
 
 // TestEveryCatalogModelHasCapabilities is the drift guard for the OpenAI table:
-// adding a model to catalog.json without classifying its reasoning and
+// adding a model to catalog.json without recording its reasoning and
 // temperature support fails here rather than at runtime against the API. An
-// entry marked Unverified counts as classified — the point is that someone
+// entry marked Unverified counts as recorded — the point is that someone
 // decided, not that every model is gated.
 func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 	for _, model := range Catalog().Models {
@@ -24,8 +24,8 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			continue // alias-only entries carry no id of their own
 		}
 		t.Run(id, func(t *testing.T) {
-			spec, declared := openAIClassificationSpecs[id]
-			assert.True(t, declared, "model %q (%s) has no exact public classification mapping", id, model.GoName)
+			spec, declared := openAIControlsSpecs[id]
+			assert.True(t, declared, "model %q (%s) has no published model-controls mapping", id, model.GoName)
 
 			entry, found := modelcaps.LookupEntry("openai", id)
 			assert.True(t, found,
@@ -35,33 +35,33 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 			assert.Equal(t, spec.entryPrefix, entry.Prefix,
 				"model %q must name its intended capability entry, not merely match a prefix", id)
 
-			classification, classified := modelcaps.ClassificationFor("openai", " OPENAI/"+strings.ToUpper(id)+" ")
-			assert.True(t, classified)
-			assert.Equal(t, id, classification.Model)
-			assert.Equal(t, !entry.Unverified, classification.VerifiedOn(modelcaps.VerificationOpenAIResponses))
+			controls, known := modelcaps.ControlsFor("openai", " OPENAI/"+strings.ToUpper(id)+" ")
+			assert.True(t, known)
+			assert.Equal(t, id, controls.Model)
+			assert.Equal(t, !entry.Unverified, controls.VerifiedOn(modelcaps.VerificationOpenAIResponses))
 
-			plan, explained := modelcaps.Explain("OPENAI", llm.Config{Model: " OPENAI/" + strings.ToUpper(id) + " "})
-			assert.True(t, explained)
+			plan, previewed := modelcaps.Preview("OPENAI", llm.Config{Model: " OPENAI/" + strings.ToUpper(id) + " "})
+			assert.True(t, previewed)
 			assert.Equal(t, id, plan.Model)
 		})
 	}
 }
 
-func TestClassificationRejectsInheritedAndGatewayModelIDs(t *testing.T) {
+func TestControlsForRejectsInheritedAndGatewayModelIDs(t *testing.T) {
 	for _, model := range []string{
 		"gpt-5.7",
 		"openrouter/openai/gpt-5.6",
 		"openai/openai/gpt-5.6",
 		"ft:gpt-5.6:example",
 	} {
-		_, ok := modelcaps.ClassificationFor("openai", model)
+		_, ok := modelcaps.ControlsFor("openai", model)
 		assert.False(t, ok, "model %q", model)
-		_, ok = modelcaps.Explain("openai", llm.Config{Model: model})
+		_, ok = modelcaps.Preview("openai", llm.Config{Model: model})
 		assert.False(t, ok, "model %q", model)
 	}
 }
 
-func TestExplainMatchesConstructedResponsesControls(t *testing.T) {
+func TestPreviewMatchesConstructedResponsesControls(t *testing.T) {
 	temperature := 0.4
 	budget := 4096
 	tests := []struct {
@@ -84,12 +84,15 @@ func TestExplainMatchesConstructedResponsesControls(t *testing.T) {
 				Thinking:        llm.ThinkingTypeAdaptive,
 				Temperature:     &temperature,
 			}
-			plan, ok := modelcaps.Explain("openai", config)
+			plan, ok := modelcaps.Preview("openai", config)
 			assert.True(t, ok)
 
 			provider := New(WithAPIKey("test"), WithModel(tt.model))
-			params, err := provider.buildRequestParams(&config)
+			params, effective, err := provider.buildRequestParams(&config)
 			assert.NoError(t, err)
+			assert.NotNil(t, effective)
+			assert.True(t, effective.Equal(plan.Effective),
+				"controls reported for the response must match the previewed plan")
 			assert.Equal(t, string(tt.want), string(params.Reasoning.Effort))
 			assert.Equal(t, tt.want, plan.Effective.ReasoningEffort)
 			assert.Equal(t, modelcaps.ControlOmitted, plan.Budget.Action)

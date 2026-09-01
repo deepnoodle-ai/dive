@@ -16,6 +16,7 @@ type StreamIterator struct {
 	currentEvent      *llm.Event
 	prefill           string
 	prefillClosingTag string
+	controls          *llm.EffectiveControls
 	closeOnce         sync.Once
 }
 
@@ -46,6 +47,20 @@ func (s *StreamIterator) Event() *llm.Event {
 func (s *StreamIterator) processEvent(event *llm.Event) *llm.Event {
 	if event.Type == "" {
 		return nil
+	}
+
+	// Report the controls this request actually carried on every usage-bearing
+	// frame: message_start seeds the accumulated response wholesale, and later
+	// usage frames supersede it.
+	if s.controls != nil {
+		if event.Message != nil {
+			controls := s.controls.Clone()
+			event.Message.Usage.Controls = &controls
+		}
+		if event.Usage != nil {
+			controls := s.controls.Clone()
+			event.Usage.Controls = &controls
+		}
 	}
 
 	// Apply prefill logic for the first text content block

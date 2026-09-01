@@ -8,12 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Exact model-control classification and network-free request planning.**
-  Provider packages can now register static reasoning, thinking, budget, and
-  temperature classifications in `providers/modelcaps`, including
-  endpoint-scoped verification evidence. Catalog and admission consumers can
-  use `ClassificationFor`, `Explain`, and `Providers` without copying provider
-  capability tables or request-combination rules.
+- **Published model controls and network-free request previews.** Provider
+  packages register exact per-model reasoning, thinking, budget, and
+  temperature controls in `providers/modelcaps`, with endpoint-scoped
+  verification evidence. Catalog and admission consumers use `ControlsFor`,
+  `Preview`, and `Providers` instead of copying provider capability tables or
+  request-combination rules.
+- **`llm.Usage.Controls` reports the controls a request actually carried.**
+  Anthropic, Google, OpenAI, and Grok attach an `llm.EffectiveControls` — the
+  same value `Plan.Effective` carries — to every response and stream, so a
+  clamped effort, an emulated budget, or a dropped temperature is visible
+  without wiring a logger. Aggregated usage reports controls only while the
+  requests agree, and sets `Usage.ControlsMixed` when they do not.
 
 ## [1.26.0] - 2026-08-22
 

@@ -8,7 +8,7 @@ import (
 	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 )
 
-type classificationSpec struct {
+type controlsSpec struct {
 	entryPrefix string
 	scopes      []modelcaps.VerificationScope
 }
@@ -17,7 +17,7 @@ var anthropicVerificationScopes = []modelcaps.VerificationScope{
 	modelcaps.VerificationAnthropicMessages,
 }
 
-var anthropicClassificationSpecs = map[string]classificationSpec{
+var anthropicControlsSpecs = map[string]controlsSpec{
 	"claude-3-5-haiku-20241022":  {entryPrefix: "claude-3-5-haiku"},
 	"claude-3-5-sonnet-20241022": {entryPrefix: "claude-3-5-sonnet"},
 	"claude-3-7-sonnet-20250219": {entryPrefix: "claude-3-7-sonnet"},
@@ -53,37 +53,37 @@ type requestControlPlan struct {
 	thinking     *Thinking
 	outputConfig *OutputConfig
 	temperature  *float64
-	explanation  modelcaps.Plan
+	plan         modelcaps.Plan
 	err          error
 }
 
 func init() {
 	modelcaps.MustRegister("anthropic", modelcaps.Resolver{
-		Classify: classifyModelControls,
-		Explain:  explainModelControls,
+		Controls: modelControlsFor,
+		Preview:  previewModelControls,
 	})
 }
 
-func classifyModelControls(model string) (modelcaps.Classification, bool) {
-	canonical := normalizeClassificationModel(model)
-	spec, ok := anthropicClassificationSpecs[canonical]
+func modelControlsFor(model string) (modelcaps.ModelControls, bool) {
+	canonical := normalizeControlsModel(model)
+	spec, ok := anthropicControlsSpecs[canonical]
 	if !ok {
-		return modelcaps.Classification{}, false
+		return modelcaps.ModelControls{}, false
 	}
 	entry, ok := lookupCapabilityEntry(canonical)
 	if !ok || entry.prefix != spec.entryPrefix {
-		return modelcaps.Classification{}, false
+		return modelcaps.ModelControls{}, false
 	}
 
 	caps := entry.caps
-	reasoning := modelcaps.ReasoningClassification{
+	reasoning := modelcaps.ReasoningControls{
 		NativeEfforts:      caps.efforts,
 		AdaptiveThinking:   caps.adaptive,
 		CanDisableThinking: canDisableThinking(caps),
 	}
 	if caps.manualBudget {
 		minimum := minThinkingBudget
-		reasoning.Budget = &modelcaps.ReasoningBudgetClassification{Minimum: &minimum}
+		reasoning.Budget = &modelcaps.BudgetBounds{Minimum: &minimum}
 	}
 	if caps.reasoningKind() == reasoningLegacyBudget {
 		reasoning.EmulatedEfforts = legacyEmulatedEfforts
@@ -92,7 +92,7 @@ func classifyModelControls(model string) (modelcaps.Classification, bool) {
 	if entry.notLiveProbed {
 		scopes = nil
 	}
-	return modelcaps.Classification{
+	return modelcaps.ModelControls{
 		Model:              canonical,
 		Temperature:        caps.temperature,
 		Reasoning:          reasoning,
@@ -100,19 +100,19 @@ func classifyModelControls(model string) (modelcaps.Classification, bool) {
 	}, true
 }
 
-func explainModelControls(config llm.Config) (modelcaps.Plan, bool) {
-	classification, ok := classifyModelControls(config.Model)
+func previewModelControls(config llm.Config) (modelcaps.Plan, bool) {
+	controls, ok := modelControlsFor(config.Model)
 	if !ok {
 		return modelcaps.Plan{}, false
 	}
-	config.Model = classification.Model
+	config.Model = controls.Model
 	config.Logger = nil
 	maxTokens := config.MaxTokens
 	if maxTokens == nil {
 		value := DefaultMaxTokens
 		maxTokens = &value
 	}
-	return planRequestControls(config.Model, maxTokens, &config).explanation, true
+	return planRequestControls(config.Model, maxTokens, &config).plan, true
 }
 
 func planRequestControls(model string, maxTokens *int, config *llm.Config) requestControlPlan {
@@ -141,13 +141,13 @@ func planRequestControls(model string, maxTokens *int, config *llm.Config) reque
 		thinking:     controlRequest.Thinking,
 		outputConfig: controlRequest.OutputConfig,
 		temperature:  controlRequest.Temperature,
-		explanation:  projectControlPlan(model, config, &controlRequest),
+		plan:         projectControlPlan(model, config, &controlRequest),
 	}
 }
 
 func rejectedControlPlan(model string, err error) requestControlPlan {
 	return requestControlPlan{
-		explanation: modelcaps.Plan{
+		plan: modelcaps.Plan{
 			Model:           model,
 			Rejected:        true,
 			RejectionReason: err.Error(),
@@ -296,7 +296,7 @@ func canDisableThinking(caps modelCapabilities) bool {
 	return hasReasoning && (!caps.thinkingOnByDefault || caps.explicitDisable)
 }
 
-func normalizeClassificationModel(model string) string {
+func normalizeControlsModel(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.TrimPrefix(model, "anthropic/")
 }

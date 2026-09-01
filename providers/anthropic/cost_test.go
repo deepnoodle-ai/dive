@@ -31,7 +31,7 @@ func TestFinalizeUsageAttachesCost(t *testing.T) {
 		CacheReadInputTokens:     1_000_000,
 		CacheCreationInputTokens: 1_000_000,
 	}
-	finalizeUsage(&llm.Config{}, ModelClaudeOpus48, usage)
+	finalizeUsage(&llm.Config{}, ModelClaudeOpus48, nil, usage)
 	assert.NotNil(t, usage.Cost, "finalizeUsage should attach cost for a known model")
 	// 5 (in) + 25 (out) + 0.5 (read) + 6.25 (write)
 	assert.Equal(t, 36.75, usage.Cost.Total)
@@ -40,14 +40,14 @@ func TestFinalizeUsageAttachesCost(t *testing.T) {
 
 func TestFinalizeUsageUsesFastPricingWhenServedFast(t *testing.T) {
 	usage := &llm.Usage{InputTokens: 1_000_000, Speed: string(llm.SpeedFast)}
-	finalizeUsage(&llm.Config{}, ModelClaudeOpus48, usage)
+	finalizeUsage(&llm.Config{}, ModelClaudeOpus48, nil, usage)
 	assert.NotNil(t, usage.Cost)
 	assert.Equal(t, 10.0, usage.Cost.Total, "fast speed should bill at fast-mode input price")
 }
 
 func TestFinalizeUsageUnknownModelLeavesCostNil(t *testing.T) {
 	usage := &llm.Usage{InputTokens: 1_000_000}
-	finalizeUsage(&llm.Config{}, "totally-unknown-model", usage)
+	finalizeUsage(&llm.Config{}, "totally-unknown-model", nil, usage)
 	assert.Nil(t, usage.Cost, "unknown model should leave cost unknown (nil)")
 }
 

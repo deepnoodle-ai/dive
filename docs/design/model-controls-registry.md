@@ -1,8 +1,9 @@
-# Model Control Classification and Planning Registry
+# Model Controls Registry
 
 **Status:** Implemented
 **Date:** 2026-08-22
-**Audience:** Dive maintainers and integrators that publish model catalogs
+**Audience:** Dive maintainers and integrators that publish model catalogs or
+report served controls
 **Target:** Next compatible minor release after v1.26.0
 
 ## Summary
@@ -13,25 +14,42 @@ temperature, and explicit thinking disablement. OpenAI and Grok expose part of
 that data through `providers/modelcaps`; Anthropic and Google keep it private to
 their provider packages.
 
-This proposal adds two provider-neutral, read-only views in
-`providers/modelcaps`:
+Dive is also lenient about those controls: it clamps an unsupported effort,
+turns an effort into a budget, represents a manual budget as adaptive thinking,
+and drops temperature a request would reject — and the request succeeds. That
+is deliberate, and it stays. What it lacks is honesty: today the only trace is a
+`Logger.Warn`, so a consumer without a wired logger gets a silent downgrade.
 
-1. `ClassificationFor` returns independent, static facts suitable for catalog
+This proposal adds three provider-neutral, read-only views of the same planner,
+named for where they sit in time:
+
+| Question                              | API                     |
+| ------------------------------------- | ----------------------- |
+| What does this exact model take?      | `modelcaps.ControlsFor` |
+| What would Dive send for this config? | `modelcaps.Preview`     |
+| What did Dive send?                   | `llm.Usage.Controls`    |
+
+1. `ControlsFor` returns independent, static facts suitable for catalog
    display.
-2. `Explain` performs a network-free dry run of a concrete `llm.Config` and
+2. `Preview` performs a network-free dry run of a concrete `llm.Config` and
    reports which controls would be applied, adjusted, emulated, or omitted, and
    separately reports whether the request would be rejected.
+3. `Usage.Controls` reports the controls a completed request actually carried,
+   beside the existing `Usage.Speed` and `Usage.ServiceTier`. It is the same
+   `llm.EffectiveControls` value `Plan.Effective` carries, so a consumer can
+   compare requested against served without parsing a provider payload.
 
-Each provider package remains authoritative and registers both functions during
-`init()`. Request construction and `Explain` share provider-private pure control
-planning helpers, so combination rules and request-dependent constraints are
-not copied into a second matrix. Provider request paths do not consult the
-global registry, and their externally observable behavior remains unchanged.
+Each provider package remains authoritative and registers the first two
+functions during `init()`. Request construction, `Preview`, and the response
+projection share provider-private pure control planning helpers, so combination
+rules and request-dependent constraints are not copied into a second matrix.
+Provider request paths do not consult the global registry, and the requests
+they build are unchanged.
 
-Public classification is deliberately stricter than runtime lookup. It accepts
+The published boundary is deliberately stricter than runtime lookup. It accepts
 only exact provider catalog IDs after documented provider-specific
 normalization. Unknown future point releases, gateway IDs, deployments, and
-custom models remain unclassified even when a permissive runtime prefix matcher
+custom models stay unpublished even when a permissive runtime prefix matcher
 would pass their settings through or inherit a family rule.
 
 Live evidence is also scoped to the endpoint and API surface that was probed. A
@@ -69,10 +87,19 @@ question: "What will Dive do with this exact configuration?" Trying to answer
 both with pairwise booleans would duplicate provider request logic and grow
 quadratically as controls are added.
 
+There is a third gap, on the other side of the call. Every one of those
+adjustments is invisible on the response. Dive already reports two applied
+settings there — `Usage.Speed` ("which inference speed served the request") and
+`Usage.ServiceTier` — but not reasoning or sampling controls. A consumer that
+asked for `max` effort and was served `xhigh`, or asked for a 8,000-token cap
+and got "the model decides", has no way to say so to its own users unless it
+wired a logger and parses warning text. Leniency without a record is not
+leniency; it is a silent downgrade.
+
 ## Goals
 
-1. Publish model-control classifications for provider adapters with maintained
-   capability tables.
+1. Publish per-model controls for provider adapters with maintained capability
+   tables.
 2. Keep provider packages authoritative; the registry stores resolvers, not a
    second copy of per-model facts.
 3. Distinguish native effort support from effort-to-budget emulation.
@@ -83,45 +110,68 @@ quadratically as controls are added.
 6. Preserve endpoint-scoped verification evidence without presenting a probe on
    one API surface as proof for another.
 7. Distinguish an unlinked provider package from a linked provider that does not
-   classify a model.
+   publish controls for a model.
 8. Define a conservative model-ID normalization contract that cannot silently
-   classify a future point release through prefix inheritance.
-9. Preserve existing public signatures and provider request behavior.
-10. Return snapshots that callers can mutate without corrupting package-level
-    tables or later plans.
+   publish a future point release through prefix inheritance.
+9. Report the controls a completed request actually carried, on the response,
+   without a logger.
+10. Preserve existing public signatures and provider request behavior.
+11. Return snapshots that callers can mutate without corrupting package-level
+    tables, later plans, or other usage frames.
 
 ## Non-goals
 
 1. A complete model catalog. Display names, descriptions, context windows,
    modalities, lifecycle, recommendations, and model availability remain owned
    by consumers or provider catalog packages.
-2. Account entitlement or deployment discovery. A classification does not
-   prove that a particular API key can access the model.
+2. Account entitlement or deployment discovery. A published control set does
+   not prove that a particular API key can access the model.
 3. Automatic live probing. Capability tables remain maintained and tested as
    they are today.
 4. Strict validation inside normal Dive calls. Existing clamping, translation,
-   omission, warnings, and unknown-model pass-through remain unchanged.
+   omission, warnings, and unknown-model pass-through remain unchanged. Making
+   those adjustments _observable_ on the response is a goal, not a form of
+   validation: nothing new is refused, and a consumer that wants a request to
+   fail instead of being adjusted builds that on `Preview`, before the call.
 5. A separate capability version or content hash. Consumers can record the
    loaded Dive module versions through `runtime/debug.ReadBuildInfo` when they
    need to diff or roll back a published contract.
 6. Native-provider inference for gateways such as OpenRouter, Amazon Bedrock,
    or Vertex deployments. Those endpoints may expose different controls and
-   must register their own provider classification if needed.
-7. A serialized provider wire request. `Explain` reports provider-neutral
+   must register their own provider controls if needed.
+7. A serialized provider wire request. `Preview` reports provider-neutral
    control outcomes, not SDK request structs or headers.
 8. Moving provider request paths onto the global registry. The registry is an
    inspection facade, not a runtime dependency.
 
 ## Terminology and API boundary
 
-The new public type is named `Classification`, not `Capabilities`. Dive already
+The word this design already uses for effort, budget, thinking, and temperature
+is **controls**, and the three APIs are named by where they sit in time
+relative to the request:
+
+| API                     | Type                    | Answers               |
+| ----------------------- | ----------------------- | --------------------- |
+| `modelcaps.ControlsFor` | `ModelControls`         | what this model takes |
+| `modelcaps.Preview`     | `Plan`                  | what Dive would send  |
+| `llm.Usage.Controls`    | `llm.EffectiveControls` | what Dive sent        |
+
+The published type is named `ModelControls`, not `Capabilities`. Dive already
 has two other meanings for that word:
 
 - `modelcaps.Capabilities` is the existing OpenAI/Grok runtime table record.
 - `modelcatalog.Model.Capabilities` is a list of broad modalities and features
   such as text, image, or audio support.
 
-`ClassificationFor` is the new exact, provider-registered inspection API.
+That constraint is real, but the escape is not "classification": a caller does
+not want a model sorted into a bucket, they want to know what it takes.
+`ControlsFor` mirrors `providers.PricingFor`, the existing per-model lookup
+precedent. `Preview` returns a `Plan` — the familiar plan/apply split — and
+reads as a sentence at the call site: `plan, ok := modelcaps.Preview(...)`.
+`Plan` cannot be the function name because the type already owns it in the
+package.
+
+`ControlsFor` is the new exact, provider-registered inspection API.
 Existing `Lookup`, `LookupEntry`, `TableFor`, `ResolveEffort`, and
 `AcceptsTemperature` keep their current prefix-oriented runtime semantics. In
 particular, `Lookup("anthropic", ...)` and `Lookup("google", ...)` do not start
@@ -129,18 +179,27 @@ working as a side effect of this proposal.
 
 The distinction is intentional:
 
-- **Classification** answers which independent controls Dive has verified for
+- **ModelControls** answers which independent controls Dive has verified for
   an exact catalog model.
 - **Plan** answers how Dive would treat one concrete configuration.
+- **EffectiveControls** answers what one request carried. It is `Plan.Effective`
+  and `Usage.Controls` — the same type, produced by the same planner, before and
+  after the call.
 - **Runtime lookup** preserves Dive's existing compatibility behavior for
   unknown, custom, and gateway models.
+
+`EffectiveControls` is defined in `llm` rather than `modelcaps` because
+`llm.Usage` must carry it and `modelcaps` imports `llm`. `modelcaps` keeps the
+name through a type alias, so `Plan.Effective` and `Usage.Controls` are
+literally the same type and neither package owns a second definition.
 
 ## Architecture
 
 ### Providers register resolvers
 
-Every participating provider package registers a classifier and explainer. This
-is consistent across OpenAI, Grok, Anthropic, and Google; there are no implicit
+Every participating provider package registers a controls function and a
+preview function. This is consistent across OpenAI, Grok, Anthropic, and
+Google; there are no implicit
 OpenAI/Grok built-ins in the registry merely because their raw tables happen to
 live in `modelcaps`.
 
@@ -157,7 +216,7 @@ provider capability table ──► provider-private control planner ──► r
           │                              │
           │ exact catalog projection     │ dry-run projection
           ▼                              ▼
-       Classify                       Explain
+       Controls                       Preview
           └──────── provider init registration ────────┐
                                                        ▼
                                           modelcaps registry
@@ -170,9 +229,9 @@ provider capability table ──► provider-private control planner ──► r
 call existing shared `modelcaps` helpers, but a request builder never resolves
 itself back through the registry.
 
-### Static classification contains no combination policy
+### Published controls contain no combination policy
 
-`Classification` contains normalized Dive contract facts that remain meaningful
+`ModelControls` contains normalized Dive contract facts that remain meaningful
 without a complete request:
 
 - native effort levels;
@@ -199,23 +258,23 @@ thinking become relevant.
   provider-neutral `AdaptiveThinking` concept.
 - The relationship between Anthropic's budget, `max_tokens`, the 1,024-token
   hard floor, and interleaved thinking is request-dependent and belongs in
-  `Explain`.
+  `Preview`.
 
-Budget bounds are the effective fixed bounds for the named model
-classification. A bound may be shared by an entire provider generation; its
+Budget bounds are the effective fixed bounds for the named model. A bound may
+be shared by an entire provider generation; its
 presence in a per-model snapshot does not claim the source constant is
 model-local.
 
-### Explain shares request-planning predicates
+### Preview shares request-planning predicates
 
 Each provider extracts or reuses a pure internal control planner. Both the
-actual request builder and the registered explainer call that helper. The
+actual request builder and the registered preview function call that helper. The
 helper performs no network I/O and does not consult the registry.
 
-`Explain` accepts `llm.Config` because request-dependent behavior already relies
+`Preview` accepts `llm.Config` because request-dependent behavior already relies
 on fields such as `Model`, `MaxTokens`, `Features`, `Prefill`, and `ToolChoice`.
 A narrower public request type would duplicate that configuration and drift.
-The explainer treats the input as immutable and returns only a
+The preview function treats the input as immutable and returns only a
 provider-neutral control plan.
 
 The plan reports:
@@ -230,6 +289,49 @@ The plan reports:
 Human-readable reason strings are diagnostic and not stable API identifiers.
 Consumers branch on `Action`, `Adjusted`, and `Rejected`, then use effective
 values for display or admission.
+
+### Effective controls are reported on the response
+
+The planner already computes `EffectiveControls` for every real request and, as
+of this change, no longer discards it once the wire request is built. Each
+provider carries the value out of request construction and attaches it to
+`Response.Usage.Controls`.
+
+This costs nothing extra to compute and cannot drift from the request, because
+it is the same value the request was built from — not a re-derivation. It is
+also the only projection available to a caller that did not inspect the config
+in advance, which is most callers.
+
+Streaming reports the same value. Providers stamp it onto the usage frames they
+emit, so `llm.ResponseAccumulator` carries it onto the accumulated response
+through the existing `Usage.Absorb` path; no new event type or accumulator
+branch is introduced.
+
+`Usage` is an aggregate as well as a per-response record, so the merge rules
+differ by operation:
+
+- `Absorb` (cumulative streaming frames) supersedes: a later frame's controls
+  replace an earlier report, and a frame with none leaves the earlier report
+  standing.
+- `Add` (separate requests) keeps the value while every contributing request
+  that reported controls reported the same ones. A disagreement clears it and
+  latches `Usage.ControlsMixed`, which is sticky: a later agreeing request
+  cannot resurrect one turn's controls as the answer for the whole run. This
+  mirrors how `ServiceTier` collapses to `"mixed"` and stays there.
+
+`Controls` needs a companion flag because its "mixed" state and its "nothing to
+report" state are both nil, unlike `ServiceTier`, whose sentinel is a string it
+can carry itself. `ControlsMixed` says which nil a caller is looking at.
+
+Nil with `ControlsMixed` false means the provider reported no effective
+controls — the four planner providers always do, and other adapters do not. A
+zero-valued field inside a non-nil value means something different and more
+useful: Dive sent nothing for that control. A `medium` effort served as a budget
+on Sonnet 4.5 arrives as an empty `ReasoningEffort` with a populated
+`ReasoningBudget`, which is exactly the difference a consumer needs to report.
+
+The response projection is observation, not validation. Nothing new is refused,
+and no request changes shape because of it.
 
 ### Model IDs are exact at the public boundary
 
@@ -250,35 +352,35 @@ inference-profile IDs, Vertex publisher/deployment paths, fine-tunes, and other
 custom names return `ok=false` unless a separately registered provider owns
 their contract.
 
-Both `Classification.Model` and `Plan.Model` contain the normalized canonical
+Both `ModelControls.Model` and `Plan.Model` contain the normalized canonical
 catalog ID, not the caller's spelling or qualified input. Consumers therefore
 do not need to duplicate provider normalization to key a published catalog.
 
-The public classifier must use an exact map from canonical catalog model ID to
+The public controls function must use an exact map from canonical catalog model ID to
 the intended capability entry and verification scopes for that exact ID. The
 map does not copy capability facts; it records which authoritative entry applies
-and where that mapping was live-probed. A classifier must not call a plain
+and where that mapping was live-probed. It must not call a plain
 prefix matcher and assume the match itself is evidence. This is particularly
 important for Anthropic: the existing runtime deliberately documents that a
 future `claude-opus-4-9` would inherit the older `claude-opus-4` entry. That
-permissive runtime behavior remains, but the public classifier returns
-`ok=false` until the new ID has an explicit classification mapping.
+permissive runtime behavior remains, but the public controls function returns
+`ok=false` until the new ID has an explicit mapping.
 
-The provider-private classification result includes the canonical model ID and
+The provider-private result includes the canonical model ID and
 matched capability-entry key so package tests can assert the exact mapping. The
 registered public projection omits that key: it is a testable source pointer,
 not a consumer contract, and private table refactors should not become public
 API changes.
 
-### Linked, classified, and verification scope are separate states
+### Linked, published, and verification scope are separate states
 
 `Providers()` returns the sorted canonical names registered in the current
 binary. It lets a caller distinguish "the provider package is not linked" from
-"the provider is linked but this model is not classified."
+"the provider is linked but this model has no published controls."
 
-`ClassificationFor` returns `ok=true` for an exact model mapping even when that
+`ControlsFor` returns `ok=true` for an exact model mapping even when that
 mapping has no live verification scope. `VerificationScopes` names the API
-surfaces against which the exact classification was successfully probed. An
+surfaces against which the exact control set was successfully probed. An
 empty list means the facts are historical, documented, inferred, or otherwise
 not live-probed.
 
@@ -288,7 +390,7 @@ Verification on one scope is not evidence for another. For example,
 AI. Anthropic's direct Messages API, Bedrock, and Vertex are likewise distinct
 surfaces. A strict consumer checks the scope it will actually call.
 
-A scope attests to the entire populated classification snapshot on that exact
+A scope attests to the entire populated control snapshot on that exact
 model and surface: affirmative support, negative support, effort ladders,
 bounds, and semantic omission rules. Verifying only the model-to-entry mapping
 or a subset of fields is insufficient. When evidence is partial, the provider
@@ -313,18 +415,18 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-// ReasoningBudgetClassification describes fixed manual reasoning-budget
+// BudgetBounds describes fixed manual reasoning-budget
 // bounds. Nil means Dive has no fixed bound to publish.
-type ReasoningBudgetClassification struct {
+type BudgetBounds struct {
 	noUnkeyedLiterals struct{}
 
 	Minimum *int
 	Maximum *int
 }
 
-// ReasoningClassification describes independent reasoning controls Dive can
+// ReasoningControls describes independent reasoning controls Dive can
 // express for an exact catalog model.
-type ReasoningClassification struct {
+type ReasoningControls struct {
 	noUnkeyedLiterals struct{}
 
 	// NativeEfforts lists provider-native effort or thinking-level values from
@@ -337,7 +439,7 @@ type ReasoningClassification struct {
 	EmulatedEfforts []llm.ReasoningEffort
 
 	// Budget is non-nil when Dive can send a manual reasoning budget.
-	Budget *ReasoningBudgetClassification
+	Budget *BudgetBounds
 
 	AdaptiveThinking bool
 
@@ -345,9 +447,9 @@ type ReasoningClassification struct {
 	CanDisableThinking bool
 }
 
-// Classification describes independent model controls Dive can publish
+// ModelControls describes independent model controls Dive can publish
 // without applying product policy or evaluating a complete request.
-type Classification struct {
+type ModelControls struct {
 	noUnkeyedLiterals struct{}
 
 	// Model is the normalized, exact canonical provider catalog ID.
@@ -357,10 +459,10 @@ type Classification struct {
 	// control when no other requested control suppresses it.
 	Temperature bool
 
-	Reasoning ReasoningClassification
+	Reasoning ReasoningControls
 
 	// VerificationScopes identifies the endpoint and API surfaces on which this
-	// entire exact classification was successfully live-probed. An empty slice
+	// entire exact control set was successfully live-probed. An empty slice
 	// makes no live-verification claim.
 	VerificationScopes []VerificationScope
 }
@@ -398,16 +500,10 @@ type ControlDecision struct {
 	Reason   string
 }
 
-// EffectiveControls is the provider-neutral result of control planning. It is
-// not a serialized provider request.
-type EffectiveControls struct {
-	noUnkeyedLiterals struct{}
-
-	ReasoningEffort llm.ReasoningEffort
-	ReasoningBudget *int
-	Thinking        llm.ThinkingType
-	Temperature     *float64
-}
+// EffectiveControls is defined in llm so llm.Usage can carry it; modelcaps
+// keeps the name through an alias so Plan.Effective and Usage.Controls are the
+// same type.
+type EffectiveControls = llm.EffectiveControls
 
 // Plan explains how Dive would treat the model controls in a concrete config.
 // When Rejected is true, the normal provider request builder would return an
@@ -428,16 +524,16 @@ type Plan struct {
 	RejectionReason string
 }
 
-type Classifier func(model string) (Classification, bool)
-type Explainer func(config llm.Config) (Plan, bool)
+type ControlsFunc func(model string) (ModelControls, bool)
+type PreviewFunc func(config llm.Config) (Plan, bool)
 
-// Resolver projects one provider's authoritative classification and pure
+// Resolver projects one provider's authoritative model controls and pure
 // request-control planner.
 type Resolver struct {
 	noUnkeyedLiterals struct{}
 
-	Classify Classifier
-	Explain  Explainer
+	Controls ControlsFunc
+	Preview  PreviewFunc
 }
 
 var (
@@ -459,25 +555,67 @@ func MustRegister(provider string, resolver Resolver)
 // current binary.
 func Providers() []string
 
-// ClassificationFor returns static facts for an exact catalog model. ok is
+// ControlsFor returns static facts for an exact catalog model. ok is
 // false when the provider is not registered or the normalized model is not an
-// exact classified catalog ID. The returned Model is that canonical ID.
-func ClassificationFor(provider, model string) (Classification, bool)
+// exact mapped catalog ID. The returned Model is that canonical ID.
+func ControlsFor(provider, model string) (ModelControls, bool)
 
-// Explain performs a network-free dry run for config.Model. ok has the same
-// exact-model meaning as ClassificationFor, and Plan.Model is canonical.
-func Explain(provider string, config llm.Config) (Plan, bool)
+// Preview performs a network-free dry run for config.Model. ok has the same
+// exact-model meaning as ControlsFor, and Plan.Model is canonical.
+func Preview(provider string, config llm.Config) (Plan, bool)
 
 // SupportsNativeEffort reports native provider support. Budget emulation does
 // not count.
-func (c Classification) SupportsNativeEffort(
+func (c ModelControls) SupportsNativeEffort(
 	effort llm.ReasoningEffort,
 ) bool
 
-// VerifiedOn reports whether the exact model classification was live-probed on
+// VerifiedOn reports whether the exact model control set was live-probed on
 // the requested endpoint and API surface.
-func (c Classification) VerifiedOn(scope VerificationScope) bool
+func (c ModelControls) VerifiedOn(scope VerificationScope) bool
 ```
+
+Add `llm/controls.go` and one field to `llm.Usage`:
+
+```go
+package llm
+
+// EffectiveControls is the provider-neutral set of reasoning and sampling
+// controls Dive resolved for one request. It is not a serialized provider
+// request. A zero-valued field means Dive sent nothing for that control.
+type EffectiveControls struct {
+	noUnkeyedLiterals struct{}
+
+	ReasoningEffort ReasoningEffort `json:"reasoning_effort,omitempty"`
+	ReasoningBudget *int            `json:"reasoning_budget,omitempty"`
+	Thinking        ThinkingType    `json:"thinking,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+}
+
+// Clone returns a deep copy so callers cannot mutate shared pointer fields.
+func (c EffectiveControls) Clone() EffectiveControls
+
+// Equal compares by value, treating nil and a pointer to an equal value as
+// different: nil means the control was not sent at all.
+func (c EffectiveControls) Equal(other EffectiveControls) bool
+
+type Usage struct {
+	// ... existing fields ...
+
+	// Controls records the reasoning and sampling controls Dive actually sent.
+	// Nil means the provider reports no effective controls for this request.
+	Controls *EffectiveControls `json:"controls,omitempty"`
+
+	// ControlsMixed distinguishes an aggregate whose requests were served with
+	// different controls from one that has no controls to report.
+	ControlsMixed bool `json:"controls_mixed,omitempty"`
+}
+```
+
+`Equal` exists because `EffectiveControls` contains pointers, so `==` is not
+usable and a plain `cmp.Diff` panics on the unexported sentinel. It is the
+comparison a consumer wants when checking a served control set against a
+previewed one.
 
 ### Plan invariants
 
@@ -557,9 +695,9 @@ unlinked Go packages execute automatically.
 ### OpenAI and Grok
 
 Add registration files to the OpenAI and Grok provider modules. Their
-classifiers use the generated provider catalog for exact ID membership, then
-project the existing raw `modelcaps.Entry` so explicitly unverified entries
-remain distinguishable.
+controls functions use the generated provider catalog for exact ID membership,
+then project the existing raw `modelcaps.Entry` so explicitly unverified
+entries remain distinguishable.
 
 For these providers:
 
@@ -570,15 +708,23 @@ For these providers:
 - `VerificationScopes` comes from the exact model mapping and is empty when
   `Entry.Unverified` is true.
 
-The classifier uses `LookupEntry`, not `Lookup`, because `Lookup` intentionally
+The controls function uses `LookupEntry`, not `Lookup`, because `Lookup` intentionally
 hides unverified entries for permissive runtime behavior. Prefix lookup may be
 used to locate the underlying record only after exact catalog membership and an
 explicit model-to-entry mapping have been established.
 
-The explainer reuses `ResolveEffort` and the same temperature predicate called
-by request construction. It reports native clamping as `ControlApplied` with
+Both providers share one planner in `providers/internal/responsescontrol`,
+because Grok's adapter embeds the OpenAI Responses provider. It reuses
+`ResolveEffort` and the same temperature predicate called by request
+construction, and reports native clamping as `ControlApplied` with
 `Adjusted=true`, unsupported omission as `ControlOmitted`, and no budget or
 adaptive emulation.
+
+`buildRequestParams` returns the planner's effective controls alongside the SDK
+params. `Generate` attaches them to the decoded response; `Stream` hands them to
+the stream iterator, which stamps them onto the `response.created` message and
+onto the usage carried by the terminal `response.completed` and
+`response.incomplete` frames.
 
 ### Anthropic
 
@@ -628,17 +774,23 @@ including:
 - temperature omission while thinking is active; and
 - control-related prefill and forced-tool-choice rejections.
 
+`applyRequestConfig` returns the planner's effective controls with the filled
+request. `Generate` records them in `finalizeUsage`, beside cache-thrash
+logging and cost estimation. The stream iterator stamps them onto every
+usage-bearing frame: `message_start` seeds the accumulated response wholesale,
+and the cumulative `message_delta` usage supersedes it.
+
 ### Google
 
-Add `providers/google/capabilities_register.go`. The classifier projects the
-raw `lookupEntry`, not `lookupCapabilities`, because the latter converts
+Add `providers/google/capabilities_register.go`. The controls function projects
+the raw `lookupEntry`, not `lookupCapabilities`, because the latter converts
 not-live-probed entries into unknown runtime passthrough.
 
 | Public field         | Google source                                    |
 | -------------------- | ------------------------------------------------ |
 | `NativeEfforts`      | `caps.efforts`                                   |
 | `EmulatedEfforts`    | known effort ladder on budget-only models        |
-| `Budget`             | classified `caps.minBudget` and `caps.maxBudget` |
+| `Budget`             | published `caps.minBudget` and `caps.maxBudget`  |
 | `AdaptiveThinking`   | model accepts Dive's adaptive-thinking request   |
 | `CanDisableThinking` | `caps.canDisableThinking`                        |
 | `Temperature`        | `modelAcceptsTemperature(model)`                 |
@@ -661,28 +813,37 @@ The exact `gemini-3.7-flash` mapping includes only
 AI and was not probed against the public Gemini API. Other Gemini mappings list
 only scopes supported by their own probe evidence.
 
-The Google explainer and request builder both use the existing thinking-plan
-logic for effort-to-budget emulation, effort and budget precedence, adaptive
-thinking, bounds clamping, disablement, and effective temperature omission.
+The Google preview function and request builder both use the existing
+thinking-plan logic for effort-to-budget emulation, effort and budget
+precedence, adaptive thinking, bounds clamping, disablement, and effective
+temperature omission.
+
+`applyRequestConfig` returns the planner's effective controls with the filled
+request. `Generate` attaches them to the converted response before cost
+population; the stream iterator stamps them onto the `message_start` message and
+onto the final `message_delta` usage. The exported
+`NewStreamIteratorFromSeq` keeps its signature and reports no controls; only the
+package-internal constructor takes them.
 
 ## Consumer contract
 
-A strict catalog checks provider linkage, exact classification, and evidence:
+A strict catalog checks provider linkage, exact published controls, and
+evidence:
 
 ```go
 if !slices.Contains(modelcaps.Providers(), "google") {
 	return errors.New("google provider package is not linked")
 }
 
-class, ok := modelcaps.ClassificationFor("google", "gemini-3.7-flash")
+controls, ok := modelcaps.ControlsFor("google", "gemini-3.7-flash")
 if !ok {
-	return errors.New("model is not classified")
+	return errors.New("model has no published controls")
 }
-if !class.VerifiedOn(modelcaps.VerificationGoogleVertexAI) {
-	return errors.New("classification was not verified on Vertex AI")
+if !controls.VerifiedOn(modelcaps.VerificationGoogleVertexAI) {
+	return errors.New("controls were not verified on Vertex AI")
 }
 
-if !class.SupportsNativeEffort(llm.ReasoningEffortHigh) {
+if !controls.SupportsNativeEffort(llm.ReasoningEffortHigh) {
 	return errors.New("high effort is not natively supported")
 }
 ```
@@ -698,9 +859,9 @@ cfg := llm.Config{
 	ReasoningBudget: pointer.To(8192),
 }
 
-plan, ok := modelcaps.Explain("anthropic", cfg)
+plan, ok := modelcaps.Preview("anthropic", cfg)
 if !ok {
-	return errors.New("model is not classified")
+	return errors.New("model has no published controls")
 }
 if plan.Rejected {
 	return errors.New(plan.RejectionReason)
@@ -712,6 +873,34 @@ if plan.Budget.Adjusted || plan.Temperature.Action == modelcaps.ControlOmitted {
 
 The example's `pointer.To` is illustrative; this proposal does not add that
 helper.
+
+A consumer that stays lenient reports the difference instead of refusing it,
+reading the served controls off the response it already has:
+
+```go
+response, err := provider.Generate(ctx, opts...)
+if err != nil {
+	return err
+}
+
+served := response.Usage.Controls
+if served == nil {
+	return nil // provider does not report effective controls
+}
+if served.ReasoningEffort != requestedEffort {
+	record("effort", requestedEffort, served.ReasoningEffort,
+		"budget", served.ReasoningBudget, "thinking", served.Thinking)
+}
+if requestedTemperature != nil && served.Temperature == nil {
+	record("temperature", requestedTemperature, nil)
+}
+```
+
+The two modes are one policy with two actions. A strict consumer runs the same
+comparison against `Preview` before the call and returns an error; a lenient one
+runs it against `Usage.Controls` after the call and records the difference.
+Neither reimplements Dive's translation rules, because both read the same
+planner.
 
 A consumer may deliberately expose Dive's portable effort emulation, but it
 must label that separately from native effort support. Emulation does not imply
@@ -727,12 +916,20 @@ boundary. The registry does not register product aliases.
 
 This design is additive at the public boundary:
 
+- `llm.Usage` gains an optional pointer field and an `omitempty` bool, so
+  serialized usage for a provider that reports nothing is byte-identical to
+  today.
+  `Usage.Copy`, `Absorb`, and `Add` gain matching handling; no existing field's
+  merge behavior changes.
+- Provider-internal request builders change signature to return their effective
+  controls (`applyRequestConfig`, `buildRequestParams`). These are unexported;
+  the exported provider surface is unchanged.
 - Existing `modelcaps` functions retain their signatures and behavior.
 - `TableFor` still returns no Anthropic or Google table.
 - Provider request paths keep direct access to provider-private planners and
   tables; they do not depend on global registration.
 - Unknown models preserve permissive runtime behavior even though the new
-  public APIs classify only exact catalog IDs.
+  public APIs publish only exact catalog IDs.
 - New structs prevent external unkeyed construction, allowing additive fields
   without breaking keyed literals.
 - Public values are snapshots; mutation cannot affect future lookups or
@@ -757,6 +954,10 @@ silently treat a missing resolver as an empty provider catalog.
 ## Package layout
 
 ```text
+llm/
+├── controls.go                   # EffectiveControls, shared by Plan and Usage
+├── controls_test.go
+└── usage.go                      # existing; gains Usage.Controls
 providers/
 ├── modelcaps/
 │   ├── modelcaps.go              # existing compatibility API
@@ -768,7 +969,7 @@ providers/
 │       └── plan.go              # shared OpenAI/Grok Responses control planner
 ├── anthropic/
 │   ├── capabilities.go           # private source of truth and planner inputs
-│   ├── capabilities_register.go  # exact classification and explanation
+│   ├── capabilities_register.go  # exact model controls and preview
 │   └── capabilities_test.go      # existing; extend coverage
 ├── google/
 │   ├── capabilities.go
@@ -793,7 +994,7 @@ Add root-module tests covering:
 1. canonical and case-insensitive provider lookup;
 2. deterministic, defensive `Providers()` snapshots;
 3. unknown provider versus linked-provider/unknown-model behavior;
-4. classified-but-not-live-probed entries returning `ok=true` with no
+4. mapped-but-not-live-probed entries returning `ok=true` with no
    verification scopes;
 5. invalid and duplicate `Register` errors plus `MustRegister` panics;
 6. concurrent registration and lookup safety;
@@ -806,15 +1007,25 @@ Add root-module tests covering:
 Comparison tests that use `go-cmp` configure `cmpopts.IgnoreUnexported` for all
 new sentinel-bearing structs.
 
-### Provider classification tests
+### Usage projection tests
+
+Add `llm` tests covering `EffectiveControls.Clone` deep-copying its pointer
+fields, `Equal` distinguishing an unsent control from a sent zero,
+`Usage.Copy` isolating the copy and carrying `ControlsMixed`, `Absorb`
+superseding while a control-free frame leaves the earlier report standing, `Add`
+keeping agreeing controls and latching `ControlsMixed` on a disagreement so a
+later agreeing request cannot resurrect one turn's value, and `Usage` JSON
+round-tripping with the field absent when nil.
+
+### Provider control-publication tests
 
 Each provider module verifies:
 
-1. every catalogued text model with an ID has one exact classification mapping;
+1. every catalogued text model with an ID has one exact controls mapping;
 2. the mapping names the intended capability entry key and exact-ID verification
    scopes, not merely any matching prefix;
 3. qualified and case-varied input returns the exact canonical catalog ID in
-   both classification and plan results;
+   both control and plan results;
 4. representative native effort ladders and budget bounds match the
    authoritative table;
 5. effort-to-budget emulation lists exactly the recognized translated ladder
@@ -845,13 +1056,23 @@ The parity test must inspect the constructed request rather than reimplementing
 the expected branch in test code. This is the primary defense against plan and
 runtime drift.
 
+The same table asserts the third projection: the effective controls returned by
+request construction must `Equal` the previewed `Plan.Effective`. That single
+assertion is what keeps "what Dive would send" and "what Dive sent" from
+drifting apart.
+
+Each provider additionally covers the response path end to end — a `Generate`
+against an httptest server and a stream driven through
+`llm.ResponseAccumulator` — asserting that `Usage.Controls` arrives populated,
+reflects the clamp or translation, and hands each frame an isolated copy.
+
 ### Commands
 
 Run module suites independently because Google, OpenAI, and Grok are separate
 Go modules:
 
 ```sh
-go test ./providers/modelcaps ./providers/anthropic ./providers
+go test ./llm ./providers/modelcaps ./providers/anthropic ./providers
 (cd providers/google && go test ./...)
 (cd providers/openai && go test ./...)
 (cd providers/grok && go test ./...)
@@ -867,49 +1088,86 @@ The normal GitHub workflow remains the final cross-module check.
 
 1. Add the public types, error-returning registry, `MustRegister`, defensive
    cloning, `Providers`, and registry unit tests to `providers/modelcaps`.
-2. Add provider-private exact classifier functions and
+2. Add provider-private exact controls functions and
    model-to-entry-and-scope maps for OpenAI, Grok, Anthropic, and Google, without
    registering incomplete resolvers. Include Anthropic's private
    `notLiveProbed` entry marker and Google's effective temperature rule.
 3. Extract or consolidate one pure control planner per provider and switch each
    request builder to it without changing request behavior.
-4. Add each provider's explainer projection, then register its complete
-   `Resolver` only after both `Classify` and `Explain` are real implementations.
-5. Add exact-ID coverage, dry-run/request parity, registry integration, and
-   mutation-isolation tests.
-6. Create `docs/guides/model-control-classification.md` with provider import
+4. Add each provider's preview projection, then register its complete
+   `Resolver` only after both `Controls` and `Preview` are real implementations.
+5. Add `llm.EffectiveControls` and `Usage.Controls`, and carry each provider's
+   planner result onto the response and its stream frames.
+6. Add exact-ID coverage, dry-run/request parity, response-projection, registry
+   integration, and mutation-isolation tests.
+7. Create `docs/guides/model-controls.md` with provider import
    requirements, model-ID and verification-scope rules, `go-cmp` guidance, and
-   strict-consumer examples.
-7. Release the root and nested provider modules at the same Dive version and
+   both strict-consumer and served-controls examples.
+8. Release the root and nested provider modules at the same Dive version and
    validate their declared root-module requirements.
-8. Migrate consumers separately. A consumer deletes copied facts only after its
-   catalog and admission tests use both classification and planning
+9. Migrate consumers separately. A consumer deletes copied facts only after its
+   catalog and admission tests use both published controls and planning
    successfully.
 
-Steps 1 and 2 form a reviewable classification foundation and compile without
-placeholder registrations. Steps 3 through 6 complete the pure-planner and
-public `Explain` phase. They may land as separate commits, but steps 1 through 6
-release together so every registered resolver is complete and planner parity is
-enforced. Consumer adoption does not block the Dive release.
+Steps 1 and 2 form a reviewable publication foundation and compile without
+placeholder registrations. Steps 3 through 7 complete the pure-planner,
+`Preview`, and response-projection phases. They may land as separate commits,
+but steps 1 through 7 release together so every registered resolver is complete
+and all three projections come from one planner. Consumer adoption does not
+block the Dive release.
+
+The three views are not equally urgent. `Usage.Controls` is what a default,
+lenient consumer depends on and is the smallest piece, because the planner
+already computes the value. `ControlsFor` is needed regardless, so consumers
+stop hand-copying provider tables. `Preview` is the enabler for an opt-in strict
+mode: strict cannot be built on `Usage`, because by then the provider call has
+cost money. All three ship together here since the rename is cheapest before a
+tagged release.
 
 ## Alternatives considered
 
-### Publish only static classification
+### Publish only static model controls
 
 Rejected. Static facts are useful for catalog display but cannot answer how
 temperature, budget, effort, thinking, tool choice, and token limits interact
 in a concrete request. Pairwise booleans would become a duplicated rules engine.
 
-### Publish only `Explain`
+### Publish only `Preview`
 
 Rejected. A catalog still needs an enumerable native effort ladder, fixed
 budget bounds, and evidence status without manufacturing many candidate
-requests. The static and dynamic views serve different consumers.
+requests. And a lenient consumer needs the served value on a response it did
+not preview. The three views serve different consumers.
+
+### Report the clamp only through the logger
+
+Rejected — this is the status quo. A `Logger.Warn` reaches an operator reading
+logs, not the program holding the response, and a consumer that has not wired a
+logger sees nothing at all. Warning text is also not a stable contract: a
+consumer that scraped it would break on any rewording. `Usage.Controls` gives
+the same information a typed value, at no extra computation, on the object the
+caller already has. The warnings stay; they are for humans.
+
+### Put the served controls on `Response` rather than `Usage`
+
+Rejected. `Usage` already carries "what actually served this request" —
+`Speed` documents "which inference speed served the request", and `ServiceTier`
+sits beside it. Effective controls are the same kind of fact, and putting them
+there means they inherit the existing `Copy`/`Absorb`/`Add` plumbing and the
+streaming accumulation path instead of needing their own.
+
+### Flatten the served controls into `Usage` fields
+
+Rejected, though it is close. Flat fields would match the `Speed` and
+`ServiceTier` precedent, but they would be a fourth spelling of a value the
+planner already produces as a struct, and `Plan.Effective` could no longer be
+compared to the served value with one call. One nested `EffectiveControls`
+keeps preview and observation literally the same type.
 
 ### Add pairwise compatibility booleans
 
 Rejected. Fields such as `EffortWithTemperature` duplicate request predicates,
-cannot represent three-way interactions, and grow quadratically. `Explain`
+cannot represent three-way interactions, and grow quadratically. `Preview`
 derives combinations from the same planner as request construction.
 
 ### Represent Google's dynamic budget separately
@@ -964,9 +1222,20 @@ initialization-order failure modes to runtime without removing data duplication.
 ## Tradeoffs and consequences
 
 - The public representation is broader than the existing OpenAI/Grok
-  `Capabilities` type, but naming it `Classification` makes the semantic
+  `Capabilities` type, but naming it `ModelControls` makes the semantic
   difference explicit.
-- Exact model classification is conservative. A new catalog ID requires an
+- `EffectiveControls` lives in `llm` because `llm.Usage` carries it and
+  `modelcaps` imports `llm`. The alias keeps one name for one type, but a reader
+  of `modelcaps` has to follow it to find the definition.
+- `Usage.Add` clears `Controls` and latches `ControlsMixed` when contributing
+  requests disagree, so an aggregate over a mixed run reports nothing rather
+  than a wrong answer. A consumer that wants per-turn controls must read them
+  per turn; this is the same limitation `Speed` and `ServiceTier` already have,
+  and it costs one extra bool to keep "mixed" distinguishable from "unknown".
+- Only the four planner providers populate `Usage.Controls`. Adapters such as
+  `openaicompletions` report nil, so a consumer must treat nil as "unknown",
+  not as "nothing was sent".
+- Exact model publication is conservative. A new catalog ID requires an
   explicit mapping before a strict consumer can advertise it, even when runtime
   compatibility lookup would inherit a family rule.
 - Provider linkage depends on Go imports. `Providers()` turns that property into
@@ -978,7 +1247,7 @@ initialization-order failure modes to runtime without removing data duplication.
   qualification.
 - Fixed budget bounds appear in per-model snapshots even when backed by a
   provider-wide constant. Documentation identifies them as effective bounds,
-  while `Explain` owns request-dependent floors and ceilings.
+  while `Preview` owns request-dependent floors and ceilings.
 - `MustRegister` can panic during provider initialization, but only for invalid
   code or duplicate canonical ownership. The underlying `Register` API remains
   recoverable and no registration is silently overwritten.

@@ -22,6 +22,7 @@ type StreamIterator struct {
 	model          string
 	pricingContext googlePricingContext
 	responseID     string
+	controls       *llm.EffectiveControls
 	message        *llm.Response
 
 	// Streaming state
@@ -49,15 +50,22 @@ type StreamIterator struct {
 
 // NewStreamIteratorFromSeq creates a new StreamIterator from a streaming sequence
 func NewStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.GenerateContentResponse, error], model string) *StreamIterator {
-	return newStreamIteratorFromSeq(ctx, streamSeq, model, googlePricingContext{})
+	return newStreamIteratorFromSeq(ctx, streamSeq, model, googlePricingContext{}, nil)
 }
 
-func newStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.GenerateContentResponse, error], model string, pricingContext googlePricingContext) *StreamIterator {
+func newStreamIteratorFromSeq(
+	ctx context.Context,
+	streamSeq iter.Seq2[*genai.GenerateContentResponse, error],
+	model string,
+	pricingContext googlePricingContext,
+	controls *llm.EffectiveControls,
+) *StreamIterator {
 	return &StreamIterator{
 		ctx:              ctx,
 		streamSeq:        streamSeq,
 		model:            model,
 		pricingContext:   pricingContext,
+		controls:         controls,
 		responseID:       fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
 		textBlockIndex:   -1,
 		thinkingBlockIdx: -1,
@@ -165,6 +173,7 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 			Role:    llm.Assistant,
 			Model:   s.model,
 			Content: []llm.Content{},
+			Usage:   llm.Usage{Controls: s.cloneControls()},
 		}
 		s.eventQueue = append(s.eventQueue, &llm.Event{
 			Type:    llm.EventTypeMessageStart,
@@ -386,12 +395,23 @@ func (s *StreamIterator) queueFinalEvents() error {
 			return err
 		}
 		populateGoogleCost(s.model, s.usage, &usage, s.pricingContext)
+		usage.Controls = s.cloneControls()
 		event.Usage = &usage
 	}
 	s.eventQueue = append(s.eventQueue, event, &llm.Event{
 		Type: llm.EventTypeMessageStop,
 	})
 	return nil
+}
+
+// cloneControls hands each usage frame its own copy of the controls this
+// request carried, so a consumer mutating one frame cannot reach the others.
+func (s *StreamIterator) cloneControls() *llm.EffectiveControls {
+	if s.controls == nil {
+		return nil
+	}
+	controls := s.controls.Clone()
+	return &controls
 }
 
 func (s *StreamIterator) Event() *llm.Event {
