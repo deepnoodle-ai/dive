@@ -20,6 +20,8 @@ const (
 	ModelClaudeOpus47           = "claude-opus-4-7"
 	ModelClaudeOpus48           = "claude-opus-4-8"
 	ModelClaudeOpus5            = "claude-opus-5"
+	ModelClaudeFable51          = "claude-fable-5-1"
+	ModelClaudeMythos51         = "claude-mythos-5-1"
 	ModelClaudeFable5           = "claude-fable-5"
 	ModelClaudeMythos5          = "claude-mythos-5"
 	ModelClaudeSonnet5          = "claude-sonnet-5"

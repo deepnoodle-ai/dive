@@ -183,9 +183,15 @@ for compatibility with custom OpenAI-compatible endpoints.
 ### Reasoning And Summarized Thinking On Claude
 
 Newer Claude models prefer **adaptive thinking** — the model decides when and how
-much to think — with `effort` guiding depth. Opus 4.7, Opus 4.8, Sonnet 5, Fable
-5, and Mythos 5 reject manual `budget_tokens`; Dive keeps older callers working
-by mapping `ReasoningBudget` to adaptive thinking on those models.
+much to think — with `effort` guiding depth. Opus 4.7, Opus 4.8, Sonnet 5, and
+the Fable and Mythos 5 / 5.1 models reject manual `budget_tokens`. On those
+models Dive keeps an existing `ReasoningBudget` caller working by emitting
+`thinking: {type: adaptive}` and omitting `budget_tokens` — the request stays
+valid, but the requested budget is dropped rather than translated, so the model
+decides the depth. Use `ReasoningEffort` to steer it instead. Fable and Mythos
+always think and reject `thinking: {type: disabled}`, so Dive omits the
+parameter for them; it also rejects a forced `tool_choice`, which Fable 5.1 and
+Mythos 5.1 answer with a 400.
 
 ```go
 ModelSettings: &dive.ModelSettings{
@@ -196,7 +202,7 @@ ModelSettings: &dive.ModelSettings{
 ```
 
 `ThinkingDisplaySummarized` requests visible summarized thinking blocks. This is
-important on Sonnet 5, Fable 5, Mythos 5, Opus 4.7, and Opus 4.8, where Claude
+important on Sonnet 5, Fable 5/5.1, Mythos 5/5.1, Opus 4.7, and Opus 4.8, where Claude
 defaults to `omitted` display and returns an empty `thinking` field plus an
 encrypted signature. Dive preserves both normal `thinking` blocks and
 `redacted_thinking` blocks in responses; when continuing a tool-use turn, pass

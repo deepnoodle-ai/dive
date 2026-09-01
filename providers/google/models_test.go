@@ -14,7 +14,7 @@ func TestLatestGeminiFlashModels(t *testing.T) {
 		inputPrice  float64
 		outputPrice float64
 	}{
-		{ModelGemini37Flash, "gemini-3.7-flash", 1.50, 7.50},
+		{ModelGemini37Flash, "gemini-3.7-flash", 0.75, 3.75},
 		{ModelGemini35FlashLite, "gemini-3.5-flash-lite", 0.30, 2.50},
 	}
 

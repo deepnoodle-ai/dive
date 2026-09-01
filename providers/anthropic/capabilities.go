@@ -168,12 +168,18 @@ var modelCapabilityTable = []capabilityEntry{
 		thinkingOnByDefault: true,
 	}},
 	// Fable 5 and Mythos 5 always think and reject an explicit disable, so
-	// Dive omits the thinking parameter for them instead.
+	// Dive omits the thinking parameter for them instead. The 5.1 point
+	// releases behave identically here and deliberately share these entries by
+	// prefix: "claude-fable-5-1" matches "claude-fable-5", and likewise for
+	// Mythos. Their added restriction — forced tool_choice returns a 400 — is
+	// already covered, since requestThinkingBlocksForcedToolChoice rejects a
+	// forced choice for any model that always thinks and cannot be disabled.
 	{prefix: "claude-fable-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
 	}},
-	// Mythos 5 is catalogued but not currently served (404), so its entry
-	// mirrors Fable 5 and is untested against the live API.
+	// Mythos 5 and 5.1 are catalogued but reachable only through Anthropic's
+	// limited-availability program, so these values mirror Fable and are
+	// untested against the live API.
 	{prefix: "claude-mythos-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
 	}},

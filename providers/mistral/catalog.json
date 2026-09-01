@@ -88,13 +88,15 @@
       "go_name": "ModelDevstral2",
       "id": "devstral-2512",
       "kind": "text",
-      "context_window": 128000
+      "context_window": 128000,
+      "deprecated": "Mistral has retired the Devstral family; use ModelCodestralLatest for coding."
     },
     {
       "go_name": "ModelDevstralSmall2",
       "id": "labs-devstral-small-2512",
       "kind": "text",
-      "context_window": 128000
+      "context_window": 128000,
+      "deprecated": "Mistral has retired the Devstral family; use ModelCodestralLatest for coding."
     },
     {
       "go_name": "ModelDevstralSmallLatest",
@@ -102,14 +104,24 @@
       "kind": "text",
       "context_window": 128000,
       "display_name": "Devstral Small",
+      "deprecated": "Mistral no longer serves or documents this alias; use ModelCodestralLatest for coding."
+    },
+    {
+      "go_name": "ModelCodestralLatest",
+      "id": "codestral-latest",
+      "kind": "text",
+      "context_window": 128000,
+      "display_name": "Codestral",
       "recommended": true,
       "cli_order": 3,
       "description": "Optimized for coding tasks"
     },
     {
-      "go_name": "ModelCodestralLatest",
-      "id": "codestral-latest",
-      "kind": "text"
+      "go_name": "ModelCodestral2508",
+      "id": "codestral-2508",
+      "kind": "text",
+      "context_window": 128000,
+      "display_name": "Codestral 25.08"
     },
     {
       "go_name": "ModelCodestral2501",

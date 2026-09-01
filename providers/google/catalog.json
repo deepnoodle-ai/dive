@@ -230,19 +230,21 @@
     "text": [
       {
         "model": "gemini-3.7-flash",
-        "input_price_per_1m_tokens": "1.50",
-        "output_price_per_1m_tokens": "7.50",
-        "cache_read_price_per_1m_tokens": "0.15",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "3.75",
+        "cache_read_price_per_1m_tokens": "0.075",
         "currency": "USD",
-        "updated_at": "2026-08-15"
+        "updated_at": "2026-09-01",
+        "note": "Rates billed today. Google lists a scheduled increase to $1.50/$7.50 ($0.15 cache read) on 2027-01-01; revisit then."
       },
       {
         "model": "gemini-3.6-flash",
-        "input_price_per_1m_tokens": "1.50",
-        "output_price_per_1m_tokens": "7.50",
-        "cache_read_price_per_1m_tokens": "0.15",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "3.75",
+        "cache_read_price_per_1m_tokens": "0.075",
         "currency": "USD",
-        "updated_at": "2026-07-21"
+        "updated_at": "2026-09-01",
+        "note": "Rates billed today. Google lists a scheduled increase to $1.50/$7.50 ($0.15 cache read) on 2027-01-01; revisit then."
       },
       {
         "model": "gemini-3.5-flash",
