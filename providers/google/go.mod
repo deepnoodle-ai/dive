@@ -2,7 +2,7 @@ module github.com/deepnoodle-ai/dive/providers/google
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
 	github.com/deepnoodle-ai/dive v1.26.0

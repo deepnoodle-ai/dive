@@ -2,7 +2,7 @@ module github.com/deepnoodle-ai/dive/a2a
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.5.0

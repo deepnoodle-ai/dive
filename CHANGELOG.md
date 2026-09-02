@@ -45,7 +45,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - **Dive now requires Go 1.26.** All 11 modules moved from `go 1.25.0` to
-  `go 1.26.0`.
+  `go 1.26.0`, and the pinned toolchain from go1.26.5 to go1.26.8, which clears
+  six Go standard library advisories (`net/http`, `crypto/tls`, `net/url`,
+  `encoding/asn1`, `encoding/xml`, `html/template`). `govulncheck` now reports
+  zero vulnerabilities across every module.
 - **Dependencies refreshed across every module.** Notably
   `google.golang.org/genai` v1.68.0 → v1.71.0, `google.golang.org/api` v0.293.0
   → v0.297.0, `openai/openai-go/v3` v3.50.0 → v3.55.0 (the v3.51 hold is
