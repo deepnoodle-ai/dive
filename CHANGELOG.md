@@ -13,7 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   a discounted `-contributor` tier trades a lower price for training on your
   data). Targets Meta's Responses API, because Chat Completions redacts
   reasoning for external keys and so cannot carry it across tool turns.
-  Unverified against a live key; see `docs/design/meta-model-api.md`.
+  Verified against the live API, including encrypted-reasoning replay across a
+  tool turn; see `docs/design/meta-model-api.md`.
 
 ## [1.27.0] - 2026-09-02
 

@@ -1,9 +1,9 @@
 # Meta Model API (Muse Spark)
 
 _Last updated: 2026-09-02_
-_Status: prototype built and merged into the working tree; unverified against a
-live key. The provider compiles, is registered, is wired into the CLI, and passes
-its tests. No generation request has been made — see
+_Status: prototype built and verified against the live API with a real key.
+Generation, streaming, tool calling, encrypted-reasoning replay, and the full
+reasoning-effort ladder were all exercised end to end — see
 [Verification status](#verification-status)._
 
 Support for Meta's Model API, launched 2026-09-02, serving the **Muse Spark**
@@ -159,20 +159,63 @@ generic should not silently redirect an existing setup.
 
 ## Verification status
 
+Verified against the live API on 2026-09-02 with a real key. The integration
+suite lives in `providers/meta/integration_test.go` behind the `integration`
+build tag and skips when no key is set:
+
+    MODEL_API_KEY=... go test -tags integration ./providers/meta/...
+
 | Check | Result |
 | --- | --- |
 | `go build ./...` (root, `providers/meta`, CLI) | pass |
 | `go vet ./...` | pass |
 | `go test ./...` (root + `providers/meta`) | pass |
 | `generate_provider_catalogs.py --check` | clean |
+| `sync_module_versions.py --check v1.27.0` | clean |
 | CLI lists Meta and `muse-spark-1.3` | pass |
-| `GET https://api.meta.ai/v1/status` | 200, `{"is_alive":true,"service_status":"operational"}` |
-| **A real generation request** | **not run — no API key available** |
+| `GET /v1/models` returns all five catalogued ids | pass |
+| Generation | pass |
+| Streaming | pass |
+| Usage reporting (`input`/`output` tokens) | pass |
+| Tool calling | pass |
+| **Encrypted-reasoning replay across a tool turn** | **pass** |
+| Effort ladder `minimal`…`xhigh` accepted | pass, all five probed |
 
-The last row is the important one. Everything above it says the code is
-structurally correct and the endpoint is real; none of it says a Muse Spark
-completion has ever come back through this provider. Request shape, streaming
-event names, tool-call encoding, and the effort ladder are all inferred from
-documentation. The first thing to do with a key is run a tool-calling loop with
-`WithReasoningEffort` set and confirm that `encrypted_content` survives the
-round trip.
+`GET /v1/models` returned exactly the five Muse Spark ids in the catalog, plus
+`muse-image-1.0` and `muse-voice-transcribe-1.0`, which are deliberately out of
+scope. The reasoning-replay test is the one that mattered: the first turn came
+back with a `get_weather` tool call **and** a reasoning item carrying
+`encrypted_content`, that item survived a JSON round trip the way a stored
+session would, and Meta accepted it on replay alongside the tool result. That is
+the behavior Chat Completions cannot provide, and it is now observed rather than
+assumed.
+
+Two things the live run taught that the docs did not:
+
+- **Reasoning dominates the token bill on short prompts.** "Name one primary
+  color" cost 12 input tokens and **425 output tokens** — roughly 420 of them
+  invisible reasoning, billed at the output rate. Muse Spark reasons even with
+  no effort set, so cheap-looking prompts are not cheap, and the default
+  `max_tokens` of 32,768 is sized for reasoning plus answer for good reason.
+- **Latency is substantial.** Trivial single-turn prompts took 14–67 seconds,
+  and the five-effort ladder took 81 seconds for five one-word answers. Callers
+  should expect the reasoning pause before first visible content that the docs
+  warn about, and integration test timeouts need to be generous.
+
+## Remaining open items
+
+The three risks below survive the live run, since none of them is something a
+green test can close:
+
+1. **Meta's pricing page is still visibly in edit** — it carries an unresolved
+   editorial note telling its own authors to confirm the rate-limit numbers
+   before publishing. Prices and limits should be re-checked before a release.
+2. **No reasoning effort means no reasoning replay.** `providers/openai`
+   requests the `reasoning.encrypted_content` include only inside the branch
+   that sends a reasoning parameter (`provider.go:276`). The replay test passes
+   *because it sets an effort*; a caller who leaves `ReasoningEffort` unset gets
+   a model that still reasons but whose reasoning is never carried forward.
+   Worth deciding: always request the include, or document that agentic use must
+   set an effort.
+3. **The 1M context window vs. Dive's compaction defaults**, which were tuned
+   for 200K-class models.
