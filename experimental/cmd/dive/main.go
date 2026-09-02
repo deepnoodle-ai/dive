@@ -155,6 +155,10 @@ func main() {
 			cli.Bool("resume", "r").
 				Default(false).
 				Help("Resume a previous session"),
+			cli.Bool("screen").
+				Default(false).
+				Env("DIVE_SCREEN").
+				Help("Render the conversation in a managed, scrollable screen instead of terminal scrollback"),
 			cli.Bool("compaction").
 				Default(true).
 				Env("DIVE_COMPACTION").
@@ -437,6 +441,10 @@ func runInteractive(ctx *cli.Context) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to read startup instructions: %v\n", err)
 	}
 	app.startupAttachment = attachment
+	app.screenMode = ctx.Bool("screen")
+	// DIVE_DEBUG_FRAMES=1 puts the per-frame cost in the status line. Only the
+	// managed screen has frames to measure.
+	app.frameMetrics = app.screenMode && os.Getenv("DIVE_DEBUG_FRAMES") == "1"
 
 	// Wire up dialog and monitor notifier
 	tuiDialog.app = app

@@ -57,6 +57,19 @@ type noticeEvent struct {
 	text string
 }
 
+// touch records an in-place mutation of message i: the streaming flushes, a
+// tool result arriving, a tool's streamed output or progress line changing.
+// Bumping Rev lets any cache tell a mutation from an append, and the managed
+// screen's viewport drops its cached view and height for that message so the
+// next frame rebuilds it.
+func (a *App) touch(i int) {
+	if i < 0 || i >= len(a.messages) {
+		return
+	}
+	a.messages[i].Rev++
+	a.viewport.Invalidate(i)
+}
+
 // appendMessage appends a message and returns its index. Event-loop goroutine
 // only, like every other write to a.messages.
 func (a *App) appendMessage(msg Message) int {
@@ -65,15 +78,6 @@ func (a *App) appendMessage(msg Message) int {
 	}
 	a.messages = append(a.messages, msg)
 	return len(a.messages) - 1
-}
-
-// touch records an in-place mutation of message i. Phase 4 forwards this to
-// the viewport's per-item render cache; for now it only bumps Rev.
-func (a *App) touch(i int) {
-	if i < 0 || i >= len(a.messages) {
-		return
-	}
-	a.messages[i].Rev++
 }
 
 // appendNotice adds a dim one-line notice and shows it right away. Event-loop

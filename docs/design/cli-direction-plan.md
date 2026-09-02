@@ -47,13 +47,16 @@ Two more decisions this plan adds:
    only artifact that can tell us whether the managed screen is better or merely
    different.
 
+## Settled since
+
+- **Kitty under tmux.** Keep the inline app's unconditional enable. The runtime now
+  takes `SetKittyKeyboard(true)` (wonton v0.0.40), which skips the probe the way
+  `WithInlineKittyKeyboard` always has, so Shift+Enter behaves the same inside and
+  outside tmux and startup does not wait on a reply that tmux will not send. See the
+  managed-screen design, appendix E.
+
 ## Still open
 
-- **Kitty under tmux.** Whether to keep the inline app's unconditional enable or accept
-  the full-screen runtime's probe-and-skip (which loses Shift+Enter under tmux unless
-  `SetBackslashEnter` is set, at the cost of a 100 ms delay on every typed backslash).
-  Decide in Phase 4 from a tmux scenario, not from reading. Default should match
-  today's behaviour.
 - **Whether `/copy`'s picker ships in Phase 5 or slips.** The picker over code blocks
   is the better shape but the select-list dialog work is the tail of the phase.
 - **`--exit-transcript=full|turn|none`.** Add only if dogfooding asks for it.

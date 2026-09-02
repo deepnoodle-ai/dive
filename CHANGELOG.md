@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`dive --screen` renders the conversation in a managed, scrollable screen**
+  (`DIVE_SCREEN=1`). The transcript becomes application state in the alternate
+  screen instead of terminal scrollback, so it reflows on resize and scrolls
+  with the wheel, PgUp/PgDn, Ctrl+Home/End, and Home/End on an empty input.
+  Opt-in; the inline renderer is unchanged and still the default.
+  `DIVE_DEBUG_FRAMES=1` puts the per-frame cost in the status line.
+
 ### Changed
 
 - **The CLI transcript is one list with one renderer.** Every message the CLI

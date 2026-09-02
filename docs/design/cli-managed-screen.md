@@ -924,11 +924,16 @@ Points that are easy to get wrong:
   to be discarded. The deferred `Close()` covers the panic path: `Run` re-panics after
   restoring raw mode, unwinding runs `Close()`, and the stack trace prints on the main
   screen where it can be read.
-- **Kitty under tmux.** The probe is skipped there, so Shift+Enter will not insert a
-  newline unless `rt.SetBackslashEnter(true)` is set — which delays every typed
-  backslash by up to 100 ms. Today's inline app sends the Kitty enable sequence
-  unconditionally instead. Decide which to keep after testing in tmux; the default
-  should match current behaviour.
+- **Kitty under tmux — settled: enable it outright, no probe.** `Runtime.Run` probed
+  for the protocol and `shouldSkipTerminalQuery` refuses to ask under `TERM=screen*`
+  or `tmux*` (and in Apple Terminal), so a multiplexed session would have lost
+  Shift+Enter — while the inline app has always sent `CSI > 1 u` unconditionally
+  (`inline_app.go:393`) and `CSI < u` on the way out. Matching that is what keeps
+  behaviour the same, and it beats both alternatives: `SetBackslashEnter` costs every
+  typed backslash a delay, and the probe costs up to 200 ms of startup for an answer
+  tmux will not give. wonton v0.0.40 adds `Runtime.SetKittyKeyboard(true)`, which skips
+  the probe and enables the protocol; `runScreen` sets it. Terminals without the
+  protocol ignore the sequence, and tmux forwards it when the outer terminal has it.
 - **Resize.** Handle `tui.ResizeEvent` in `HandleEvent` (there is no handler today).
   The viewport re-measures on its own from the width it is rendered at; the app only
   needs the size if it wants it for the status line.

@@ -63,3 +63,7 @@ replace (
 	github.com/deepnoodle-ai/dive/providers/grok => ../../../providers/grok
 	github.com/deepnoodle-ai/dive/providers/openai => ../../../providers/openai
 )
+
+// TODO: drop once wonton tags the Viewport/Measure/Suspend release (v0.0.40)
+// and this becomes a plain version bump.
+replace github.com/deepnoodle-ai/wonton => ../../../../wonton

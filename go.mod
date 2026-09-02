@@ -20,3 +20,7 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
+
+// TODO: drop once wonton tags the Viewport/Measure/Suspend release (v0.0.40)
+// and this becomes a plain version bump.
+replace github.com/deepnoodle-ai/wonton => ../wonton

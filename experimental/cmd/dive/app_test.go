@@ -147,9 +147,9 @@ func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
 	assert.True(t, reasoningIdx < answerIdx, "reasoning should render before answer")
 }
 
-func TestConvertLLMMessageToViewsShowsThinkingContent(t *testing.T) {
-	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
-	views := app.convertLLMMessageToViews(&llm.Message{
+func TestConvertLLMMessageShowsThinkingContent(t *testing.T) {
+	app, _ := newFakeApp(t)
+	msgs := app.convertLLMMessage(&llm.Message{
 		Role: llm.Assistant,
 		Content: []llm.Content{
 			&llm.ThinkingContent{Thinking: "I considered the API contract."},
@@ -157,6 +157,14 @@ func TestConvertLLMMessageToViewsShowsThinkingContent(t *testing.T) {
 		},
 	}, nil)
 
+	assert.Equal(t, 2, len(msgs))
+	assert.Equal(t, roleReasoning, msgs[0].Role)
+	assert.Equal(t, roleAssistant, msgs[1].Role)
+
+	var views []tui.View
+	for _, m := range msgs {
+		views = append(views, app.messageView(m, viewOpts{}))
+	}
 	var buf bytes.Buffer
 	tui.Fprint(&buf, tui.Stack(views...), tui.WithWidth(80))
 	out := buf.String()
