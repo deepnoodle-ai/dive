@@ -17,6 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **The `--resume` session picker is one line per session.** The second line
+  was the workspace path, identical on nearly every row; it now appears once,
+  under the list, for the selected session. Sessions with no turns are dropped,
+  attachment markers no longer eat the title, long titles are cut on whole
+  characters rather than mid-rune, and the turn count and age stay pinned right.
 - **Dim text in the CLI is readable on a dark background.** Secondary greys sat
   near 2.9:1 contrast, and hints combined bright black with SGR 2 (faint) on top
   of it. Greys now start at 152 and hints keep the italic without the dimming.

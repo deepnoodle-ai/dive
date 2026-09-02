@@ -62,8 +62,17 @@ func RunSessionPicker(store session.Store, filter string, workspaceDir string) (
 		sessions = listResult.Sessions
 	}
 
+	// A session with no turns is one that was opened and abandoned; there is
+	// nothing in it to resume. They were four of the ten rows on screen.
+	if withTurns := nonEmptySessions(sessions); len(withTurns) > 0 {
+		sessions = withTurns
+	}
+
 	if len(sessions) == 0 {
-		return nil, fmt.Errorf("no sessions found matching %q", filter)
+		if filter != "" {
+			return nil, fmt.Errorf("no sessions found matching %q", filter)
+		}
+		return &SessionPickerResult{Canceled: true}, nil
 	}
 
 	// Create picker app
@@ -88,97 +97,129 @@ func RunSessionPicker(store session.Store, filter string, workspaceDir string) (
 	return picker.result, nil
 }
 
+// visibleRows is how many sessions the picker shows at once. The picker runs
+// in the inline live region, so every row it reserves is a row of the user's
+// scrollback it paints over.
+const visibleRows = 10
+
+// window returns the slice of sessions currently on screen, keeping the
+// selection inside it.
+func (p *SessionPickerApp) window() (start, end int) {
+	start = 0
+	if p.selectedIdx >= visibleRows {
+		start = p.selectedIdx - visibleRows + 1
+	}
+	end = min(start+visibleRows, len(p.sessions))
+	return start, end
+}
+
 // LiveView implements tui.InlineApplication
 func (p *SessionPickerApp) LiveView() tui.View {
-	views := []tui.View{
+	start, end := p.window()
+
+	header := tui.Group(
+		tui.Text(" Resume a session").Bold(),
+		tui.Spacer().Flex(1),
+		tui.Text("%d of %d ", end-start, len(p.sessions)).Style(metaStyle()),
+	)
+
+	views := []tui.View{tui.Text(""), header, tui.Text("")}
+	for i := start; i < end; i++ {
+		views = append(views, p.sessionItemView(p.sessions[i], i-start, i == p.selectedIdx))
+	}
+
+	views = append(views,
 		tui.Text(""),
-		tui.Text(" Select a session to resume:").Bold(),
-		tui.Text(""),
-	}
-
-	// Show sessions (max 10 at a time with scrolling)
-	startIdx := 0
-	if p.selectedIdx >= 10 {
-		startIdx = p.selectedIdx - 9
-	}
-	endIdx := startIdx + 10
-	if endIdx > len(p.sessions) {
-		endIdx = len(p.sessions)
-	}
-
-	for i := startIdx; i < endIdx; i++ {
-		session := p.sessions[i]
-		views = append(views, p.sessionItemView(session, i == p.selectedIdx))
-	}
-
-	// Show scroll indicator if needed
-	if len(p.sessions) > 10 {
-		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" (%d/%d sessions)", endIdx, len(p.sessions)).Style(hintStyle()))
-	}
-
-	views = append(views, tui.Text(""))
-	views = append(views, tui.Text(" ↑/↓ to navigate, Enter to select, Esc to cancel").Style(hintStyle()))
-
+		p.detailView(),
+		tui.Text(" ↑↓ navigate · 1-9 jump · Enter resume · Esc cancel").Style(metaStyle()),
+	)
 	return tui.Stack(views...)
 }
 
-// sessionItemView creates the view for a single session item
-func (p *SessionPickerApp) sessionItemView(info *session.SessionInfo, selected bool) tui.View {
-	// Build the session display
-	timeAgo := formatTimeAgo(info.UpdatedAt)
-
-	// Get title
-	title := info.Title
-	if title == "" {
-		title = "Untitled session"
+// detailView is a fixed line under the list carrying the selected session's
+// directory. Keeping it out of the rows is what lets the list be one line per
+// session: the path was the same on nearly every row, and repeating it 10
+// times said nothing while costing 10 lines.
+func (p *SessionPickerApp) detailView() tui.View {
+	if p.selectedIdx < 0 || p.selectedIdx >= len(p.sessions) {
+		return tui.Text("")
 	}
-
-	// Truncate title if too long
-	if len(title) > 50 {
-		title = title[:47] + "..."
+	ws := sessionWorkspace(p.sessions[p.selectedIdx])
+	if ws == "" {
+		return tui.Text("")
 	}
+	return tui.Text(" %s", shortenPath(ws)).Style(metaStyle())
+}
 
-	// Get workspace if available
-	var workspace string
-	if info.Metadata != nil {
-		if ws, ok := info.Metadata["workspace"].(string); ok {
-			workspace = shortenPath(ws)
-		}
+// metaStyle is the picker's secondary text: timestamps, counts, key hints.
+// Upright, not italic — a whole screen of slanted text is what made the old
+// picker hard to read.
+func metaStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(dimText)
+}
+
+// sessionItemView renders one session as a single line:
+//
+//	▌1  what does this image say?   ~/other/repo      3 turns · 6w ago
+//
+// One line rather than two, because the second line was the workspace path and
+// it is the same path on nearly every row. The path now appears only when it
+// differs from where the picker was launched, which is the only time it tells
+// the user anything.
+func (p *SessionPickerApp) sessionItemView(info *session.SessionInfo, row int, selected bool) tui.View {
+	titleStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 215, G: 215, B: 225})
+	marker := tui.Text("  ")
+	gutter := tui.Text("%d ", row+1).Style(metaStyle())
+	if row >= 9 {
+		gutter = tui.Text("  ").Style(metaStyle())
 	}
-
-	// Build the item view
 	if selected {
-		line1 := tui.Group(
-			tui.Text(" ❯ ").Fg(tui.ColorCyan),
-			tui.Text("[%s] ", timeAgo).Style(hintStyle()),
-			tui.Text("%s", title).Fg(tui.ColorCyan),
-		)
-
-		var line2 tui.View
-		if workspace != "" {
-			line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Style(hintStyle())
-		} else {
-			line2 = tui.Text("     %d turns", info.EventCount).Style(hintStyle())
-		}
-
-		return tui.Stack(line1, line2)
+		titleStyle = tui.NewStyle().WithFgRGB(accentBright).WithBold()
+		marker = tui.Text("▌ ").Style(tui.NewStyle().WithFgRGB(accentBright))
+		gutter = tui.Text("%d ", row+1).Style(tui.NewStyle().WithFgRGB(accentDim))
 	}
 
-	line1 := tui.Group(
-		tui.Text("   "),
-		tui.Text("[%s] ", timeAgo).Style(hintStyle()),
-		tui.Text("%s", title),
+	parts := []tui.View{marker, gutter, tui.Text("%s", sessionTitle(info)).Style(titleStyle)}
+
+	parts = append(parts,
+		tui.Spacer().Flex(1),
+		tui.Text("  %d turn%s · %s ", info.EventCount, pluralSuffix(info.EventCount), formatTimeAgo(info.UpdatedAt)).
+			Style(metaStyle()),
 	)
+	return tui.Group(parts...)
+}
 
-	var line2 tui.View
-	if workspace != "" {
-		line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Style(hintStyle())
-	} else {
-		line2 = tui.Text("     %d turns", info.EventCount).Style(hintStyle())
+// sessionTitle is what the session is about, in one line. Titles are taken
+// from the first message, so an attachment can push the actual words off the
+// end; the marker is dropped rather than truncated around.
+func sessionTitle(info *session.SessionInfo) string {
+	title := strings.TrimSpace(info.Title)
+	for strings.HasPrefix(title, "[image:") {
+		close := strings.Index(title, "]")
+		if close < 0 {
+			break
+		}
+		title = strings.TrimSpace(title[close+1:])
 	}
+	if title == "" {
+		return "Untitled session"
+	}
+	// Truncate by runes: slicing bytes splits multi-byte characters.
+	// 48 leaves room for the gutter and the right-hand meta at 80 columns,
+	// which is the narrowest terminal worth laying out for.
+	if r := []rune(title); len(r) > 48 {
+		return strings.TrimRight(string(r[:47]), " ") + "…"
+	}
+	return title
+}
 
-	return tui.Stack(line1, line2)
+// sessionWorkspace reads the workspace path a session was started in.
+func sessionWorkspace(info *session.SessionInfo) string {
+	if info.Metadata == nil {
+		return ""
+	}
+	ws, _ := info.Metadata["workspace"].(string)
+	return ws
 }
 
 // HandleEvent implements tui.EventHandler
@@ -202,27 +243,28 @@ func (p *SessionPickerApp) HandleEvent(event tui.Event) []tui.Cmd {
 			return []tui.Cmd{tui.Quit()}
 		}
 
-		// Handle number keys 1-9 for quick selection within visible viewport
+		// Number keys jump to a row by its gutter number, which is why the
+		// gutter is numbered from the top of the window rather than the list.
 		if e.Rune >= '1' && e.Rune <= '9' {
-			// Calculate visible viewport (same logic as LiveView)
-			startIdx := 0
-			if p.selectedIdx >= 10 {
-				startIdx = p.selectedIdx - 9
-			}
-			endIdx := startIdx + 10
-			if endIdx > len(p.sessions) {
-				endIdx = len(p.sessions)
-			}
-			visibleCount := endIdx - startIdx
-
-			idx := int(e.Rune - '1')
-			if idx < visibleCount {
-				p.result.SessionID = p.sessions[startIdx+idx].ID
+			start, end := p.window()
+			if idx := start + int(e.Rune-'1'); idx < end {
+				p.result.SessionID = p.sessions[idx].ID
 				return []tui.Cmd{tui.Quit()}
 			}
 		}
 	}
 	return nil
+}
+
+// nonEmptySessions drops sessions that hold no turns.
+func nonEmptySessions(sessions []*session.SessionInfo) []*session.SessionInfo {
+	kept := make([]*session.SessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		if s.EventCount > 0 {
+			kept = append(kept, s)
+		}
+	}
+	return kept
 }
 
 // formatTimeAgo formats a time as a human-readable "time ago" string
