@@ -1,13 +1,13 @@
 module github.com/deepnoodle-ai/dive/a2a
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.26.5
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.5.0
 	github.com/deepnoodle-ai/dive v1.26.0
-	github.com/deepnoodle-ai/wonton v0.0.38
+	github.com/deepnoodle-ai/wonton v0.0.39
 )
 
 require (

@@ -4,7 +4,7 @@ Get up and running with Dive in a few minutes.
 
 ## Prerequisites
 
-- **Go 1.25** or later
+- **Go 1.26** or later
 - An API key from at least one LLM provider:
   - [Anthropic](https://console.anthropic.com/) (`ANTHROPIC_API_KEY`)
   - [OpenAI](https://platform.openai.com/api-keys) (`OPENAI_API_KEY`)

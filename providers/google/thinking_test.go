@@ -90,6 +90,25 @@ func TestGemini37FlashBudgetCeilingIsLowerThanTheFamily(t *testing.T) {
 	assert.Equal(t, int32(32768), *thinking.ThinkingBudget)
 }
 
+func TestGemini38FlashResolvesToItsOwnCapabilities(t *testing.T) {
+	// 3.8 Flash sits between its neighbours: it rejects MINIMAL like 3.7 Flash
+	// but keeps the family's 65535 budget ceiling rather than 3.7's 32768, so
+	// landing on the 3.7 entry by prefix would be wrong in one direction and
+	// landing on a generic 3.x entry wrong in the other. Both probed live.
+	entry, found := lookupEntry(ModelGemini38Flash)
+	assert.True(t, found)
+	assert.Equal(t, "gemini-3.8-flash", entry.prefix)
+
+	clamped := buildThinking(t, ModelGemini38Flash,
+		llm.WithReasoningEffort(llm.ReasoningEffortMinimal))
+	assert.NotNil(t, clamped)
+	assert.Equal(t, genai.ThinkingLevelLow, clamped.ThinkingLevel)
+
+	budget := buildThinking(t, ModelGemini38Flash, llm.WithReasoningBudget(1_000_000))
+	assert.NotNil(t, budget)
+	assert.Equal(t, int32(65535), *budget.ThinkingBudget)
+}
+
 func TestReasoningBudgetMapsToThinkingBudget(t *testing.T) {
 	thinking := buildThinking(t, ModelGemini36Flash, llm.WithReasoningBudget(4096))
 	assert.NotNil(t, thinking)

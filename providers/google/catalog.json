@@ -25,15 +25,22 @@
   ],
   "models": [
     {
+      "go_name": "ModelGemini38Flash",
+      "id": "gemini-3.8-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.8 Flash",
+      "default": true,
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Most intelligent Flash model for long-horizon engineering and autonomous agents"
+    },
+    {
       "go_name": "ModelGemini37Flash",
       "id": "gemini-3.7-flash",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 3.7 Flash",
-      "default": true,
-      "recommended": true,
-      "cli_order": 1,
-      "description": "Most capable Flash model for agentic workflows and multimodal reasoning"
+      "display_name": "Gemini 3.7 Flash"
     },
     {
       "go_name": "ModelGemini36Flash",
@@ -58,6 +65,27 @@
       "recommended": true,
       "cli_order": 3,
       "description": "Lowest-cost model for high-throughput execution"
+    },
+    {
+      "go_name": "ModelGemini35Transcribe",
+      "id": "gemini-3.5-transcribe",
+      "kind": "audio",
+      "context_window": 98304,
+      "display_name": "Gemini 3.5 Transcribe"
+    },
+    {
+      "go_name": "ModelGemini35TranscribeLive",
+      "id": "gemini-3.5-transcribe-live",
+      "kind": "audio",
+      "context_window": 131072,
+      "display_name": "Gemini 3.5 Transcribe Live"
+    },
+    {
+      "go_name": "ModelGeminiOmni11Flash",
+      "id": "gemini-omni-1.1-flash",
+      "kind": "video",
+      "context_window": 131072,
+      "display_name": "Gemini Omni 1.1 Flash"
     },
     {
       "go_name": "ModelGemini31ProPreview",
@@ -228,6 +256,15 @@
   ],
   "pricing": {
     "text": [
+      {
+        "model": "gemini-3.8-flash",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "3.75",
+        "cache_read_price_per_1m_tokens": "0.075",
+        "currency": "USD",
+        "updated_at": "2026-09-02",
+        "note": "Rates billed today. Google lists a scheduled increase to $1.50/$7.50 ($0.15 cache read) on 2027-01-01; revisit then."
+      },
       {
         "model": "gemini-3.7-flash",
         "input_price_per_1m_tokens": "0.75",

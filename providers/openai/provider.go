@@ -72,6 +72,9 @@ func New(opts ...Option) *Provider {
 	p.options = append(p.options,
 		option.WithHTTPClient(p.httpClient),
 		option.WithMaxRetries(0),
+		// Repair OpenAI-compatible error bodies the SDK can no longer parse;
+		// see normalizeErrorBodyMiddleware.
+		option.WithMiddleware(normalizeErrorBodyMiddleware),
 	)
 	p.client = openai.NewClient(p.options...)
 	return p

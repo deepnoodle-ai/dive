@@ -32,6 +32,7 @@ const (
 	ModelO3                 = "openai/o3"
 	ModelO3Pro              = "openai/o3-pro"
 	ModelO4Mini             = "openai/o4-mini"
+	ModelGemini38Flash      = "google/gemini-3.8-flash"
 	ModelGemini37Flash      = "google/gemini-3.7-flash"
 	ModelGemini31ProPreview = "google/gemini-3.1-pro-preview"
 	// Deprecated: Model was shut down March 9, 2026.

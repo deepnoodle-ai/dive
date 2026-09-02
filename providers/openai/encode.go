@@ -163,7 +163,10 @@ func findAndEncodeMCPPair(
 				text.WriteString(chunk.Text)
 			}
 			if result.IsError {
-				mcpCallParam.Error = openai.String(text.String())
+				// An MCP tool that answered isError is an execution failure,
+				// not a protocol or transport one, so it takes the
+				// mcp_tool_execution_error variant of the error union.
+				mcpCallParam.Error = responses.McpToolCallErrorParamOfMcpToolExecutionError(text.String())
 			} else {
 				mcpCallParam.Output = openai.String(text.String())
 			}
@@ -325,7 +328,7 @@ func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInput
 		if err != nil {
 			return responses.ResponseInputItemUnionParam{}, err
 		}
-		return responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output), nil
+		return functionCallOutputItem(c.ToolUseID, output), nil
 	}
 	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(blocks))
 	for _, b := range blocks {
@@ -361,7 +364,19 @@ func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInput
 			})
 		}
 	}
-	return responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, items), nil
+	return functionCallOutputItem(c.ToolUseID, items), nil
+}
+
+// functionCallOutputItem builds a function_call_output item for a tool call.
+// openai-go v3.51 dropped call_id from the constructor and made it an optional
+// field, so it is set after construction rather than passed in.
+func functionCallOutputItem[T string | responses.ResponseFunctionCallOutputItemListParam](
+	toolUseID string,
+	output T,
+) responses.ResponseInputItemUnionParam {
+	item := responses.ResponseInputItemParamOfFunctionCallOutput(output)
+	item.OfFunctionCallOutput.CallID = openai.String(toolUseID)
+	return item
 }
 
 func blocksContainImage(blocks []*dive.ToolResultContent) bool {

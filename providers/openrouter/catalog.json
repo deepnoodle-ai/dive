@@ -216,6 +216,13 @@
       "display_name": "o4-mini"
     },
     {
+      "go_name": "ModelGemini38Flash",
+      "id": "google/gemini-3.8-flash",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Gemini 3.8 Flash"
+    },
+    {
       "go_name": "ModelGemini37Flash",
       "id": "google/gemini-3.7-flash",
       "kind": "text",

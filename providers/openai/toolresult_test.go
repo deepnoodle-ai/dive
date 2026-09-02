@@ -25,7 +25,7 @@ func TestEncodeToolResultTextBlocksFlattened(t *testing.T) {
 	assert.NoError(t, err)
 	data, err := json.Marshal(items)
 	assert.NoError(t, err)
-	assert.Equal(t, `[{"call_id":"call_1","output":"line one\n\nline two","type":"function_call_output"}]`, string(data))
+	assert.Equal(t, `[{"output":"line one\n\nline two","call_id":"call_1","type":"function_call_output"}]`, string(data))
 }
 
 // TestEncodeToolResultWithImageBlocks verifies a tool result carrying an
@@ -91,7 +91,7 @@ func TestEncodeToolResultEmptyOutput(t *testing.T) {
 			assert.NoError(t, err)
 			data, err := json.Marshal(items)
 			assert.NoError(t, err)
-			assert.Equal(t, `[{"call_id":"call_1","output":"(no output)","type":"function_call_output"}]`, string(data))
+			assert.Equal(t, `[{"output":"(no output)","call_id":"call_1","type":"function_call_output"}]`, string(data))
 		})
 	}
 }
@@ -114,5 +114,5 @@ func TestEncodeToolResultBlocksSurviveJSONRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 	data, err := json.Marshal(items)
 	assert.NoError(t, err)
-	assert.Equal(t, `[{"call_id":"call_1","output":"replayed","type":"function_call_output"}]`, string(data))
+	assert.Equal(t, `[{"output":"replayed","call_id":"call_1","type":"function_call_output"}]`, string(data))
 }

@@ -189,15 +189,16 @@ func decodeMcpCallContent(mcpCall responses.ResponseOutputItemMcpCall) ([]llm.Co
 	contentBlocks = append(contentBlocks, toolUseContent)
 
 	// Create tool result content block if there's output or error
-	if mcpCall.Output != "" || mcpCall.Error != "" {
+	errorText, hasError := mcpCallErrorText(mcpCall.Error)
+	if mcpCall.Output != "" || hasError {
 		var resultContent []*llm.ContentChunk
 		isError := false
 
-		if mcpCall.Error != "" {
+		if hasError {
 			// If there's an error, add it as text content and mark as error
 			resultContent = append(resultContent, &llm.ContentChunk{
 				Type: "text",
-				Text: mcpCall.Error,
+				Text: errorText,
 			})
 			isError = true
 		} else if mcpCall.Output != "" {
@@ -217,6 +218,37 @@ func decodeMcpCallContent(mcpCall responses.ResponseOutputItemMcpCall) ([]llm.Co
 	}
 
 	return contentBlocks, nil
+}
+
+// mcpCallErrorText flattens an mcp_call error to text and reports whether the
+// call actually failed. openai-go v3.51 replaced the plain error string with a
+// union of mcp_protocol_error, mcp_tool_execution_error, and http_error: the
+// protocol and HTTP variants carry a code and message, while the execution
+// variant carries the server's own content, which may be a string or the
+// structured block list MCP servers return. Type is the discriminant, so an
+// empty Type means no error was reported.
+func mcpCallErrorText(callErr responses.McpToolCallErrorUnion) (string, bool) {
+	if callErr.Type == "" {
+		return "", false
+	}
+	if content := callErr.Content; content != nil {
+		if text, ok := content.(string); ok {
+			if text != "" {
+				return text, true
+			}
+		} else if encoded, err := json.Marshal(content); err == nil {
+			return string(encoded), true
+		}
+	}
+	if callErr.Message != "" {
+		if callErr.Code != 0 {
+			return fmt.Sprintf("%s (code %d)", callErr.Message, callErr.Code), true
+		}
+		return callErr.Message, true
+	}
+	// The variant reported a failure but carried no detail Dive can render;
+	// the type itself is still worth surfacing over an empty string.
+	return callErr.Type, true
 }
 
 func decodeMcpListToolsContent(mcpList responses.ResponseOutputItemMcpListTools) ([]llm.Content, error) {
