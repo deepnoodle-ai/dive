@@ -32,6 +32,7 @@ SUB_MODULES = (
     "providers/google",
     "providers/openai",
     "providers/grok",
+    "providers/meta",
     "a2a",
     "otel",
     "experimental/mcp",

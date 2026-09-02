@@ -92,6 +92,9 @@ func TableFor(providerName, model string) Table {
 		strings.HasPrefix(id, "x-ai/"),
 		strings.HasPrefix(id, "grok-"):
 		return sortedGrok
+	case strings.EqualFold(providerName, "meta"),
+		strings.HasPrefix(id, "muse-"):
+		return sortedMuse
 	case strings.EqualFold(providerName, "openai"),
 		strings.HasPrefix(id, "openai/"),
 		strings.HasPrefix(id, "gpt-"),

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Meta Model API provider (Muse Spark)** — new `providers/meta` module serving
+  `muse-spark-1.3` and its 1.2/1.1 siblings (1M context, $1.25/$4.25 per MTok;
+  a discounted `-contributor` tier trades a lower price for training on your
+  data). Targets Meta's Responses API, because Chat Completions redacts
+  reasoning for external keys and so cannot carry it across tool turns.
+  Unverified against a live key; see `docs/design/meta-model-api.md`.
+
 ## [1.27.0] - 2026-09-02
 
 ### Added

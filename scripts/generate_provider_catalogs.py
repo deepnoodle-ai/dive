@@ -77,6 +77,13 @@ TARGETS: dict[str, Target] = {
         "grok",
         (TEXT, IMAGE),
     ),
+    "meta": Target(
+        "meta",
+        "meta",
+        REPO_ROOT / "providers" / "meta",
+        "meta",
+        (TEXT,),
+    ),
     "mistral": Target(
         "mistral",
         "mistral",

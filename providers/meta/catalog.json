@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "provider": "meta",
+  "sources": [
+    {
+      "name": "models",
+      "url": "https://dev.meta.ai/docs/models"
+    },
+    {
+      "name": "pricing",
+      "url": "https://dev.meta.ai/docs/pricing-rate-limits"
+    },
+    {
+      "name": "protocols",
+      "url": "https://dev.meta.ai/docs/protocols"
+    },
+    {
+      "name": "api-reference",
+      "url": "https://dev.meta.ai/docs/api-reference"
+    },
+    {
+      "name": "docs-index",
+      "url": "https://dev.meta.ai/docs/llms.txt",
+      "kind": "llms",
+      "discovery_patterns": [
+        "/docs/(?:models|pricing-rate-limits|protocols|reasoning|prompt-caching)",
+        "/docs/protocols/",
+        "/docs/api-reference/"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelMuseSpark13",
+      "id": "muse-spark-1.3",
+      "default": true,
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Spark 1.3",
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Meta's agentic and coding model; 1M context, standard tier (no training on your data)"
+    },
+    {
+      "go_name": "ModelMuseSpark13Contributor",
+      "id": "muse-spark-1.3-contributor",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Spark 1.3 (Contributor)",
+      "description": "Discounted tier; Meta trains on your prompts and completions. Deliberately not marked recommended so it is opt-in by explicit id rather than something to pick blind from a menu."
+    },
+    {
+      "go_name": "ModelMuseSpark12",
+      "id": "muse-spark-1.2",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Spark 1.2",
+      "description": "Previous version; the supported choice for audio input"
+    },
+    {
+      "go_name": "ModelMuseSpark12Contributor",
+      "id": "muse-spark-1.2-contributor",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Spark 1.2 (Contributor)",
+      "description": "Discounted tier: Meta trains on your prompts and completions"
+    },
+    {
+      "go_name": "ModelMuseSpark11",
+      "id": "muse-spark-1.1",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Spark 1.1",
+      "description": "Original version; no contributor tier is offered"
+    }
+  ],
+  "pricing": {
+    "text": [
+      {
+        "model": "muse-spark-1.3",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "4.25",
+        "cache_read_price_per_1m_tokens": "0.15",
+        "currency": "USD",
+        "updated_at": "2026-09-02",
+        "note": "Standard tier. Meta publishes no long-context premium: one rate at any context length."
+      },
+      {
+        "model": "muse-spark-1.3-contributor",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.20",
+        "cache_read_price_per_1m_tokens": "0.002",
+        "currency": "USD",
+        "updated_at": "2026-09-02",
+        "note": "Contributor tier: discounted in exchange for permission to train on your prompts and completions."
+      },
+      {
+        "model": "muse-spark-1.2",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "4.25",
+        "cache_read_price_per_1m_tokens": "0.15",
+        "currency": "USD",
+        "updated_at": "2026-09-02"
+      },
+      {
+        "model": "muse-spark-1.2-contributor",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.20",
+        "cache_read_price_per_1m_tokens": "0.002",
+        "currency": "USD",
+        "updated_at": "2026-09-02",
+        "note": "Contributor tier: discounted in exchange for permission to train on your prompts and completions."
+      },
+      {
+        "model": "muse-spark-1.1",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "4.25",
+        "cache_read_price_per_1m_tokens": "0.15",
+        "currency": "USD",
+        "updated_at": "2026-09-02"
+      }
+    ]
+  }
+}

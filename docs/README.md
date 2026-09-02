@@ -31,6 +31,7 @@ These cover packages in `experimental/` with unstable APIs:
 
 - [Sandboxing](design/sandboxing.md) - Sandboxing design
 - [Runtime Context Injection](design/context-injection.md) - Implemented context authority, delivery, ordering, persistence, and provider-rendering contract
+- [Meta Model API (Muse Spark)](design/meta-model-api.md) - Prototype provider for Meta's Model API, and why it targets Responses rather than Chat Completions
 
 ## Project
 

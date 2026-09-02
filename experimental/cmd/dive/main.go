@@ -1273,5 +1273,12 @@ func getDefaultModel() string {
 	if os.Getenv("MISTRAL_API_KEY") != "" {
 		return defaultMistralModel
 	}
+	// Checked last: Meta documents the generic name MODEL_API_KEY, which is
+	// likelier than a vendor-scoped name to already mean something else in a
+	// user's environment. Reaching it only when no vendor key is set keeps a
+	// collision from silently redirecting an existing setup.
+	if os.Getenv("MODEL_API_KEY") != "" || os.Getenv("META_API_KEY") != "" {
+		return defaultMetaModel
+	}
 	return anthropic.DefaultModel
 }
