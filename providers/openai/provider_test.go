@@ -212,7 +212,7 @@ func TestEncodeMessages(t *testing.T) {
 					},
 				},
 			},
-			want: `[{"call_id":"tool_123","output":"The weather is sunny","type":"function_call_output"}]`,
+			want: `[{"output":"The weather is sunny","call_id":"tool_123","type":"function_call_output"}]`,
 		},
 		{
 			// A PostToolUse hook's AdditionalContext lands as auxiliary
@@ -233,7 +233,7 @@ func TestEncodeMessages(t *testing.T) {
 					},
 				},
 			},
-			want: `[{"call_id":"tool_123","output":"The weather is sunny","type":"function_call_output"},{"content":[{"text":"note: weather source verified","type":"input_text"}],"role":"user"}]`,
+			want: `[{"output":"The weather is sunny","call_id":"tool_123","type":"function_call_output"},{"content":[{"text":"note: weather source verified","type":"input_text"}],"role":"user"}]`,
 		},
 		{
 			// Even when a durable transcript stores the auxiliary text before
@@ -249,7 +249,7 @@ func TestEncodeMessages(t *testing.T) {
 					},
 				},
 			},
-			want: `[{"call_id":"tool_a","output":"A","type":"function_call_output"},{"call_id":"tool_b","output":"B","type":"function_call_output"},{"content":[{"text":"aux for A","type":"input_text"}],"role":"user"}]`,
+			want: `[{"output":"A","call_id":"tool_a","type":"function_call_output"},{"output":"B","call_id":"tool_b","type":"function_call_output"},{"content":[{"text":"aux for A","type":"input_text"}],"role":"user"}]`,
 		},
 		{
 			name: "empty messages are skipped",

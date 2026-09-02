@@ -79,6 +79,15 @@ type capabilityEntry struct {
 // cannot, and the 2.5 generation has no thinking level at all.
 var modelCapabilityTable = []capabilityEntry{
 	// --- 3.x: thinking levels, budgets in [1, 65535] unless noted. ---
+	// 3.8 Flash rejects MINIMAL ("Thinking level MINIMAL is not supported for
+	// this model") like the Pro models and 3.7 Flash, but keeps the family's
+	// full [1, 65535] budget range rather than 3.7's lowered 32768 ceiling, and
+	// accepts thinkingBudget: 0. Probed live against the public Gemini API on
+	// 2026-09-02.
+	{prefix: "gemini-3.8-flash", caps: modelCapabilities{
+		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		canDisableThinking: true,
+	}},
 	// 3.7 Flash rejects MINIMAL ("Thinking level is unsupported:
 	// THINKING_LEVEL_MINIMAL") and its budget ceiling is lower than the rest
 	// of the family — 32768, not 65535 ("thinking_budget is out of range;

@@ -14,6 +14,7 @@ func TestLatestGeminiFlashModels(t *testing.T) {
 		inputPrice  float64
 		outputPrice float64
 	}{
+		{ModelGemini38Flash, "gemini-3.8-flash", 0.75, 3.75},
 		{ModelGemini37Flash, "gemini-3.7-flash", 0.75, 3.75},
 		{ModelGemini35FlashLite, "gemini-3.5-flash-lite", 0.30, 2.50},
 	}
@@ -33,7 +34,7 @@ func TestLatestGeminiFlashModelsOmitTemperature(t *testing.T) {
 	temperature := 0.8
 	provider := New()
 
-	for _, model := range []string{ModelGemini37Flash, ModelGemini35FlashLite} {
+	for _, model := range []string{ModelGemini38Flash, ModelGemini37Flash, ModelGemini35FlashLite} {
 		t.Run(model, func(t *testing.T) {
 			logger := &recordingWarningLogger{}
 			var request Request
@@ -60,6 +61,7 @@ func TestShouldOmitTemperatureCoversFutureGeminiModels(t *testing.T) {
 	}{
 		{ModelGemini35FlashLite, true},
 		{"gemini-3.5-flash-lite-001", true},
+		{ModelGemini38Flash, true},
 		{ModelGemini36Flash, true},
 		{"gemini-3.7-pro", true},
 		{"gemini-4-pro", true},

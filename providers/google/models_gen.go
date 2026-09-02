@@ -3,10 +3,14 @@
 package google
 
 const (
+	ModelGemini38Flash                 = "gemini-3.8-flash"
 	ModelGemini37Flash                 = "gemini-3.7-flash"
 	ModelGemini36Flash                 = "gemini-3.6-flash"
 	ModelGemini35Flash                 = "gemini-3.5-flash"
 	ModelGemini35FlashLite             = "gemini-3.5-flash-lite"
+	ModelGemini35Transcribe            = "gemini-3.5-transcribe"
+	ModelGemini35TranscribeLive        = "gemini-3.5-transcribe-live"
+	ModelGeminiOmni11Flash             = "gemini-omni-1.1-flash"
 	ModelGemini31ProPreview            = "gemini-3.1-pro-preview"
 	ModelGemini31ProPreviewCustomTools = "gemini-3.1-pro-preview-customtools"
 	ModelGemini31FlashLite             = "gemini-3.1-flash-lite"
@@ -38,4 +42,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGemini37Flash
+var DefaultModel = ModelGemini38Flash

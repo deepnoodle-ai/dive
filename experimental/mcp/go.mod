@@ -1,13 +1,13 @@
 module github.com/deepnoodle-ai/dive/experimental/mcp
 
-go 1.25.5
+go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
 	github.com/deepnoodle-ai/dive v1.26.0
-	github.com/deepnoodle-ai/wonton v0.0.38
-	github.com/mark3labs/mcp-go v0.58.0
+	github.com/deepnoodle-ai/wonton v0.0.39
+	github.com/mark3labs/mcp-go v1.0.0
 )
 
 require (

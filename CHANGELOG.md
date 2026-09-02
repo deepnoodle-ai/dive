@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Gemini 3.8 Flash** — new `google.ModelGemini38Flash` (1M context,
+  $0.75/$3.75 per MTok). It becomes `google.DefaultModel` and takes Gemini 3.7
+  Flash's CLI recommendation slot; 3.7 Flash remains catalogued. OpenRouter
+  picks up `google/gemini-3.8-flash`.
+- **Gemini 3.5 Transcribe, Transcribe Live, and Omni 1.1 Flash** —
+  `ModelGemini35Transcribe`, `ModelGemini35TranscribeLive`, and
+  `ModelGeminiOmni11Flash` for Google's new speech-to-text and video models.
 - **Claude Fable 5.1 and Mythos 5.1** — new `ModelClaudeFable51` and
   `ModelClaudeMythos51` constants (1M context, $10/$50 per MTok). Fable 5.1
   replaces Fable 5 in the CLI recommendations; Fable 5 and Mythos 5 remain
@@ -29,9 +36,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Fable 5.1 and Mythos 5.1 cache reads bill at 0.025x base input**, not the
   0.1x Dive derives for every other Claude model, so the $0.25 per MTok rate is
   stated in the catalog instead of derived 4x too high.
+- **OpenAI-compatible error bodies with a bare-string `error` member keep their
+  status code and message.** openai-go v3.51 stopped parsing the xAI/Grok shape
+  `{"code":...,"error":"<message>"}` into an SDK error at all, surfacing a raw
+  `json.UnmarshalTypeError` instead; a 403 for exhausted credits lost both its
+  status and its reason, and no longer classified for retry.
 
 ### Changed
 
+- **Dive now requires Go 1.26.** All 11 modules moved from `go 1.25.0` to
+  `go 1.26.0`, and the pinned toolchain from go1.26.5 to go1.26.8, which clears
+  six Go standard library advisories (`net/http`, `crypto/tls`, `net/url`,
+  `encoding/asn1`, `encoding/xml`, `html/template`). `govulncheck` now reports
+  zero vulnerabilities across every module.
+- **Dependencies refreshed across every module.** Notably
+  `google.golang.org/genai` v1.68.0 → v1.71.0, `google.golang.org/api` v0.293.0
+  → v0.297.0, `openai/openai-go/v3` v3.50.0 → v3.55.0 (the v3.51 hold is
+  lifted), `mark3labs/mcp-go` v0.58.0 → v1.0.0, `gobwas/glob` v0.2.3 → v1.0.0,
+  `wonton` v0.0.38 → v0.0.39, and OpenTelemetry v1.45.0 → v1.46.0.
 - **Mistral's Devstral models are marked deprecated.** Mistral has retired the
   family, and `devstral-small-latest` no longer resolves upstream at all; the
   constants remain for compatibility.

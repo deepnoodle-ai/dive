@@ -80,7 +80,10 @@ func TestMCPContentPairing(t *testing.T) {
 		assert.Equal(t, "mcp_456", mcpCall.ID)
 		assert.Equal(t, "risky_operation", mcpCall.Name)
 		assert.Equal(t, "unsafe-server", mcpCall.ServerLabel)
-		assert.Equal(t, openai.String("Operation failed: Permission denied"), mcpCall.Error)
+		// openai-go v3.51 replaced the plain error string with a union; an MCP
+		// tool that answered isError maps to the tool-execution variant.
+		assert.NotNil(t, mcpCall.Error.OfMcpToolExecutionError)
+		assert.Equal(t, "Operation failed: Permission denied", mcpCall.Error.OfMcpToolExecutionError.Content)
 	})
 
 	t.Run("handles MCPToolUseContent without corresponding result", func(t *testing.T) {

@@ -1,12 +1,12 @@
 module github.com/deepnoodle-ai/dive
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
-	github.com/deepnoodle-ai/wonton v0.0.38
-	github.com/gobwas/glob v0.2.3
+	github.com/deepnoodle-ai/wonton v0.0.39
+	github.com/gobwas/glob v1.0.0
 	github.com/google/uuid v1.6.0
 	golang.org/x/image v0.45.0
 	gopkg.in/yaml.v3 v3.0.1

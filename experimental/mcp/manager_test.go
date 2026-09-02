@@ -307,7 +307,9 @@ func newTestMCPServer(t *testing.T, toolNames ...string) (*mcpserver.MCPServer, 
 	for _, name := range toolNames {
 		addTestTool(srv, name)
 	}
-	ts := mcpserver.NewTestStreamableHTTPServer(srv)
+	// mcp-go v1.0.0 moved NewTestStreamableHTTPServer into its own internal
+	// test files, so it is no longer exported to consumers; this is what it did.
+	ts := httptest.NewServer(mcpserver.NewStreamableHTTPServer(srv))
 	t.Cleanup(ts.Close)
 	return srv, ts
 }

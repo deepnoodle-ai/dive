@@ -121,7 +121,7 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 // root (e.g. "node_modules/foo.js"). Testing the "./" form makes the pure-Go
 // matching agree with ripgrep's gitignore-style globs, where "**/" also
 // matches zero directories.
-func matchesExclude(eg glob.Glob, relPath string) bool {
+func matchesExclude(eg *glob.Pattern, relPath string) bool {
 	return eg.Match(relPath) || eg.Match("./"+relPath)
 }
 
@@ -245,7 +245,7 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 	}
 
 	// Compile exclude patterns
-	excludeGlobs := make([]glob.Glob, 0, len(t.defaultExcludes))
+	excludeGlobs := make([]*glob.Pattern, 0, len(t.defaultExcludes))
 	for _, pattern := range t.defaultExcludes {
 		if eg, err := glob.Compile(pattern, '/'); err == nil {
 			excludeGlobs = append(excludeGlobs, eg)

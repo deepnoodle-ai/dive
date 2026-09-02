@@ -498,7 +498,7 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 	}
 
 	// Compile file filter
-	var fileFilter glob.Glob
+	var fileFilter *glob.Pattern
 	if input.Glob != "" {
 		fileFilter, err = glob.Compile(input.Glob, '/')
 		if err != nil {
@@ -532,7 +532,7 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 	}
 
 	// Compile exclude patterns
-	excludeGlobs := make([]glob.Glob, 0, len(t.defaultExcludes))
+	excludeGlobs := make([]*glob.Pattern, 0, len(t.defaultExcludes))
 	for _, pattern := range t.defaultExcludes {
 		if eg, err := glob.Compile(pattern, '/'); err == nil {
 			excludeGlobs = append(excludeGlobs, eg)
