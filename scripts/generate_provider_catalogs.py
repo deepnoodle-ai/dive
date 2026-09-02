@@ -82,7 +82,7 @@ TARGETS: dict[str, Target] = {
         "meta",
         REPO_ROOT / "providers" / "meta",
         "meta",
-        (TEXT,),
+        (TEXT, IMAGE),
     ),
     "mistral": Target(
         "mistral",

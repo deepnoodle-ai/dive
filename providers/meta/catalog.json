@@ -72,6 +72,13 @@
       "context_window": 1048576,
       "display_name": "Muse Spark 1.1",
       "description": "Original version; no contributor tier is offered"
+    },
+    {
+      "go_name": "ModelMuseImage",
+      "id": "muse-image-1.0",
+      "kind": "image",
+      "display_name": "Muse Image 1.0",
+      "description": "Generates and edits images; runs its own web and image search while rendering"
     }
   ],
   "pricing": {
@@ -118,6 +125,15 @@
         "cache_read_price_per_1m_tokens": "0.15",
         "currency": "USD",
         "updated_at": "2026-09-02"
+      }
+    ],
+    "image": [
+      {
+        "model": "muse-image-1.0",
+        "price_per_image": "0.01",
+        "currency": "USD",
+        "updated_at": "2026-09-02",
+        "note": "Flat per generated image at any prompt length or reasoning_strength; the model's built-in web and image search is included, not billed as search grounding."
       }
     ]
   }

@@ -1241,6 +1241,11 @@ func getDefaultImageModel() string {
 	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
 		return "grok-imagine-image"
 	}
+	// Last for the same reason as the text default: MODEL_API_KEY is generic
+	// enough that it may already mean something else.
+	if os.Getenv("MODEL_API_KEY") != "" || os.Getenv("META_API_KEY") != "" {
+		return "muse-image-1.0"
+	}
 	return ""
 }
 

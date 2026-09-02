@@ -50,3 +50,14 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		UpdatedAt:      "2026-09-02",
 	},
 }
+
+// ImageModelPricing is generated from catalog.json.
+var ImageModelPricing = map[string]llm.ImagePricingInfo{
+	// Flat per generated image at any prompt length or reasoning_strength; the model's built-in web and image search is included, not billed as search grounding.
+	ModelMuseImage: {
+		Model:     ModelMuseImage,
+		Price:     0.01,
+		Currency:  "USD",
+		UpdatedAt: "2026-09-02",
+	},
+}

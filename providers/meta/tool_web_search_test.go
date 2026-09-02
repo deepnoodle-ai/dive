@@ -2,7 +2,10 @@ package meta
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/deepnoodle-ai/dive/media"
 
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -59,4 +62,14 @@ func TestWebSearchToolEncodesSetFields(t *testing.T) {
 	includes := tool.ResponsesIncludes()
 	assert.Len(t, includes, 1)
 	assert.Equal(t, string(includes[0]), "web_search_call.results")
+}
+
+// Format.FileExtension carries its own leading dot, so composing a filename
+// with an extra one produced "image-0..png" on every edit upload.
+func TestEditUploadFilenameHasOneDot(t *testing.T) {
+	for _, format := range []media.Format{media.FormatPNG, media.FormatJPEG, media.FormatWebP} {
+		name := editUploadName(0, format)
+		assert.Equal(t, strings.Count(name, "."), 1, "filename %q", name)
+		assert.True(t, strings.HasPrefix(name, "image-0."), "filename %q", name)
+	}
 }

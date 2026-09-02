@@ -8,6 +8,7 @@ const (
 	ModelMuseSpark12            = "muse-spark-1.2"
 	ModelMuseSpark12Contributor = "muse-spark-1.2-contributor"
 	ModelMuseSpark11            = "muse-spark-1.1"
+	ModelMuseImage              = "muse-image-1.0"
 )
 
 // DefaultModel is generated from the catalog's default model.
