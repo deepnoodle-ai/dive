@@ -1098,6 +1098,36 @@ class ModelTokenTests(unittest.TestCase):
                     [model_id],
                 )
 
+    def test_muse_model_families_are_covered(self) -> None:
+        # The scheduled audit runs --public-only, so scraped pages are the only
+        # evidence for Meta. A Muse id this pattern does not recognize is one
+        # the watcher can never report as missing from Dive's catalog.
+        for model_id in (
+            "muse-spark-1.3",
+            "muse-spark-1.3-contributor",
+            "muse-spark-1.2",
+            "muse-image-1.0",
+            "muse-voice-transcribe-1.0",
+        ):
+            with self.subTest(model=model_id):
+                self.assertEqual(
+                    provider_watch.MODEL_TOKEN_RE.findall(f"see {model_id} today"),
+                    [model_id],
+                )
+
+    def test_meta_is_registered_end_to_end(self) -> None:
+        # Registration is spread across four tables; missing any one of them
+        # leaves the provider silently unwatched rather than erroring.
+        self.assertIn("meta", provider_watch.PROVIDERS)
+        self.assertEqual(provider_watch.CATALOG_DIRECTORIES["meta"], "meta")
+        self.assertIn("meta", provider_watch.API_COLLECTORS)
+        env_names, _ = provider_watch.API_COLLECTORS["meta"]
+        # MODEL_API_KEY is the name Meta's own docs use; the namespaced alias
+        # exists because that name is generic enough to already be taken.
+        self.assertEqual(env_names, ("MODEL_API_KEY", "META_API_KEY"))
+        for name in env_names:
+            self.assertIn(name, provider_watch.API_KEY_ENV_NAMES)
+
     def test_open_and_labs_prefixes_stay_attached(self) -> None:
         # Truncating these produces an id the API does not accept, which then
         # reads as a gap against the correctly-spelled catalog entry.
