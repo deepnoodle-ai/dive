@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The CLI transcript is one list with one renderer.** Every message the CLI
+  shows now lives in `a.messages` and renders through
+  `messageView(msg, viewOpts)`; the `*Static` renderers and the 36 `runner.Print`
+  calls are gone. New `notice` and `report` message roles carry warnings and
+  command output.
+
+### Fixed
+
+- **The CLI status line no longer forks `git` on every frame.** The branch is
+  cached and refreshed on a 5 s tick and at turn boundaries, removing ~5 ms from
+  a 33 ms frame budget.
+- **`/clear` no longer panics without a session store.**
+
 ## [1.27.0] - 2026-09-02
 
 ### Added

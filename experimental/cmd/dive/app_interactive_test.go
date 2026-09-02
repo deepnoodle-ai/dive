@@ -98,17 +98,9 @@ func TestAppLiveView(t *testing.T) {
 // TestAppWithInlineRunner tests the App with an actual InlineApp runner
 // to verify the full rendering pipeline including ANSI sequences.
 func TestAppWithInlineRunner(t *testing.T) {
-	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	app, _ := newFakeApp(t)
 
 	var buf bytes.Buffer
-	runner := tui.NewInlineApp(
-		tui.WithInlineWidth(80),
-		tui.WithInlineOutput(&buf),
-	)
-
-	// Wire up the runner
-	app.runner = runner
 
 	// Create a live printer for testing render cycles
 	live := tui.NewLivePrinter(tui.WithWidth(80), tui.WithOutput(&buf))
@@ -223,15 +215,7 @@ func renderLiveView(t *testing.T, app *App, width, height int) *termtest.Screen 
 // TestAppEventHandling tests the App's event handling and state changes.
 // This demonstrates how to simulate user interactions and verify the resulting view.
 func TestAppEventHandling(t *testing.T) {
-	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
-
-	// Create a runner with captured output
-	var buf bytes.Buffer
-	app.runner = tui.NewInlineApp(
-		tui.WithInlineWidth(80),
-		tui.WithInlineOutput(&buf),
-	)
+	app, _ := newFakeApp(t)
 
 	t.Run("Ctrl+C shows exit hint", func(t *testing.T) {
 		// Simulate first Ctrl+C

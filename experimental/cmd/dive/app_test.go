@@ -81,7 +81,7 @@ func TestFailedReadRendersTheErrorInsteadOfAFalseLineCount(t *testing.T) {
 	assert.True(t, msg.ToolError)
 	assert.Equal(t, 0, msg.ToolReadLines)
 	var output bytes.Buffer
-	tui.Fprint(&output, app.formatToolResultView(msg), tui.WithWidth(80))
+	tui.Fprint(&output, app.formatToolResultView(msg, viewOpts{}), tui.WithWidth(80))
 	assert.Contains(t, output.String(), "file does not exist")
 	assert.NotContains(t, output.String(), "Read 1 line")
 }
@@ -93,19 +93,14 @@ func TestSuccessfulReadUsesCorrectSingularLineCount(t *testing.T) {
 		Type:          MessageTypeToolCall,
 		ToolName:      "Read",
 		ToolReadLines: 1,
-	}), tui.WithWidth(80))
+	}, viewOpts{}), tui.WithWidth(80))
 	assert.Contains(t, output.String(), "Read 1 line")
 	assert.NotContains(t, output.String(), "Read 1 lines")
 }
 
 func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
-	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	app, fake := newFakeApp(t)
 	app.contextDemos = allContextDemos()
-	var output bytes.Buffer
-	app.runner = tui.NewInlineApp(
-		tui.WithInlineWidth(180),
-		tui.WithInlineOutput(&output),
-	)
 	reminder, err := dive.NewOperatorReminder("verification-debt", "Run the relevant checks before completion.")
 	assert.NoError(t, err)
 	app.handleContextDemoNotice(contextDemoNotice{
@@ -115,7 +110,7 @@ func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
 	})
 	app.printContextDemoReport()
 
-	rendered := output.String()
+	rendered := fake.scrollback(180)
 	assert.Contains(t, rendered, "verification-debt queued")
 	assert.Contains(t, rendered, "operator")
 	assert.Contains(t, rendered, "model-only")
@@ -125,12 +120,7 @@ func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
 }
 
 func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
-	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
-	var buf bytes.Buffer
-	app.runner = tui.NewInlineApp(
-		tui.WithInlineWidth(80),
-		tui.WithInlineOutput(&buf),
-	)
+	app, _ := newFakeApp(t)
 	app.handleProcessingStart(processingStartEvent{baseEvent: newBaseEvent(), userInput: "explain this"})
 
 	app.handleStreamThinking("I should compare the code paths.")

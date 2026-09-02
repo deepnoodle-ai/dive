@@ -154,12 +154,34 @@ type Todo struct {
 	Status     TodoStatus // pending, in_progress, completed
 }
 
-// Message represents a chat message
+// Message represents a chat message.
+//
+// Messages are append-mostly. The five sites that mutate one in place — the two
+// stream flushes, the tool result, and the tool stream and progress updates —
+// all call a.touch(i), which bumps Rev. Rev is what a render cache keys on, so
+// anything caching a message's view can tell a mutation from an append without
+// diffing content.
 type Message struct {
-	Role    string // "user", "assistant", "reasoning", "system", "context", or "intro"
+	Role    string // see the message role constants
 	Content string // Text content
 	Time    time.Time
 	Type    MessageType
+
+	// View carries a pre-built view for roleReport messages (/usage, /help,
+	// /todos, /context). wonton views are inert until measured, so a stored
+	// view re-wraps at whatever width it is later rendered to.
+	View tui.View
+
+	// Marker prefixes a roleNotice line with an accented glyph (the "◇" of a
+	// context-demo row). Empty for a plain notice.
+	Marker string
+
+	// Rev counts in-place mutations of this message. Bumped by touch.
+	Rev uint32
+
+	// emitted records that this message has already been written to inline
+	// scrollback. Unused by the managed screen, which renders a.messages.
+	emitted bool
 
 	// Tool call fields (when Type == MessageTypeToolCall)
 	ToolID          string
@@ -253,8 +275,11 @@ type App struct {
 	resumeSessionID string           // Session ID to resume (from --resume flag)
 	currentSession  *session.Session // Current active session
 
-	// InlineApp runner
-	runner *tui.InlineApp
+	// runner is the event sink for the active UI runner. Safe to call from any
+	// goroutine. scrollback is the inline runner's transcript sink; the managed
+	// screen leaves it nil and renders a.messages directly.
+	runner     uiRunner
+	scrollback scrollbackWriter
 
 	// Input state
 	inputText    string
@@ -285,6 +310,12 @@ type App struct {
 	frame               uint64
 	processing          bool
 	processingStartTime time.Time
+
+	// Git branch shown in the status line. Cached because `git rev-parse` costs
+	// ~5 ms and the status line renders on every frame; refreshed on a timer and
+	// at turn boundaries, never from a view function.
+	gitBranch   string
+	gitBranchAt time.Time
 
 	// Todo list state
 	todos     []Todo
@@ -428,7 +459,7 @@ func (a *App) LiveView() tui.View {
 	// Show todos if visible and not processing
 	if !a.processing && a.showTodos && len(a.todos) > 0 {
 		views = append(views, tui.Text(""))
-		views = append(views, a.todoListView())
+		views = append(views, a.todoListView(viewOpts{animate: true}))
 	}
 
 	// Always add spacing before divider (separates from scrollback or live content)
@@ -781,6 +812,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.frame = e.Frame
 		// Flush any buffered streaming text (batches updates to 30 FPS max)
 		a.flushStreamBuffer()
+		// Keep the status line's branch fresh without forking git per frame.
+		a.refreshGitBranch()
 		// Clear exit hint after 2 seconds
 		if a.showExitHint && time.Since(a.lastCtrlC) >= 2*time.Second {
 			a.showExitHint = false
@@ -823,6 +856,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleNativeBgTasksReady(e)
 	case monitorNotificationEvent:
 		a.handleMonitorNotification(e)
+	case noticeEvent:
+		a.appendNotice("%s", e.text)
 	case contextDemoNoticeEvent:
 		a.handleContextDemoNotice(e.notice)
 	case showDialogEvent:
@@ -1024,9 +1059,7 @@ func (a *App) captureDroppedFiles(inserted string) string {
 		if err != nil {
 			// The drop was deliberate, so say why nothing was attached and
 			// leave the path in the message as text.
-			if a.runner != nil {
-				a.runner.Printf("Did not attach %s: %s.", filepath.Base(path), err)
-			}
+			a.appendNotice("Did not attach %s: %s.", filepath.Base(path), err)
 			parts = append(parts, tokens[i].value)
 			continue
 		}
@@ -1258,11 +1291,11 @@ func (a *App) processMessageAsync(input string, attachments []attachment, includ
 	// Expand file references (uses only immutable workspaceDir)
 	expanded, extraContent, err := a.expandFileReferences(input)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	expanded, attachedContent, err := expandAttachments(expanded, attachments)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	extraContent = append(extraContent, attachedContent...)
 	if includeStartupAttachment {
@@ -1281,11 +1314,11 @@ func (a *App) processCommandAsync(displayText, expanded string, attachments []at
 	// Expand file references in the expanded text
 	expandedWithFiles, extraContent, err := a.expandFileReferences(expanded)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	expandedWithFiles, attachedContent, err := expandAttachments(expandedWithFiles, attachments)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	extraContent = append(extraContent, attachedContent...)
 	if includeStartupAttachment {
@@ -1468,7 +1501,7 @@ func (a *App) warnIfManyCompactions() {
 	if err != nil || len(records) < repeatedCompactionWarnThreshold {
 		return
 	}
-	a.runner.Printf("Note: this conversation has been compacted %d times. "+
+	a.postNotice("Note: this conversation has been compacted %d times. "+
 		"Repeated compactions lose detail and can reduce accuracy — consider starting a fresh session.",
 		len(records))
 }
@@ -1548,30 +1581,25 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 	a.resetContextDemoTrace()
 	userInput := strings.TrimSpace(e.userInput)
 
-	role := "user"
+	role := roleUser
 	if e.fromBackground {
-		role = "context"
+		role = roleContext
 	}
-	userMsg := Message{
+	// Show the user's turn immediately; the model's reply lands at turn end.
+	a.emit(a.appendMessage(Message{
 		Role:    role,
 		Content: userInput,
-		Time:    time.Now(),
 		Type:    MessageTypeText,
-	}
-	a.messages = append(a.messages, userMsg)
-
-	// Print user message to scrollback
-	a.runner.Print(tui.Stack(tui.Text(""), a.textMessageView(userMsg, len(a.messages)-1)))
+	}))
 
 	// Prepare for streaming response
 	a.currentMessage = &Message{
-		Role:    "assistant",
+		Role:    roleAssistant,
 		Content: "",
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	}
-	a.messages = append(a.messages, *a.currentMessage)
-	a.streamingMessageIndex = len(a.messages) - 1
+	a.streamingMessageIndex = a.appendMessage(*a.currentMessage)
 	a.thinkingMessageIndex = -1
 	a.needNewTextMessage = false
 
@@ -1612,17 +1640,15 @@ func (a *App) flushStreamBuffer() {
 		a.needNewTextMessage
 
 	if needNewMessage {
-		a.messages = append(a.messages, Message{
-			Role:    "assistant",
-			Content: "",
-			Time:    time.Now(),
-			Type:    MessageTypeText,
+		a.streamingMessageIndex = a.appendMessage(Message{
+			Role: roleAssistant,
+			Type: MessageTypeText,
 		})
-		a.streamingMessageIndex = len(a.messages) - 1
 		a.needNewTextMessage = false
 	}
 
 	a.messages[a.streamingMessageIndex].Content += a.streamBuffer
+	a.touch(a.streamingMessageIndex)
 	a.streamBuffer = ""
 }
 
@@ -1633,19 +1659,17 @@ func (a *App) flushThinkingStreamBuffer() {
 
 	needNewMessage := a.thinkingMessageIndex < 0 ||
 		a.thinkingMessageIndex >= len(a.messages) ||
-		a.messages[a.thinkingMessageIndex].Role != "reasoning"
+		a.messages[a.thinkingMessageIndex].Role != roleReasoning
 
 	if needNewMessage {
-		a.messages = append(a.messages, Message{
-			Role:    "reasoning",
-			Content: "",
-			Time:    time.Now(),
-			Type:    MessageTypeText,
+		a.thinkingMessageIndex = a.appendMessage(Message{
+			Role: roleReasoning,
+			Type: MessageTypeText,
 		})
-		a.thinkingMessageIndex = len(a.messages) - 1
 	}
 
 	a.messages[a.thinkingMessageIndex].Content += a.thinkingStreamBuffer
+	a.touch(a.thinkingMessageIndex)
 	a.thinkingStreamBuffer = ""
 }
 
@@ -1664,7 +1688,7 @@ func (a *App) handleToolCall(call *llm.ToolUseContent) {
 	}
 
 	msg := Message{
-		Role:      "assistant",
+		Role:      roleAssistant,
 		Time:      time.Now(),
 		Type:      MessageTypeToolCall,
 		ToolID:    call.ID,
@@ -1673,14 +1697,14 @@ func (a *App) handleToolCall(call *llm.ToolUseContent) {
 		ToolInput: string(call.Input),
 		ToolDone:  false,
 	}
-	a.messages = append(a.messages, msg)
-	a.toolCallIndex[call.ID] = len(a.messages) - 1
+	a.toolCallIndex[call.ID] = a.appendMessage(msg)
 	a.needNewTextMessage = true
 	a.thinkingMessageIndex = -1
 }
 
 func (a *App) handleToolResult(result *dive.ToolCallResult) {
 	if idx, ok := a.toolCallIndex[result.ID]; ok && idx < len(a.messages) {
+		defer a.touch(idx)
 		a.messages[idx].ToolDone = true
 		if result.Result != nil {
 			display := result.Result.Display
@@ -1739,7 +1763,7 @@ func (a *App) handleCompaction(event *compaction.CompactionEvent, midTurn bool) 
 		// Mid-turn compaction happens while the agent is still working, so
 		// surface it as a scrollback line rather than the transient footer
 		// stats used between turns.
-		a.runner.Printf(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
+		a.appendNotice(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
 			event.TokensBefore, event.TokensAfter, event.MessagesCompacted)
 		return
 	}
@@ -1760,13 +1784,11 @@ func (a *App) handleProcessingEnd(err error) {
 	a.flushStreamingBuffers()
 
 	if err != nil && err != context.Canceled {
-		errMsg := Message{
-			Role:    "system",
+		a.appendMessage(Message{
+			Role:    roleSystem,
 			Content: "Error: " + err.Error(),
-			Time:    time.Now(),
 			Type:    MessageTypeText,
-		}
-		a.messages = append(a.messages, errMsg)
+		})
 	}
 
 	// Clear processing state BEFORE printing to scrollback.
@@ -1781,8 +1803,13 @@ func (a *App) handleProcessingEnd(err error) {
 	a.streamBuffer = ""
 	a.thinkingStreamBuffer = ""
 
-	// Now print to scrollback - the live view will be re-rendered with correct height
-	a.printRecentMessagesToScrollback()
+	// Now commit the turn to scrollback - the live view will be re-rendered
+	// with correct height.
+	a.emitPending()
+
+	// Turn boundaries are the natural moment to notice a branch switch.
+	a.gitBranchAt = time.Time{}
+	a.refreshGitBranch()
 
 	// Drain any native background results that arrived while processing.
 	if len(a.pendingNativeBgResults) > 0 {
@@ -1829,6 +1856,7 @@ func (a *App) handleToolStream(e toolStreamEvent) {
 			last = last[:77] + "..."
 		}
 		a.messages[idx].ToolResultLines = []string{last}
+		a.touch(idx)
 	}
 }
 
@@ -1846,6 +1874,7 @@ func (a *App) handleToolProgress(e toolProgressEvent) {
 		display = display[:77] + "..."
 	}
 	a.messages[idx].ToolProgress = display
+	a.touch(idx)
 }
 
 // startNativeBgTaskWatcher starts a goroutine that awaits all tasks and sends
@@ -1968,41 +1997,18 @@ func lastNonEmptyLine(text string) string {
 	return ""
 }
 
-// printRecentMessagesToScrollback prints the messages from current interaction to scrollback
-func (a *App) printRecentMessagesToScrollback() {
-	// Find start of current interaction
-	startIdx := 0
-	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == "user" || a.messages[i].Role == "context" {
-			startIdx = i + 1 // Start after user/context message (already printed)
-			break
-		}
-	}
-
-	// Collect all message views (add blank line before each)
-	messageViews := []tui.View{}
-	for i := startIdx; i < len(a.messages); i++ {
-		msg := a.messages[i]
-		view := a.messageViewStatic(msg)
-		if view != nil {
-			messageViews = append(messageViews, tui.Text(""), view)
-		}
-	}
-
-	// Print all messages as a single view
-	if len(messageViews) > 0 {
-		a.runner.Print(tui.Stack(messageViews...))
-	}
-}
-
 // Run starts the CLI application
 func (a *App) Run() error {
 	// Create InlineApp runner with 30 FPS for animations
-	a.runner = tui.NewInlineApp(
+	inline := tui.NewInlineApp(
 		tui.WithInlineFPS(30),
 		tui.WithInlineBracketedPaste(true),
 		tui.WithInlineKittyKeyboard(true),
 	)
+	a.runner = inline
+	a.scrollback = inline
+
+	a.refreshGitBranch()
 
 	// If resuming a session, print the conversation history instead of the intro
 	if a.resumeSessionID != "" {
@@ -2021,24 +2027,20 @@ func (a *App) Run() error {
 	}
 
 	// Run the inline app (blocks until quit)
-	return a.runner.Run(a)
+	return inline.Run(a)
 }
 
-// printIntroToScrollback prints the intro/splash screen to scrollback.
+// printIntroToScrollback prints the intro/splash screen before the event loop
+// starts, when the runner cannot print for us yet.
 func (a *App) printIntroToScrollback() {
-	view := a.buildIntroView()
-	tui.Print(view)
+	i := a.appendIntro()
+	a.messages[i].emitted = true
+	tui.Print(a.introView(a.messages[i]))
 	fmt.Println() // Newline so the live region doesn't overwrite the last line
 }
 
-// printIntroViaRunner prints the intro/splash screen using the runner's Print method.
-func (a *App) printIntroViaRunner() {
-	view := a.buildIntroView()
-	a.runner.Print(view)
-}
-
-// buildIntroView creates the intro view and adds it to messages.
-func (a *App) buildIntroView() tui.View {
+// appendIntro adds the intro/splash message to the transcript and returns its index.
+func (a *App) appendIntro() int {
 	wsDisplay := a.workspaceDir
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
 		wsDisplay = "~" + wsDisplay[len(home):]
@@ -2055,14 +2057,11 @@ func (a *App) buildIntroView() tui.View {
 		content += "\nResuming session: " + a.resumeSessionID
 	}
 
-	a.messages = append(a.messages, Message{
-		Role:    "intro",
+	return a.appendMessage(Message{
+		Role:    roleIntro,
 		Content: content,
-		Time:    time.Now(),
 		Type:    MessageTypeText,
 	})
-
-	return a.introView(a.messages[len(a.messages)-1])
 }
 
 // printSessionHistoryToScrollback prints the conversation history from a resumed session
@@ -2117,7 +2116,7 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 				Time:    time.Now(),
 				Type:    MessageTypeText,
 			}
-			view := a.textMessageViewStatic(appMsg)
+			view := a.messageView(appMsg, viewOpts{})
 			if view != nil {
 				views = append(views, tui.Text(""), view)
 			}
@@ -2127,12 +2126,12 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 				continue
 			}
 			appMsg := Message{
-				Role:    "reasoning",
+				Role:    roleReasoning,
 				Content: c.Thinking,
 				Time:    time.Now(),
 				Type:    MessageTypeText,
 			}
-			view := a.textMessageViewStatic(appMsg)
+			view := a.messageView(appMsg, viewOpts{})
 			if view != nil {
 				views = append(views, tui.Text(""), view)
 			}
@@ -2147,7 +2146,7 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 			}
 
 			appMsg := Message{
-				Role:      "assistant",
+				Role:      roleAssistant,
 				Time:      time.Now(),
 				Type:      MessageTypeToolCall,
 				ToolID:    c.ID,
@@ -2169,7 +2168,7 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 				}
 			}
 
-			view := a.toolCallViewStatic(appMsg)
+			view := a.messageView(appMsg, viewOpts{})
 			if view != nil {
 				views = append(views, tui.Text(""), view)
 			}
@@ -2178,12 +2177,12 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 			// Show compaction summaries as system messages
 			if c.Summary != "" {
 				appMsg := Message{
-					Role:    "system",
+					Role:    roleSystem,
 					Content: "[Context compacted]",
 					Time:    time.Now(),
 					Type:    MessageTypeText,
 				}
-				view := a.textMessageViewStatic(appMsg)
+				view := a.messageView(appMsg, viewOpts{})
 				if view != nil {
 					views = append(views, tui.Text(""), view)
 				}
@@ -2247,28 +2246,13 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		return true
 
 	case "clear":
-		// Clear scrollback
-		a.runner.ClearScrollback()
-
-		// Reset conversation state by deleting the current session
-		if a.currentSession != nil && a.sessionStore != nil {
-			if err := a.sessionStore.Delete(a.ctx, a.currentSession.ID()); err != nil {
-				// Log error but continue
-				a.runner.Printf("Warning: failed to clear conversation: %v", err)
-			}
+		// Drop the transcript first, so anything the reset has to say about
+		// itself lands in the fresh one rather than the discarded one. nil,
+		// not [:0]: the old messages hold report views worth releasing.
+		a.messages = nil
+		if a.scrollback != nil {
+			a.scrollback.ClearScrollback()
 		}
-
-		// Create a new session
-		newID := newSessionID()
-		newSess, err := a.sessionStore.Open(a.ctx, newID)
-		if err != nil {
-			a.runner.Printf("Warning: failed to create new session: %v", err)
-		} else {
-			a.currentSession = newSess
-		}
-
-		// Clear local message state
-		a.messages = make([]Message, 0)
 		a.todos = nil
 		a.toolCallIndex = make(map[string]int)
 		a.needNewTextMessage = false
@@ -2283,9 +2267,26 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.interactionUsage = nil
 		a.resetContextDemoTrace()
 
-		// Show fresh intro using runner.Print (not tui.Print) since we're
-		// in the middle of the running InlineApp event loop
-		a.printIntroViaRunner()
+		// Reset conversation state by deleting the current session
+		if a.currentSession != nil && a.sessionStore != nil {
+			if err := a.sessionStore.Delete(a.ctx, a.currentSession.ID()); err != nil {
+				// Log error but continue
+				a.appendNotice("Warning: failed to clear conversation: %v", err)
+			}
+		}
+
+		// Create a new session
+		a.currentSession = nil
+		if a.sessionStore != nil {
+			newSess, err := a.sessionStore.Open(a.ctx, newSessionID())
+			if err != nil {
+				a.appendNotice("Warning: failed to create new session: %v", err)
+			} else {
+				a.currentSession = newSess
+			}
+		}
+
+		a.emit(a.appendIntro())
 		return true
 
 	case "compact":
@@ -2322,12 +2323,12 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 			// Expand argument placeholders (with shell expansion for local skills)
 			expanded, expandErr := cmd.Expand(context.Background(), cmdArgs, skill.WithShellExpansion(true))
 			if expandErr != nil {
-				a.runner.Printf("Warning: expansion error: %v", expandErr)
+				a.appendNotice("Warning: expansion error: %v", expandErr)
 			}
 
 			// Warn about unsupported model override (agent doesn't support per-request model changes)
 			if cmd.Config.Model != "" {
-				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Config.Model)
+				a.appendNotice("Note: Model override '%s' specified but not yet supported in CLI", cmd.Config.Model)
 			}
 
 			// Build display text with command name and args
@@ -2345,35 +2346,35 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 	}
 
 	// Unknown command - show error
-	a.runner.Printf("Unknown command: /%s (try /help)", cmdName)
+	a.appendNotice("Unknown command: /%s (try /help)", cmdName)
 	return true
 }
 
 // handleCompactCommand performs manual compaction of the conversation
 func (a *App) handleCompactCommand() {
 	if a.compactionConfig == nil {
-		a.runner.Printf("Compaction is disabled.")
+		a.appendNotice("Compaction is disabled.")
 		return
 	}
 
 	if a.currentSession == nil || a.sessionStore == nil {
-		a.runner.Printf("No conversation to compact.")
+		a.appendNotice("No conversation to compact.")
 		return
 	}
 
 	// Get current messages
 	msgs, err := a.currentSession.Messages(a.ctx)
 	if err != nil {
-		a.runner.Printf("No conversation to compact.")
+		a.appendNotice("No conversation to compact.")
 		return
 	}
 
 	if len(msgs) < 2 {
-		a.runner.Printf("Not enough messages to compact (need at least 2).")
+		a.appendNotice("Not enough messages to compact (need at least 2).")
 		return
 	}
 
-	a.runner.Printf("Compacting conversation...")
+	a.appendNotice("Compacting conversation...")
 
 	// Calculate tokens before compaction (estimate)
 	tokensBefore := 0
@@ -2405,20 +2406,19 @@ func (a *App) handleCompactCommand() {
 		return compactedMsgs, err
 	})
 	if err != nil {
-		a.runner.Printf("Compaction failed: %v", err)
+		a.appendNotice("Compaction failed: %v", err)
 		return
 	}
 
 	// Show stats
 	if event != nil {
-		a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
+		a.appendNotice("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
 	}
 	a.warnIfManyCompactions()
 }
 
 func (a *App) printHelp() {
 	views := []tui.View{
-		tui.Text(""),
 		tui.Text("Built-in Commands:").Bold(),
 		tui.Text("  /quit, /q      Exit"),
 		tui.Text("  /clear         Clear conversation and screen"),
@@ -2459,18 +2459,18 @@ func (a *App) printHelp() {
 		tui.Text(""),
 	)
 
-	a.runner.Print(tui.Stack(views...))
+	a.appendReport(tui.Stack(views...))
 }
 
-// printUsageReport prints the detailed token + cache usage breakdown to
-// scrollback, or a placeholder when nothing has been recorded yet.
+// printUsageReport adds the detailed token + cache usage breakdown to the
+// transcript, or a placeholder when nothing has been recorded yet.
 func (a *App) printUsageReport() {
 	view := a.usageReportView()
 	if view == nil {
-		a.runner.Printf("No token usage recorded yet.")
+		a.appendNotice("No token usage recorded yet.")
 		return
 	}
-	a.runner.Print(view)
+	a.appendReport(view)
 }
 
 // usageReportView builds a detailed token + cache usage breakdown (turn and,
@@ -2542,7 +2542,6 @@ func (a *App) usageReportView() tui.View {
 	}
 
 	views := []tui.View{
-		tui.Text(""),
 		tui.Text("Token usage").Bold(),
 		tui.Group(headerCells...),
 		tokRow("input", func(u *llm.Usage) int { return u.InputTokens }),
@@ -2597,14 +2596,11 @@ func (a *App) usageReportView() tui.View {
 
 func (a *App) printTodosToScrollback() {
 	if len(a.todos) == 0 {
-		a.runner.Printf("No todos.")
+		a.appendNotice("No todos.")
 		return
 	}
 
-	view := a.todoListViewStatic()
-	if view != nil {
-		a.runner.Print(view)
-	}
+	a.appendReport(a.todoListView(viewOpts{}))
 }
 
 // buildLiveView creates the view for live updates during streaming.
@@ -2621,17 +2617,17 @@ func (a *App) buildLiveView() tui.View {
 	var activityViews []tui.View
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		msg := a.messages[i]
-		if msg.Role == "user" || msg.Role == "context" {
+		if msg.Role == roleUser || msg.Role == roleContext {
 			break
 		}
 		switch {
 		case msg.Type == MessageTypeToolCall:
-			view := a.toolCallView(msg)
+			view := a.toolCallView(msg, viewOpts{animate: true})
 			if view != nil {
 				activityViews = append([]tui.View{view}, activityViews...)
 			}
-		case msg.Role == "reasoning":
-			view := a.textMessageView(msg, i)
+		case msg.Role == roleReasoning:
+			view := a.textMessageView(msg)
 			if view != nil {
 				activityViews = append([]tui.View{view}, activityViews...)
 			}
@@ -2667,7 +2663,7 @@ func (a *App) buildLiveView() tui.View {
 
 	// Show todos if active
 	if a.showTodos && len(a.todos) > 0 {
-		views = append(views, a.todoListView())
+		views = append(views, a.todoListView(viewOpts{animate: true}))
 	}
 
 	if len(views) == 0 {
@@ -2957,6 +2953,21 @@ func (a *App) getFileMatches(prefix string) []string {
 	return result
 }
 
+// gitBranchTTL is how stale the cached branch name may get. Branches change
+// between turns, not between frames.
+const gitBranchTTL = 5 * time.Second
+
+// refreshGitBranch re-reads the workspace's branch if the cached value has
+// aged out. Never call this from a view function: it forks `git`, and the
+// status line renders on every frame.
+func (a *App) refreshGitBranch() {
+	if !a.gitBranchAt.IsZero() && time.Since(a.gitBranchAt) < gitBranchTTL {
+		return
+	}
+	a.gitBranchAt = time.Now()
+	a.gitBranch = detectGitBranch(a.workspaceDir)
+}
+
 // detectGitBranch returns the current git branch name, or empty string if not in a repo.
 func detectGitBranch(dir string) string {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
@@ -2984,7 +2995,7 @@ func (a *App) handleModelCommand(args string) {
 	// Build choices
 	choices := availableModelChoices()
 	if len(choices) == 0 {
-		a.runner.Printf("No models available. Set an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)")
+		a.appendNotice("No models available. Set an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)")
 		return
 	}
 
@@ -3059,14 +3070,14 @@ func (a *App) switchModel(modelID string) {
 		return
 	}
 	if modelID == a.modelName {
-		a.runner.Printf("Already using %s", a.modelDisplayName())
+		a.appendNotice("Already using %s", a.modelDisplayName())
 		return
 	}
 
 	oldName := a.modelName
 	newModel := createModel(modelID, a.apiEndpoint)
 	if newModel == nil {
-		a.runner.Printf("Unknown model: %s", modelID)
+		a.appendNotice("Unknown model: %s", modelID)
 		return
 	}
 	a.agent.SetModel(newModel)
@@ -3087,5 +3098,5 @@ func (a *App) switchModel(modelID string) {
 		}
 	}
 
-	a.runner.Printf("Switched to %s", a.modelDisplayName())
+	a.appendNotice("Switched to %s", a.modelDisplayName())
 }

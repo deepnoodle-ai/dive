@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -33,22 +31,17 @@ func (a *App) handleContextDemoNotice(notice contextDemoNotice) {
 	}
 	a.contextDemoNotices[name] = notice
 
-	line := fmt.Sprintf("%s %s · %s · %s", name, notice.Action, notice.Reminder.Tier, notice.Delivery)
-	markerStyle := tui.NewStyle().WithFgRGB(accentMuted)
-	a.runner.Print(tui.Group(
-		tui.Text("◇ ").Style(markerStyle),
-		tui.Text("%s", line).Hint(),
-	))
+	a.appendMarkedNotice("◇ ", "%s %s · %s · %s",
+		name, notice.Action, notice.Reminder.Tier, notice.Delivery)
 }
 
 func (a *App) printContextDemoReport() {
 	if a.contextDemos.empty() {
-		a.runner.Printf("Context demos are off. Restart with --context-demo NAME or run 'dive context-demos' to list presets.")
+		a.appendNotice("Context demos are off. Restart with --context-demo NAME or run 'dive context-demos' to list presets.")
 		return
 	}
 
 	views := []tui.View{
-		tui.Text(""),
 		tui.Text("Context demo reminders").Bold(),
 		tui.Text("  enabled: %s", a.contextDemos.displaySummary()),
 		tui.Text("  shows --context-demo reminders only; skill and application reminders are not included").Hint(),
@@ -60,7 +53,7 @@ func (a *App) printContextDemoReport() {
 			tui.Text("No context-demo reminder payloads were observed during the latest turn.").Hint(),
 			tui.Text("Send a message or use a tool, then run /context again.").Hint(),
 		)
-		a.runner.Print(tui.Stack(views...))
+		a.appendReport(tui.Stack(views...))
 		return
 	}
 
@@ -73,5 +66,5 @@ func (a *App) printContextDemoReport() {
 		)
 	}
 	views = append(views, tui.Text(""))
-	a.runner.Print(tui.Stack(views...).Gap(0))
+	a.appendReport(tui.Stack(views...).Gap(0))
 }
