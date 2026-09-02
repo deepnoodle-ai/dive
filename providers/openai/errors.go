@@ -62,7 +62,9 @@ func normalizeErrorBodyMiddleware(req *http.Request, next option.MiddlewareNext)
 		return res, err
 	}
 	body, readErr := io.ReadAll(res.Body)
-	res.Body.Close()
+	// The bytes are already in hand and the body is replaced below, so a close
+	// failure here is not actionable.
+	_ = res.Body.Close()
 	if readErr != nil {
 		res.Body = io.NopCloser(bytes.NewReader(nil))
 		return res, readErr
