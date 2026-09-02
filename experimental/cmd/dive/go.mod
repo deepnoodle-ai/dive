@@ -5,10 +5,10 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/deepnoodle-ai/dive v1.26.0
-	github.com/deepnoodle-ai/dive/providers/google v1.26.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.26.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.26.0
+	github.com/deepnoodle-ai/dive v1.27.0
+	github.com/deepnoodle-ai/dive/providers/google v1.27.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.27.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.27.0
 	github.com/deepnoodle-ai/wonton v0.0.39
 	github.com/mattn/go-runewidth v0.0.29
 	google.golang.org/genai v1.71.0

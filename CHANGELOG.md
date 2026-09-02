@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-09-02
+
 ### Added
 
 - **Gemini 3.8 Flash** — new `google.ModelGemini38Flash` (1M context,
