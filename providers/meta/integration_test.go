@@ -280,3 +280,56 @@ func TestIntegration_ReasoningReplayWithoutExplicitEffort(t *testing.T) {
 	t.Logf("final: %q", second.Message().Text())
 	assert.True(t, strings.TrimSpace(second.Message().Text()) != "")
 }
+
+// TestIntegration_WebSearch exercises search grounding. The model decides
+// whether to search, so this asserts the request is accepted and answered
+// rather than that a search necessarily ran.
+func TestIntegration_WebSearch(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	search, err := NewWebSearchTool(WebSearchToolOptions{
+		SearchContextSize: SearchContextLow,
+		IncludeResults:    true,
+	})
+	assert.NoError(t, err)
+
+	provider := New(WithMaxTokens(4000))
+	ctx := testContext(t, 240*time.Second)
+
+	response, err := provider.Generate(ctx,
+		llm.WithUserTextMessage("What was announced at Meta's most recent developer event? One sentence."),
+		llm.WithTools(search),
+	)
+	// The SDK surfaces the message text, not the error code, so match the
+	// wording as well as the status.
+	if err != nil && (strings.Contains(err.Error(), "status 503") ||
+		strings.Contains(err.Error(), "overloaded")) {
+		// Plain generation succeeds while web_search returns 503 for the same
+		// key, and a raw curl with no Dive code in the path does the same, so
+		// this is Meta's search backend being capacity-limited rather than
+		// anything about the request. Skipping keeps the suite honest: it will
+		// exercise search grounding the moment the backend has room, instead of
+		// reporting a failure this repository cannot fix.
+		t.Skipf("Meta search grounding is refusing requests: %v", err)
+	}
+	assert.NoError(t, err)
+
+	text := response.Message().Text()
+	t.Logf("grounded answer: %q", text)
+	assert.True(t, strings.TrimSpace(text) != "")
+
+	// Citations and search calls are both optional per Meta's docs, so log what
+	// came back rather than requiring it.
+	var searchCalls, citations int
+	for _, content := range response.Message().Content {
+		switch c := content.(type) {
+		case *llm.ServerToolUseContent:
+			if c.Name == "web_search" {
+				searchCalls++
+			}
+		case *llm.TextContent:
+			citations += len(c.Citations)
+		}
+	}
+	t.Logf("web_search calls: %d, citations: %d", searchCalls, citations)
+}
