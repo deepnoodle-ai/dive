@@ -114,11 +114,11 @@ func (p *SessionPickerApp) LiveView() tui.View {
 	// Show scroll indicator if needed
 	if len(p.sessions) > 10 {
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" (%d/%d sessions)", endIdx, len(p.sessions)).Hint())
+		views = append(views, tui.Text(" (%d/%d sessions)", endIdx, len(p.sessions)).Style(hintStyle()))
 	}
 
 	views = append(views, tui.Text(""))
-	views = append(views, tui.Text(" ↑/↓ to navigate, Enter to select, Esc to cancel").Hint())
+	views = append(views, tui.Text(" ↑/↓ to navigate, Enter to select, Esc to cancel").Style(hintStyle()))
 
 	return tui.Stack(views...)
 }
@@ -151,15 +151,15 @@ func (p *SessionPickerApp) sessionItemView(info *session.SessionInfo, selected b
 	if selected {
 		line1 := tui.Group(
 			tui.Text(" ❯ ").Fg(tui.ColorCyan),
-			tui.Text("[%s] ", timeAgo).Hint(),
+			tui.Text("[%s] ", timeAgo).Style(hintStyle()),
 			tui.Text("%s", title).Fg(tui.ColorCyan),
 		)
 
 		var line2 tui.View
 		if workspace != "" {
-			line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Hint()
+			line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Style(hintStyle())
 		} else {
-			line2 = tui.Text("     %d turns", info.EventCount).Hint()
+			line2 = tui.Text("     %d turns", info.EventCount).Style(hintStyle())
 		}
 
 		return tui.Stack(line1, line2)
@@ -167,15 +167,15 @@ func (p *SessionPickerApp) sessionItemView(info *session.SessionInfo, selected b
 
 	line1 := tui.Group(
 		tui.Text("   "),
-		tui.Text("[%s] ", timeAgo).Hint(),
+		tui.Text("[%s] ", timeAgo).Style(hintStyle()),
 		tui.Text("%s", title),
 	)
 
 	var line2 tui.View
 	if workspace != "" {
-		line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Hint()
+		line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Style(hintStyle())
 	} else {
-		line2 = tui.Text("     %d turns", info.EventCount).Hint()
+		line2 = tui.Text("     %d turns", info.EventCount).Style(hintStyle())
 	}
 
 	return tui.Stack(line1, line2)

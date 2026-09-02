@@ -44,14 +44,14 @@ func (a *App) printContextDemoReport() {
 	views := []tui.View{
 		tui.Text("Context demo reminders").Bold(),
 		tui.Text("  enabled: %s", a.contextDemos.displaySummary()),
-		tui.Text("  shows --context-demo reminders only; skill and application reminders are not included").Hint(),
-		tui.Text("  model-only reminders are appended at the request tail and are not saved to conversation history").Hint(),
+		tui.Text("  shows --context-demo reminders only; skill and application reminders are not included").Style(hintStyle()),
+		tui.Text("  model-only reminders are appended at the request tail and are not saved to conversation history").Style(hintStyle()),
 	}
 	if len(a.contextDemoOrder) == 0 {
 		views = append(views,
 			tui.Text(""),
-			tui.Text("No context-demo reminder payloads were observed during the latest turn.").Hint(),
-			tui.Text("Send a message or use a tool, then run /context again.").Hint(),
+			tui.Text("No context-demo reminder payloads were observed during the latest turn.").Style(hintStyle()),
+			tui.Text("Send a message or use a tool, then run /context again.").Style(hintStyle()),
 		)
 		a.appendReport(tui.Stack(views...))
 		return
@@ -62,7 +62,7 @@ func (a *App) printContextDemoReport() {
 		notice := a.contextDemoNotices[name]
 		views = append(views,
 			tui.Text("  %s · %s · %s · %s", name, notice.Reminder.Tier, notice.Delivery, notice.Action).Bold(),
-			tui.PaddingLTRB(4, 0, 0, 0, tui.Text("%s", notice.Reminder.Content).Wrap().Hint()),
+			tui.PaddingLTRB(4, 0, 0, 0, tui.Text("%s", notice.Reminder.Content).Wrap().Style(hintStyle())),
 		)
 	}
 	views = append(views, tui.Text(""))

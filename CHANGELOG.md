@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Opt-in; the inline renderer is unchanged and still the default.
   `DIVE_DEBUG_FRAMES=1` puts the per-frame cost in the status line.
 
+### Fixed
+
+- **Dim text in the CLI is readable on a dark background.** Secondary greys sat
+  near 2.9:1 contrast, and hints combined bright black with SGR 2 (faint) on top
+  of it. Greys now start at 152 and hints keep the italic without the dimming.
+
 ### Changed
 
 - **The CLI transcript is one list with one renderer.** Every message the CLI

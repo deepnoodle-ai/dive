@@ -192,7 +192,7 @@ func TestEscapeReturnsToTheBottomWhenIdle(t *testing.T) {
 	assert.True(t, app.viewport.AtBottom)
 }
 
-func TestWheelScrollsThreeLines(t *testing.T) {
+func TestWheelScrollsOneLine(t *testing.T) {
 	app := newScreenApp(t, 40)
 	renderScreen(t, app, 80, 24)
 	assert.True(t, app.viewport.AtBottom)
@@ -201,12 +201,12 @@ func TestWheelScrollsThreeLines(t *testing.T) {
 	// between them: the "N new lines" row appears as soon as the transcript is
 	// scrolled and costs the viewport a line, which would move the end.
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelUp})
-	assert.Equal(t, 3, app.viewport.LinesBelow, "one notch is three lines")
+	assert.Equal(t, 1, app.viewport.LinesBelow, "one notch is one line")
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelUp})
-	assert.Equal(t, 6, app.viewport.LinesBelow)
+	assert.Equal(t, 2, app.viewport.LinesBelow)
 
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelDown})
-	assert.Equal(t, 3, app.viewport.LinesBelow)
+	assert.Equal(t, 1, app.viewport.LinesBelow)
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelDown})
 	assert.True(t, app.viewport.AtBottom, "back where it started")
 }

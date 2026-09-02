@@ -77,7 +77,7 @@ func (a *App) frameMetricsView() tui.View {
 		float64(m.MaxFrameTime.Microseconds())/1000,
 		fps,
 		len(a.messages),
-	).Hint()
+	).Style(hintStyle())
 }
 
 // footerView is the fixed bottom of the managed screen: the dialog when one is
@@ -96,7 +96,7 @@ func (a *App) footerView() tui.View {
 		views = append(views, tui.Group(
 			tui.Text(" ↓ %d new line%s", a.viewport.LinesBelow, pluralSuffix(a.viewport.LinesBelow)).
 				Style(tui.NewStyle().WithFgRGB(accentDim)),
-			tui.Text(" · End to jump to the latest").Hint(),
+			tui.Text(" · End to jump to the latest").Style(hintStyle()),
 		))
 	}
 
@@ -224,17 +224,21 @@ func (a *App) snapToBottom() {
 	}
 }
 
-// handleScreenMouse turns wheel events into scrolling. Three lines per notch is
-// what every terminal-based reader uses.
+// wheelLines is how far one wheel notch scrolls. Pagers conventionally use
+// three, but a trackpad delivers notches continuously, so three overshoots on
+// exactly the hardware most of this CLI's users have.
+const wheelLines = 1
+
+// handleScreenMouse turns wheel events into scrolling.
 func (a *App) handleScreenMouse(e tui.MouseEvent) {
 	if !a.screenMode || e.Type != tui.MouseScroll {
 		return
 	}
 	switch e.Button {
 	case tui.MouseButtonWheelUp:
-		a.viewport.ScrollBy(-3)
+		a.viewport.ScrollBy(-wheelLines)
 	case tui.MouseButtonWheelDown:
-		a.viewport.ScrollBy(3)
+		a.viewport.ScrollBy(wheelLines)
 	}
 }
 

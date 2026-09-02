@@ -506,7 +506,7 @@ func (a *App) inputAreaView() []tui.View {
 		tui.InputField(&a.inputText).
 			ID("main-input").
 			Prompt(" ❯ ").
-			PromptStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})).
+			PromptStyle(tui.NewStyle().WithFgRGB(dimText)).
 			Placeholder("Type a message... (@filename, or drop a file to attach)").
 			Multiline(true).
 			MaxHeight(10).
@@ -554,7 +554,7 @@ func (a *App) inputAreaView() []tui.View {
 			if i == a.autocompleteIndex {
 				footerViews = append(footerViews, tui.Text(" ❯ %s%s", prefix, match).Fg(tui.ColorCyan))
 			} else {
-				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Hint())
+				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Style(hintStyle()))
 			}
 		}
 		// Pad to 8 lines only when autocomplete is active (stable height during selection)
@@ -564,12 +564,12 @@ func (a *App) inputAreaView() []tui.View {
 	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
 		footerViews = append(footerViews, tui.Group(
 			tui.Text(" ⚡").Fg(tui.ColorYellow),
-			tui.Text(" Context compacted:").Hint(),
+			tui.Text(" Context compacted:").Style(hintStyle()),
 			tui.Text(" %d → %d tokens", a.lastCompactionEvent.TokensBefore, a.lastCompactionEvent.TokensAfter),
-			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Hint(),
+			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Style(hintStyle()),
 		))
 	} else if a.showExitHint {
-		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Hint())
+		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Style(hintStyle()))
 	}
 
 	// Show status line when autocomplete is not active
@@ -600,7 +600,7 @@ func (a *App) attachmentsView() tui.View {
 	for _, att := range a.attachments {
 		rows = append(rows, tui.Group(
 			tui.Text(" ⏺ ").Fg(tui.ColorCyan),
-			tui.Text("%s (%s)", att.Name, formatBytes(int(att.Size))).Hint(),
+			tui.Text("%s (%s)", att.Name, formatBytes(int(att.Size))).Style(hintStyle()),
 		))
 	}
 	return tui.Stack(rows...).Gap(0)
@@ -692,7 +692,7 @@ func (a *App) dialogView() tui.View {
 		)
 
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Esc to cancel").Hint())
+		views = append(views, tui.Text(" Esc to cancel").Style(hintStyle()))
 
 		return tui.Stack(views...)
 
@@ -703,12 +703,12 @@ func (a *App) dialogView() tui.View {
 			tui.Text(" %s", a.dialogState.Title).Bold(),
 		)
 		if a.dialogState.Message != "" {
-			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(tui.NewStyle().WithFgRGB(mutedText)))
 		}
 		if a.dialogState.ContentPreview != "" {
 			views = append(views, tui.Divider().Char('-'))
 			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
-				views = append(views, tui.Text(" %s", line).Hint())
+				views = append(views, tui.Text(" %s", line).Style(hintStyle()))
 			}
 		}
 		views = append(views, tui.Text(""))
@@ -753,7 +753,7 @@ func (a *App) dialogView() tui.View {
 		views = append(views, promptChoice)
 
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Use arrow keys to navigate, Enter to select, Esc to cancel").Hint())
+		views = append(views, tui.Text(" Use arrow keys to navigate, Enter to select, Esc to cancel").Style(hintStyle()))
 
 	case DialogTypeMultiSelect:
 		// Header
@@ -762,7 +762,7 @@ func (a *App) dialogView() tui.View {
 			tui.Text(" %s", a.dialogState.Title).Bold(),
 		)
 		if a.dialogState.Message != "" {
-			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(tui.NewStyle().WithFgRGB(mutedText)))
 		}
 		views = append(views, tui.Text(""))
 
@@ -782,7 +782,7 @@ func (a *App) dialogView() tui.View {
 		)
 
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Use arrow keys to navigate, Space to toggle, Enter to confirm, Esc to cancel").Hint())
+		views = append(views, tui.Text(" Use arrow keys to navigate, Space to toggle, Enter to confirm, Esc to cancel").Style(hintStyle()))
 
 	case DialogTypeInput:
 		// Header
@@ -791,7 +791,7 @@ func (a *App) dialogView() tui.View {
 			tui.Text(" %s", a.dialogState.Title).Bold(),
 		)
 		if a.dialogState.Message != "" {
-			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(tui.NewStyle().WithFgRGB(mutedText)))
 		}
 		views = append(views, tui.Text(""))
 		// Note: InputField handles its own Enter key via OnSubmit
@@ -813,7 +813,7 @@ func (a *App) dialogView() tui.View {
 					a.hideActiveDialog()
 				}),
 		)
-		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
+		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Style(hintStyle()))
 	}
 
 	return tui.Stack(views...)
@@ -2495,7 +2495,7 @@ func (a *App) printHelp() {
 			}
 			views = append(views, tui.Text("%s", line))
 			if cmd.Description != "" {
-				views = append(views, tui.Text("      %s", cmd.Description).Hint())
+				views = append(views, tui.Text("      %s", cmd.Description).Style(hintStyle()))
 			}
 		}
 	}
@@ -2544,7 +2544,7 @@ func (a *App) usageReportView() tui.View {
 		sess = &llm.Usage{}
 	}
 
-	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 110, B: 120})
+	labelStyle := tui.NewStyle().WithFgRGB(dimText)
 	rowLabelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170})
 	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
 
@@ -2701,7 +2701,7 @@ func (a *App) buildLiveView(withActivity bool) tui.View {
 			tui.Text(" %d → %d tokens, %d messages summarized",
 				a.lastCompactionEvent.TokensBefore,
 				a.lastCompactionEvent.TokensAfter,
-				a.lastCompactionEvent.MessagesCompacted).Hint(),
+				a.lastCompactionEvent.MessagesCompacted).Style(hintStyle()),
 		))
 	}
 
@@ -2710,9 +2710,9 @@ func (a *App) buildLiveView(withActivity bool) tui.View {
 		views = append(views, tui.Group(
 			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
 			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
-			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
-			tui.Text("  ").Hint(),
-			tui.Text("esc to interrupt").Hint(),
+			tui.Text(" (%s)", formatDuration(elapsed)).Style(hintStyle()),
+			tui.Text("  ").Style(hintStyle()),
+			tui.Text("esc to interrupt").Style(hintStyle()),
 		))
 	}
 

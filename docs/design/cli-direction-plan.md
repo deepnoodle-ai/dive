@@ -242,7 +242,7 @@ a.footerView())`. `footerView` is `app.go:409–530` minus the transcript-ish pa
    `Close()`-then-`Print` ordering all need the `*Terminal`.
 3. **Handle `ResizeEvent`** — there is no handler anywhere in the CLI today.
 4. **Wire `touch(i)` to `viewport.Invalidate(i)`** at the ten mutation sites.
-5. **Scrolling**: wheel (3 lines), PgUp/PgDn, Ctrl+Home/End, Home/End on empty input via
+5. **Scrolling**: wheel (1 line), PgUp/PgDn, Ctrl+Home/End, Home/End on empty input via
    `OnKey`, Esc-to-bottom when idle and scrolled up, snap-to-bottom on typing and
    submit, and the `↓ N new lines · End to jump` indicator.
 6. **`/clear`** becomes `a.messages = a.messages[:0]` + `InvalidateAll()` +
