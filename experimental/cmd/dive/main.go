@@ -160,9 +160,9 @@ func main() {
 				Env("DIVE_COMPACTION").
 				Help("Enable automatic context compaction"),
 			cli.Int("compaction-threshold").
-				Default(100000).
+				Default(fallbackCompactionThreshold).
 				Env("DIVE_COMPACTION_THRESHOLD").
-				Help("Token threshold for automatic context compaction"),
+				Help("Token threshold for automatic context compaction (default: half the model's context window)"),
 			dangerouslySkipPermissionsFlag(),
 		).
 		Run(runMain)
@@ -342,8 +342,12 @@ func runInteractive(ctx *cli.Context) error {
 	// Set up compaction config
 	var compactionConfig *compaction.CompactionConfig
 	if ctx.Bool("compaction") {
+		var explicitThreshold int
+		if ctx.IsSet("compaction-threshold") {
+			explicitThreshold = ctx.Int("compaction-threshold")
+		}
 		compactionConfig = &compaction.CompactionConfig{
-			ContextTokenThreshold: ctx.Int("compaction-threshold"),
+			ContextTokenThreshold: compactionThreshold(explicitThreshold, modelName),
 			Model:                 model,
 		}
 	}
@@ -462,6 +466,50 @@ func permissionMode(ctx *cli.Context) permission.Mode {
 
 //go:embed system_prompt.txt
 var defaultSystemPromptTemplate string
+
+// fallbackCompactionThreshold is used only for a model whose context window the
+// embedded catalogs do not list. It is half of a 200K window, which is what the
+// threshold was for every model before it became model-aware.
+const fallbackCompactionThreshold = 100000
+
+// compactionThreshold picks the token count at which the conversation is
+// compacted. An explicit --compaction-threshold or DIVE_COMPACTION_THRESHOLD
+// wins; otherwise it is half the model's context window.
+//
+// One flat number cannot serve the range the CLI now spans. 100000 is half of a
+// 200K window, but only a tenth of Muse Spark's 1M — compacting there discards
+// most of the context the model was chosen for. On a 128K model the same number
+// errs the other way: compaction would not start until the request is already
+// near overflowing.
+//
+// explicit is what the user asked for, or 0 when they asked for nothing.
+func compactionThreshold(explicit int, modelName string) int {
+	if explicit > 0 {
+		return explicit
+	}
+	if window := usableContextWindow(modelName); window > 0 {
+		return window / 2
+	}
+	return fallbackCompactionThreshold
+}
+
+// anthropicUngatedContextWindow is what a Claude model accepts without the
+// context-1m-2025-08-07 beta header.
+const anthropicUngatedContextWindow = 200_000
+
+// usableContextWindow is the window the CLI can actually fill, which is not
+// always the number the catalog lists. Anthropic's 1M tier is behind a beta
+// header the CLI never sends — createModel goes through the plain registry — so
+// a Claude model stops at 200K here whatever the catalog says. Deriving the
+// threshold from the catalog number instead would put it beyond the point where
+// the API rejects the request outright, and compaction would never run.
+func usableContextWindow(modelName string) int {
+	window := contextWindowForModel(modelName)
+	if strings.HasPrefix(modelName, "claude-") && window > anthropicUngatedContextWindow {
+		return anthropicUngatedContextWindow
+	}
+	return window
+}
 
 func defaultSystemPrompt(workspaceDir, modelName string) string {
 	var b strings.Builder

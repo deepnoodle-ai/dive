@@ -103,3 +103,27 @@ func TestGPT56ContextWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestCompactionThreshold(t *testing.T) {
+	tests := []struct {
+		name     string
+		explicit int
+		model    string
+		want     int
+	}{
+		{"explicit wins over the window", 250_000, "muse-spark-1.3", 250_000},
+		{"Muse Spark's 1M compacts at half of it", 0, "muse-spark-1.3", 524_288},
+		// The catalog lists 1M for this model, but the CLI cannot reach it: the
+		// 1M tier needs a beta header the CLI does not send. Capping at the
+		// ungated 200K is what keeps the threshold below the point where the
+		// API starts rejecting the request.
+		{"Claude stays at its ungated 200K", 0, "claude-sonnet-4-5", 100_000},
+		{"a genuine 200K model is unchanged", 0, "claude-haiku-4-5", 100_000},
+		{"unknown model falls back", 0, "some-unlisted-model", fallbackCompactionThreshold},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, compactionThreshold(tt.explicit, tt.model), tt.want)
+		})
+	}
+}
