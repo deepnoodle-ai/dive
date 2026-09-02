@@ -193,3 +193,28 @@ func TestLookupReturnsIndependentEffortSlice(t *testing.T) {
 func TestTableForUnknownVendorIsNil(t *testing.T) {
 	assert.Nil(t, TableFor("openrouter", "mistralai/mistral-large"))
 }
+
+// SupportsReasoning answers a different question from ResolveEffort: whether the
+// model reasons at all, rather than what depth it accepts. The include that
+// carries reasoning between turns depends on the former, and gating it on the
+// latter silently dropped continuity for callers who named no effort.
+func TestSupportsReasoning(t *testing.T) {
+	tests := []struct {
+		provider string
+		model    string
+		want     bool
+	}{
+		{"openai", "gpt-4o", false},  // no reasoning parameter at all
+		{"openai", "gpt-4.1", false}, // likewise
+		{"openai", "gpt-5.1", true},
+		{"grok", "grok-4.6", true},
+		{"meta", "muse-spark-1.3", true},
+		{"meta", "muse-spark-1.3-contributor", true},
+		{"openai", "some-unknown-finetune", false}, // unknown stays untouched
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
+			assert.Equal(t, SupportsReasoning(tt.provider, tt.model), tt.want)
+		})
+	}
+}

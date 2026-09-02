@@ -184,6 +184,23 @@ func ResolveEffort(
 	return clamped, true
 }
 
+// SupportsReasoning reports whether a model produces reasoning at all.
+//
+// This is deliberately separate from ResolveEffort. Whether a model reasons is a
+// property of the model; the effort level is a property of the request. A caller
+// who names no level still gets reasoning from a model that always reasons —
+// both Muse Spark and the gpt-5 family reason at a model-chosen depth when the
+// parameter is omitted — and a caller that wants that reasoning returned has to
+// ask for it whether or not it picked a depth.
+//
+// Unknown models report false. Asking for an include a model does not
+// understand is an error on some endpoints, so an unrecognized id keeps the
+// behavior it had before these tables existed.
+func SupportsReasoning(providerName, model string) bool {
+	caps, known := lookup(providerName, model)
+	return known && len(caps.Efforts) > 0
+}
+
 // AcceptsTemperature reports whether the model takes a temperature. Unknown
 // models are assumed to accept it, as they did before these tables existed.
 func AcceptsTemperature(providerName, model string) bool {

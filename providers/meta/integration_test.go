@@ -207,3 +207,76 @@ func TestIntegration_ToolCallAndReasoningReplay(t *testing.T) {
 	t.Logf("final: %q", final)
 	assert.True(t, strings.TrimSpace(final) != "", "expected a concluding answer")
 }
+
+// TestIntegration_ReasoningReplayWithoutExplicitEffort is the regression test
+// for the include that used to be gated on the effort level. Muse Spark reasons
+// whether or not the caller names a depth, so a Dive agent that never touched
+// ReasoningEffort — the default — used to drop the chain of thought at every
+// tool-result boundary. Nothing about the caller's code says "no reasoning
+// continuity", which is what made the old behavior a silent one.
+func TestIntegration_ReasoningReplayWithoutExplicitEffort(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	provider := New(WithMaxTokens(4000))
+	ctx := testContext(t, 180*time.Second)
+
+	weather := llm.NewToolDefinition().
+		WithName("get_weather").
+		WithDescription("Get the current weather for a city.").
+		WithSchema(&schema.Schema{
+			Type:     "object",
+			Required: []string{"city"},
+			Properties: map[string]*schema.Property{
+				"city": {Type: "string", Description: "City name"},
+			},
+		})
+
+	prompt := "What is the weather in Oslo? Use the tool, then answer in one sentence."
+
+	// Deliberately no llm.WithReasoningEffort here.
+	first, err := provider.Generate(ctx,
+		llm.WithUserTextMessage(prompt),
+		llm.WithTools(weather),
+	)
+	assert.NoError(t, err)
+
+	stored, err := json.Marshal(first.Message())
+	assert.NoError(t, err)
+	var reloaded llm.Message
+	assert.NoError(t, json.Unmarshal(stored, &reloaded))
+
+	var toolResults []llm.Content
+	var signatures int
+	for _, content := range reloaded.Content {
+		switch c := content.(type) {
+		case *llm.ToolUseContent:
+			toolResults = append(toolResults, &llm.ToolResultContent{
+				ToolUseID: c.ID,
+				Content:   "-3C, snowing",
+			})
+		case *llm.ThinkingContent:
+			if c.Signature != "" {
+				signatures++
+			}
+		}
+	}
+	if len(toolResults) == 0 {
+		t.Skip("model answered without calling the tool; nothing to replay")
+	}
+
+	assert.True(t, signatures > 0,
+		"encrypted reasoning must come back even with no effort set; gating the "+
+			"include on the effort level is what this test exists to catch")
+
+	second, err := provider.Generate(ctx,
+		llm.WithMessages(
+			llm.NewUserTextMessage(prompt),
+			&reloaded,
+			llm.NewMessage(llm.User, toolResults),
+		),
+		llm.WithTools(weather),
+	)
+	assert.NoError(t, err)
+	t.Logf("final: %q", second.Message().Text())
+	assert.True(t, strings.TrimSpace(second.Message().Text()) != "")
+}
