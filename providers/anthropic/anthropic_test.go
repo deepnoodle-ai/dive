@@ -28,11 +28,12 @@ func TestHelloWorld(t *testing.T) {
 		llm.NewUserTextMessage("respond with \"hello\""),
 	))
 	assert.NoError(t, err)
-	// Casing and trailing punctuation on a one-word reply are the model's
-	// choice, not the provider's behavior: Opus 5 answers "Hello" where 4.8
-	// answered "hello". Normalize rather than pin the exact string.
-	normalized := strings.ToLower(strings.Trim(response.Message().Text(), " .!"))
-	assert.Equal(t, normalized, "hello")
+	// How much the model says around the requested word is its choice, not the
+	// provider's behavior: Sonnet 5 has answered "hello", "Hello", and "Hello!
+	// How can I help you today?" to this prompt. What the round trip owes us is
+	// assistant text containing the word, so check that and nothing more. This
+	// matches the openaicompletions TestHelloWorld.
+	assert.Contains(t, strings.ToLower(response.Message().Text()), "hello")
 }
 
 func TestStreamCountTo10(t *testing.T) {
