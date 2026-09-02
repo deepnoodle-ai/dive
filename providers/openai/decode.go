@@ -168,12 +168,86 @@ func decodeImageGenerationCallContent(imgCall responses.ResponseOutputItemImageG
 
 func decodeWebSearchCallContent(call responses.ResponseFunctionWebSearch) ([]llm.Content, error) {
 	// https://platform.openai.com/docs/guides/tools-web-search?api-mode=responses
-	return []llm.Content{
-		&llm.ServerToolUseContent{
-			ID:   call.ID,
-			Name: "web_search_call",
-		},
-	}, nil
+	//
+	// The action records what the model did with the web: the query it ran, the
+	// page it opened, and — when the request asked for
+	// web_search_call.action.sources — the hits behind the answer. Only the
+	// call's ID used to survive decoding, so a caller who paid for the sources
+	// include had no way to read what came back.
+	content := &llm.ServerToolUseContent{
+		ID:    call.ID,
+		Name:  "web_search_call",
+		Input: webSearchActionInput(call.Action),
+	}
+	if results := webSearchResults(call.RawJSON()); len(results) > 0 {
+		if content.Input == nil {
+			content.Input = map[string]any{}
+		}
+		content.Input["results"] = results
+	}
+	return []llm.Content{content}, nil
+}
+
+// webSearchResults pulls the hits that include: ["web_search_call.results"]
+// adds to a call: title, url, and the snippet the model actually saw. The SDK
+// struct has no field for them, so they only exist in the raw payload, and
+// without this the include is paid for and then discarded.
+func webSearchResults(raw string) []any {
+	if raw == "" {
+		return nil
+	}
+	var payload struct {
+		Results []map[string]any `json:"results"`
+	}
+	// A shape the SDK does not model is not an error worth failing a decode
+	// over: the answer and its citations are already decoded by this point.
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	results := make([]any, 0, len(payload.Results))
+	for _, result := range payload.Results {
+		results = append(results, result)
+	}
+	if len(results) == 0 {
+		return nil
+	}
+	return results
+}
+
+// webSearchActionInput flattens the action union into the fields the variant
+// actually set. It returns nil rather than an empty map when the action is
+// absent, so a provider that omits it reads the same as before.
+func webSearchActionInput(action responses.ResponseFunctionWebSearchActionUnion) map[string]any {
+	input := map[string]any{}
+	if action.Type != "" {
+		input["type"] = action.Type
+	}
+	if action.Query != "" {
+		input["query"] = action.Query
+	}
+	if len(action.Queries) > 0 {
+		input["queries"] = action.Queries
+	}
+	if action.URL != "" {
+		input["url"] = action.URL
+	}
+	if action.Pattern != "" {
+		input["pattern"] = action.Pattern
+	}
+	if len(action.Sources) > 0 {
+		sources := make([]any, 0, len(action.Sources))
+		for _, source := range action.Sources {
+			sources = append(sources, map[string]any{
+				"type": string(source.Type),
+				"url":  source.URL,
+			})
+		}
+		input["sources"] = sources
+	}
+	if len(input) == 0 {
+		return nil
+	}
+	return input
 }
 
 func decodeMcpCallContent(mcpCall responses.ResponseOutputItemMcpCall) ([]llm.Content, error) {

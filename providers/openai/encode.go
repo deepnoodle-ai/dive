@@ -445,9 +445,13 @@ func joinToolResultBlockText(blocks []*dive.ToolResultContent) string {
 func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses.ResponseInputItemUnionParam, error) {
 	switch c.Name {
 	case "web_search_call":
+		// Replay the query the search actually ran when decoding kept it. It
+		// used to always go back empty, which told a later turn that a search
+		// happened but not what was asked.
+		query, _ := c.Input["query"].(string)
 		return responses.ResponseInputItemParamOfWebSearchCall(
 			responses.ResponseFunctionWebSearchActionSearchParam{
-				Query: openai.String(""), // Empty query for completed search
+				Query: openai.String(query),
 				Type:  "search",
 			},
 			c.ID,

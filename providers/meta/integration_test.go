@@ -281,9 +281,14 @@ func TestIntegration_ReasoningReplayWithoutExplicitEffort(t *testing.T) {
 	assert.True(t, strings.TrimSpace(second.Message().Text()) != "")
 }
 
-// TestIntegration_WebSearch exercises search grounding. The model decides
-// whether to search, so this asserts the request is accepted and answered
-// rather than that a search necessarily ran.
+// TestIntegration_WebSearch exercises search grounding end to end: the request
+// is accepted, a search actually runs, and the hits behind it come back.
+//
+// Muse Spark narrates before it searches ("I'll search for ..."), so the answer
+// arrives as a second message after the search rather than as the whole of the
+// output text. A token budget that runs out mid-search leaves only the
+// narration, which is why the budget here is generous and the assertion looks
+// for the search call rather than for any non-empty text.
 func TestIntegration_WebSearch(t *testing.T) {
 	skipIfNoAPIKey(t)
 
@@ -293,11 +298,11 @@ func TestIntegration_WebSearch(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	provider := New(WithMaxTokens(4000))
+	provider := New(WithMaxTokens(16000))
 	ctx := testContext(t, 240*time.Second)
 
 	response, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("What was announced at Meta's most recent developer event? One sentence."),
+		llm.WithUserTextMessage("What was announced at Meta Connect 2025? One sentence."),
 		llm.WithTools(search),
 	)
 	// The SDK surfaces the message text, not the error code, so match the
@@ -318,18 +323,27 @@ func TestIntegration_WebSearch(t *testing.T) {
 	t.Logf("grounded answer: %q", text)
 	assert.True(t, strings.TrimSpace(text) != "")
 
-	// Citations and search calls are both optional per Meta's docs, so log what
-	// came back rather than requiring it.
-	var searchCalls, citations int
+	// IncludeResults asks for web_search_call.action.sources, so the hits the
+	// model saw have to survive decoding. They did not until the action was
+	// decoded: every call arrived as a bare ID.
+	var searchCalls, sources int
 	for _, content := range response.Message().Content {
-		switch c := content.(type) {
-		case *llm.ServerToolUseContent:
-			if c.Name == "web_search" {
-				searchCalls++
+		use, ok := content.(*llm.ServerToolUseContent)
+		if !ok || use.Name != "web_search_call" {
+			continue
+		}
+		searchCalls++
+		t.Logf("search %d: query=%q", searchCalls, use.Input["query"])
+		if hits, ok := use.Input["results"].([]any); ok {
+			sources += len(hits)
+			for _, hit := range hits {
+				if result, ok := hit.(map[string]any); ok {
+					t.Logf("  hit: %v %v", result["title"], result["url"])
+				}
 			}
-		case *llm.TextContent:
-			citations += len(c.Citations)
 		}
 	}
-	t.Logf("web_search calls: %d, citations: %d", searchCalls, citations)
+	t.Logf("web_search calls: %d, sources: %d", searchCalls, sources)
+	assert.True(t, searchCalls > 0, "the model should have searched for a 2025 event")
+	assert.True(t, sources > 0, "IncludeResults should return the hits behind the search")
 }
