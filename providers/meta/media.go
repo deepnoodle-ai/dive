@@ -271,5 +271,14 @@ func downloadImage(ctx context.Context, url string) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d fetching image", response.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(response.Body, maxImageSize))
+	// Read one byte past the cap so an oversized image is an error rather than
+	// silently truncated bytes that go on to be decoded and written to disk.
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxImageSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxImageSize {
+		return nil, fmt.Errorf("image exceeds the %d byte read cap", maxImageSize)
+	}
+	return data, nil
 }
