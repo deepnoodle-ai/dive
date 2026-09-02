@@ -18,6 +18,12 @@ type config struct {
 	retryBaseWait       time.Duration
 	client              *http.Client
 	extraRequestOptions []option.RequestOption
+
+	// Transcription-only. Muse Voice Transcribe takes its settings per session
+	// rather than per request, and media.Config has no field for them.
+	transcriptionMode     TranscriptionMode
+	transcriptionKeywords []string
+	languageBias          []string
 }
 
 // Option is a function that configures the Provider.

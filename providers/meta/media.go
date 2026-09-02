@@ -37,7 +37,10 @@ var (
 // than billed as search grounding, and the lookups are not surfaced as separate
 // tool calls — the finished image is all that comes back.
 type MediaProvider struct {
-	client *openai.Client
+	client                *openai.Client
+	transcriptionMode     TranscriptionMode
+	transcriptionKeywords []string
+	languageBias          []string
 }
 
 // NewMediaProvider creates a Meta MediaProvider, reading MODEL_API_KEY or
@@ -55,7 +58,12 @@ func NewMediaProvider(opts ...Option) *MediaProvider {
 		requestOptions = append(requestOptions, option.WithHTTPClient(cfg.client))
 	}
 	client := openai.NewClient(requestOptions...)
-	return &MediaProvider{client: &client}
+	return &MediaProvider{
+		client:                &client,
+		transcriptionMode:     cfg.transcriptionMode,
+		transcriptionKeywords: cfg.transcriptionKeywords,
+		languageBias:          cfg.languageBias,
+	}
 }
 
 // imageSize renders an aspect ratio as the "WxH" string Muse Image expects.

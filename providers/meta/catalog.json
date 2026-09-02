@@ -79,6 +79,13 @@
       "kind": "image",
       "display_name": "Muse Image 1.0",
       "description": "Generates and edits images; runs its own web and image search while rendering"
+    },
+    {
+      "go_name": "ModelMuseVoiceTranscribe",
+      "id": "muse-voice-transcribe-1.0",
+      "kind": "audio",
+      "display_name": "Muse Voice Transcribe 1.0",
+      "description": "Speech to text with speech-turn detection, speaker labels, and vocabulary biasing; $0.18 per hour of audio"
     }
   ],
   "pricing": {

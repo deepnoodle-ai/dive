@@ -10,4 +10,11 @@ func init() {
 			return NewMediaProvider()
 		},
 	})
+	media.RegisterTranscription(media.TranscriptionProviderEntry{
+		Name:  "meta",
+		Match: media.PrefixMatcher("muse-voice-transcribe"),
+		Factory: func(model string) media.TranscriptionProvider {
+			return NewMediaProvider()
+		},
+	})
 }
