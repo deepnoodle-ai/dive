@@ -464,3 +464,39 @@ func TestTheThinkingIndicatorIsGivenRoomOnBothSides(t *testing.T) {
 	assert.Equal(t, strings.TrimSpace(lines[row-1]), "", "a blank line above the spinner")
 	assert.Equal(t, strings.TrimSpace(lines[row+1]), "", "a blank line below the spinner")
 }
+
+// A finished turn leaves a line where the spinner was, rather than a gap. A
+// long turn is often left running while the user is elsewhere, and a blank
+// space answers neither "is it done?" nor "how long was I gone?".
+func TestAFinishedTurnReportsHowLongItTookWhereTheSpinnerWas(t *testing.T) {
+	app := newScreenApp(t, 3)
+	app.processingStartTime = time.Now().Add(-3*time.Minute - 51*time.Second)
+	app.processing = true
+	app.streamingMessageIndex = len(app.messages) - 1
+
+	spinning := strings.Split(renderScreen(t, app, 80, 24).Text(), "\n")
+	spinRow := rowContaining(t, spinning, "esc to interrupt")
+
+	app.handleProcessingEnd(nil)
+
+	lines := strings.Split(renderScreen(t, app, 80, 24).Text(), "\n")
+	row := rowContaining(t, lines, "Worked for")
+
+	assert.Contains(t, lines[row], "Worked for 3m 51s")
+	assert.Contains(t, lines[row], "· done ")
+	assert.Equal(t, row, spinRow, "it takes the spinner's row, so nothing shifts")
+	assert.Equal(t, strings.TrimSpace(lines[row-1]), "", "a blank line above")
+	assert.Equal(t, strings.TrimSpace(lines[row+1]), "", "a blank line below")
+}
+
+// rowContaining is the index of the first line containing want.
+func rowContaining(t *testing.T, lines []string, want string) int {
+	t.Helper()
+	for i, line := range lines {
+		if strings.Contains(line, want) {
+			return i
+		}
+	}
+	t.Fatalf("no line contains %q:\n%s", want, strings.Join(lines, "\n"))
+	return -1
+}

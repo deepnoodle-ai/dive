@@ -104,14 +104,20 @@ func (a *App) footerView() tui.View {
 		))
 	}
 
+	// The spinner's slot, and what takes its place once the turn is done. Both
+	// get a blank line above and below: this sits between the transcript and the
+	// input box, and without them it crowds both.
 	if a.processing {
 		if live := a.buildLiveView(false); live != nil {
-			// Blank lines above and below: the spinner sits between the
-			// transcript and the input box, and without them it crowds both.
 			views = append(views, tui.Text(""), live, tui.Text(""))
 		}
-	} else if a.showTodos && len(a.todos) > 0 {
-		views = append(views, a.todoListView(viewOpts{animate: true}))
+	} else {
+		if done := a.turnSummaryView(); done != nil {
+			views = append(views, tui.Text(""), done, tui.Text(""))
+		}
+		if a.showTodos && len(a.todos) > 0 {
+			views = append(views, a.todoListView(viewOpts{animate: true}))
+		}
 	}
 
 	views = append(views, a.inputAreaView()...)
@@ -469,6 +475,27 @@ func (a *App) copyToClipboard(text string) {
 		}
 		a.postFlash("%s", report.notice())
 	}()
+}
+
+// turnSummaryView is what the thinking indicator leaves behind: how long the
+// last turn took and when it finished, in the same place the spinner was.
+//
+//	✻ Worked for 3m 51s · done 11:35 PM
+//
+// It stands until the next turn starts. A long turn is often left running while
+// the user is elsewhere, and coming back to a blank space answers neither "is it
+// finished?" nor "how long was I gone?".
+func (a *App) turnSummaryView() tui.View {
+	if a.lastTurnEndedAt.IsZero() {
+		return nil
+	}
+	// The leading space is the column every other line in the transcript and the
+	// spinner start at.
+	return tui.Group(
+		tui.Text(" ✻").Style(tui.NewStyle().WithFgRGB(accentDim)),
+		tui.Text(" Worked for %s", formatDuration(a.lastTurnDuration)).Style(hintStyle()),
+		tui.Text(" · done %s", a.lastTurnEndedAt.Format("3:04 PM")).Style(hintStyle()),
+	)
 }
 
 // setMouseReporting turns the app's mouse gestures on or off, which is the only

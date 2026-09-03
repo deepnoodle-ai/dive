@@ -317,6 +317,12 @@ type App struct {
 	// mode off, which is the only thing that entitles us to turn it back on.
 	altScrollDisabled bool
 
+	// What the last turn cost, kept so the spinner's slot can report it once the
+	// turn is over rather than simply vanishing. Zero until a turn completes,
+	// and replaced by the spinner as soon as the next one starts.
+	lastTurnDuration time.Duration
+	lastTurnEndedAt  time.Time
+
 	// A flash is feedback that expires: it takes over the status line for a
 	// moment and then gives it back. Copying needs this rather than a transcript
 	// notice, because a notice is permanent and every drag would leave one —
@@ -1913,6 +1919,13 @@ func (a *App) handleProcessingEnd(err error) {
 		})
 	}
 
+	// Record what the turn cost before clearing the state that measures it, so
+	// the spinner's slot can say how long it took instead of going blank.
+	if !a.processingStartTime.IsZero() {
+		a.lastTurnDuration = time.Since(a.processingStartTime)
+		a.lastTurnEndedAt = time.Now()
+	}
+
 	// Clear processing state BEFORE printing to scrollback.
 	// This ensures the live view rendered inside Print() matches the final state
 	// (without thinking animation), preventing orphaned blank lines.
@@ -2387,6 +2400,8 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.lastUsage = nil
 		a.sessionUsage = nil
 		a.interactionUsage = nil
+		// The turn it summarised is gone with the transcript.
+		a.lastTurnDuration, a.lastTurnEndedAt = 0, time.Time{}
 		a.resetContextDemoTrace()
 
 		// Reset conversation state by deleting the current session
