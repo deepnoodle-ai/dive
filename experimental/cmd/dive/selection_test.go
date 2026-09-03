@@ -279,12 +279,14 @@ func TestMouseOffHandsGesturesBackToTheTerminal(t *testing.T) {
 	clip.nothing(t)
 	assert.False(t, app.viewport.HasSelection())
 
-	// The wheel is not a gesture the terminal can give back inside the
-	// alternate screen, so it keeps working either way.
+	// Scrolling is not gated on mouseEnabled, so a wheel event that does reach
+	// us is still honoured. In practice the terminal stops sending them —
+	// reporting off means no mouse bytes at all — which is why turning it off
+	// says where scrolling went.
 	before, _ := app.viewport.Anchor()
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelUp})
 	after, _ := app.viewport.Anchor()
-	assert.True(t, after <= before, "the wheel still scrolls with reporting off")
+	assert.True(t, after <= before, "a wheel event that arrives still scrolls")
 }
 
 func TestClickingAToolCallHeaderExpandsItsOutput(t *testing.T) {

@@ -523,7 +523,11 @@ func (a *App) toggleMouse() {
 		a.appendNotice("Mouse on — drag to select, double-click a word, triple-click a line.")
 		return
 	}
-	a.appendNotice("Mouse off — your terminal's own selection is back. /mouse turns it on again.")
+	// Reporting off means no mouse bytes at all, wheel included: iTerm2 and
+	// most others only translate the wheel into arrow keys with alternate
+	// scroll on, which we have just turned off precisely so it does not land
+	// in the input. So say where scrolling went.
+	a.appendNotice("Mouse off — your terminal's own selection is back. Scroll with PgUp/PgDn; /mouse turns it on again.")
 }
 
 // firstNonBlankLine is the first line of a rendered view that has anything on
