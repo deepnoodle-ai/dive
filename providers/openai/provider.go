@@ -274,6 +274,15 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			}
 		}
 		includes[IncludeReasoningEncryptedContent] = true
+	} else if modelReasons(p.Name(), string(params.Model)) {
+		// The caller named no effort, but this model reasons anyway — omitting
+		// the parameter selects a model-chosen depth rather than disabling it.
+		// Ask for the encrypted reasoning regardless, because the alternative is
+		// silently dropping the chain of thought at every tool-result boundary,
+		// so each turn of an agent loop starts its thinking over. Gating the
+		// include on the effort level made reasoning continuity depend on a
+		// setting that has nothing to do with it.
+		includes[IncludeReasoningEncryptedContent] = true
 	}
 
 	// Handle parallel tool calls

@@ -78,6 +78,7 @@ PROVIDERS = (
     "mistral",
     "openrouter",
     "ollama",
+    "meta",
 )
 
 CATALOG_DIRECTORIES = {
@@ -88,6 +89,7 @@ CATALOG_DIRECTORIES = {
     "mistral": "mistral",
     "openrouter": "openrouter",
     "ollama": "ollama",
+    "meta": "meta",
 }
 
 # Fallback namespaces, used only when the OpenRouter catalog cannot be read.
@@ -111,7 +113,7 @@ MATERIAL_LINE_RE = re.compile(
     r"\bstructured outputs?\b|\bvision\b|\bimage\b|\baudio\b|\bvideo\b|"
     r"\bcach(?:e|ed|ing)\b|\bbatch\b|\bfast mode\b|\bflex\b|\bbeta\b|"
     r"\brelease notes?\b|\$\s*\d|\b\d+(?:\.\d+)?[kKmM]\s+tokens?\b|"
-    r"\b(?:gpt|claude|gemini|grok|mistral|codestral|devstral|llama|o[1-9])-"
+    r"\b(?:gpt|claude|gemini|grok|mistral|codestral|devstral|llama|muse|o[1-9])-"
     r")",
     re.IGNORECASE,
 )
@@ -125,6 +127,8 @@ API_KEY_ENV_NAMES = (
     "GROK_API_KEY",
     "MISTRAL_API_KEY",
     "OPENROUTER_API_KEY",
+    "MODEL_API_KEY",
+    "META_API_KEY",
 )
 
 SENSITIVE_QUERY_PARAMS = frozenset(
@@ -146,7 +150,7 @@ MODEL_TOKEN_RE = re.compile(
     # Mistral ships seven "-tral" families and only three were listed here, so
     # a Ministral, Magistral, Pixtral, or Voxtral release could never be
     # recognized as a model at all. See test_mistral_model_families_are_covered.
-    r"(?:gpt|claude|gemini|grok|llama|o[1-9]"
+    r"(?:gpt|claude|gemini|grok|llama|muse|o[1-9]"
     r"|mistral|mixtral|ministral|magistral|codestral|devstral|pixtral|voxtral"
     r"|mathstral|leanstral)"
     r"[a-z0-9._:/-]*"
@@ -738,6 +742,16 @@ def collect_mistral_api(client: HTTPClient, key: str) -> dict[str, Any]:
     return {"status": "ok", "source": url, "models": models}
 
 
+def collect_meta_api(client: HTTPClient, key: str) -> dict[str, Any]:
+    url = "https://api.meta.ai/v1/models"
+    payload = client.json(url, headers={"Authorization": f"Bearer {key}"})
+    models = records_by_id(
+        payload.get("data", []),
+        ("id", "created", "owned_by", "object"),
+    )
+    return {"status": "ok", "source": url, "models": models}
+
+
 def openrouter_prefixes(repo_root: Path) -> tuple[str, ...]:
     """Namespaces to keep from OpenRouter's catalog, derived from Dive's own."""
 
@@ -825,6 +839,7 @@ API_COLLECTORS: dict[str, tuple[tuple[str, ...], Callable[[HTTPClient, str], dic
     "google": (("GEMINI_API_KEY", "GOOGLE_API_KEY"), collect_google_api),
     "xai": (("XAI_API_KEY", "GROK_API_KEY"), collect_xai_api),
     "mistral": (("MISTRAL_API_KEY",), collect_mistral_api),
+    "meta": (("MODEL_API_KEY", "META_API_KEY"), collect_meta_api),
 }
 
 

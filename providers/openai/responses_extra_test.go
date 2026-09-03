@@ -207,8 +207,12 @@ func TestBuildRequestParams_CompatibleProviderOmitsUnsupportedPromptCacheKey(t *
 	assert.False(t, params.PromptCacheKey.Valid())
 }
 
+// Pinned to a non-reasoning model so the assertion isolates what the test is
+// about: a tool that opts out contributes no includes. A reasoning model adds
+// reasoning.encrypted_content on its own account, which would make an empty
+// Include say nothing about the tool.
 func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {
-	provider := New(WithAPIKey("test"))
+	provider := New(WithAPIKey("test"), WithModel(ModelGPT4o))
 
 	config := &llm.Config{}
 	config.Apply(
@@ -219,6 +223,76 @@ func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {
 	params, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
 	assert.Empty(t, params.Include)
+}
+
+func hasEncryptedReasoningInclude(params responses.ResponseNewParams) bool {
+	for _, inc := range params.Include {
+		if string(inc) == string(IncludeReasoningEncryptedContent) {
+			return true
+		}
+	}
+	return false
+}
+
+// The include used to be gated on the caller having named a reasoning effort,
+// which tied reasoning continuity to a setting that has nothing to do with it.
+// A model that reasons at a model-chosen depth still produces a chain of
+// thought, and without the include it is dropped at every tool-result boundary,
+// so each turn of an agent loop re-reasons from scratch.
+func TestEncryptedReasoningIncludeRequestedWithoutAnEffort(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+
+	config := &llm.Config{}
+	config.Apply(llm.WithMessages(llm.NewUserTextMessage("hi")))
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.True(t, hasEncryptedReasoningInclude(params),
+		"a reasoning model must have its encrypted reasoning requested even "+
+			"when the caller names no effort")
+	assert.Equal(t, string(params.Reasoning.Effort), "",
+		"no effort was requested, so none should be sent")
+}
+
+func TestEncryptedReasoningIncludeRequestedWithAnEffort(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffortLow),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.True(t, hasEncryptedReasoningInclude(params))
+	assert.Equal(t, string(params.Reasoning.Effort), "low")
+}
+
+// gpt-4o has no reasoning at all, and asking for reasoning it cannot produce is
+// how this fix would have turned one silent bug into a louder one.
+func TestEncryptedReasoningIncludeSkippedForNonReasoningModel(t *testing.T) {
+	provider := New(WithAPIKey("test"), WithModel(ModelGPT4o))
+
+	config := &llm.Config{}
+	config.Apply(llm.WithMessages(llm.NewUserTextMessage("hi")))
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.False(t, hasEncryptedReasoningInclude(params))
+}
+
+// An id the tables do not recognize keeps the behavior it had before the
+// capability tables existed: nothing is inferred about what it accepts.
+func TestEncryptedReasoningIncludeSkippedForUnknownModel(t *testing.T) {
+	provider := New(WithAPIKey("test"), WithModel("some-finetune-of-unknown-shape"))
+
+	config := &llm.Config{}
+	config.Apply(llm.WithMessages(llm.NewUserTextMessage("hi")))
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.False(t, hasEncryptedReasoningInclude(params))
 }
 
 func TestProviderDefaultModel(t *testing.T) {

@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Meta Model API provider (Muse Spark)** — new `providers/meta` module serving
+  `muse-spark-1.3` and its 1.2/1.1 siblings (1M context, $1.25/$4.25 per MTok;
+  a discounted `-contributor` tier trades a lower price for training on your
+  data). Targets Meta's Responses API, because Chat Completions redacts
+  reasoning for external keys and so cannot carry it across tool turns.
+  Verified against the live API, including encrypted-reasoning replay across a
+  tool turn; see `docs/design/meta-model-api.md`.
+- **Meta search grounding** — `meta.NewWebSearchTool` adds Meta's server-side
+  `web_search`. No domain allow/deny list, which Meta does not support;
+  `IncludeResults` returns the title, URL, and snippet of every hit.
+- **Muse Image** — `muse-image-1.0` generates and edits images through
+  `media.GenerateImage` / `media.EditImage` and `dive image` ($0.01 per image).
+- **Muse Voice Transcribe** — `muse-voice-transcribe-1.0` transcribes WAV audio
+  through `media.Transcribe` ($0.18 per hour). `meta.WithTranscriptionMode`
+  selects push-to-talk, endpointing, or diarization; diarization returns speaker
+  labels and turn timestamps in `TranscriptionResult.Metadata["turns"]`.
+
+### Changed
+
+- **The CLI compacts relative to the model's context window** — the default
+  `--compaction-threshold` is now half the model's usable window instead of a
+  flat 100000 tokens, which was a tenth of Muse Spark's 1M. Anthropic models are
+  capped at their ungated 200K and are unchanged; an explicit
+  `--compaction-threshold` or `DIVE_COMPACTION_THRESHOLD` still wins.
+
+### Fixed
+
+- **Encrypted reasoning is requested whenever the model reasons** — the
+  `reasoning.encrypted_content` include was sent only when the caller named a
+  reasoning effort, so an agent that left it unset carried no reasoning across
+  tool turns on any Responses provider.
+- **A `web_search_call` keeps what it did and found** — the query, the page
+  opened, and the retrieved hits now reach
+  `llm.ServerToolUseContent.Input` instead of being decoded away to a bare ID,
+  and the query is replayed into later turns rather than sent empty.
+
 ## [1.27.0] - 2026-09-02
 
 ### Added
