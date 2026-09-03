@@ -34,12 +34,14 @@ import (
 	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
+const cliVersion = "0.1.0"
+
 func main() {
 	loadDotEnv()
 
 	app := cli.New("dive").
 		Description("Interactive AI assistant for coding tasks").
-		Version("0.1.0")
+		Version(cliVersion)
 
 	// Image generation subcommand
 	app.Command("image").
@@ -129,6 +131,10 @@ func main() {
 				Default(false).
 				Env("DIVE_SHOW_THINKING").
 				Help("Request and show summarized model thinking when supported"),
+			cli.Bool("show-detailed-usage").
+				Default(false).
+				Env("DIVE_SHOW_DETAILED_USAGE").
+				Help("Show the full token breakdown table under the status line (default shows only the session total cost)"),
 			cli.String("thinking-effort").
 				Default(string(llm.ReasoningEffortMedium)).
 				Env("DIVE_THINKING_EFFORT").
@@ -210,11 +216,23 @@ func runInteractive(ctx *cli.Context) error {
 		return err
 	}
 
-	// Parse model
-	modelName := ctx.String("model")
-	if modelName == "" {
-		modelName = getDefaultModel()
+	// Parse model: flag > env > settings file > autodetect.
+	effSettings := loadEffectiveCLISettings(workspaceDir)
+	modelName, modelSource := resolveModelName(ctx, effSettings)
+	effort, effortSource := resolveThinkingEffort(ctx, effSettings)
+	showThinking, thinkingSource := resolveShowThinking(ctx, effSettings)
+	showDetailedUsage, detailedUsageSource := resolveShowDetailedUsage(ctx, effSettings)
+
+	// Resolve the live model settings before constructing the subagent factory.
+	// Subagents take a snapshot of these values when they start, so a /model,
+	// /effort, or /thinking change also reaches downstream work.
+	maxTokens := ctx.Int("max-tokens")
+	tempSet := ctx.IsSet("temperature")
+	var temp float64
+	if tempSet {
+		temp = ctx.Float64("temperature")
 	}
+	modelSettings, _ := buildCLIModelSettings(maxTokens, tempSet, temp, showThinking, effort)
 
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
@@ -244,9 +262,17 @@ func runInteractive(ctx *cli.Context) error {
 		return fmt.Errorf("failed to create path validator: %w", err)
 	}
 
-	// Create tools
+	var app *App
+
+	// Create tools. Provider-native tools are dynamic because /model can cross
+	// provider boundaries without restarting the CLI.
 	tools := createTools(pathValidator, tuiDialog)
-	tools = append(tools, grokServerSideTools(modelName)...)
+	serverToolset := providerServerToolset(func() string {
+		if app != nil {
+			return app.modelName
+		}
+		return modelName
+	})
 
 	// Set up the subagent catalog and orchestration tools. Runs is the shared
 	// tracker that lets TaskStop cancel background spawns and monitors by id.
@@ -258,17 +284,31 @@ func runInteractive(ctx *cli.Context) error {
 	runs := orchestration.NewRuns()
 
 	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
-		// Create sub-model (use parent model by default)
-		subModel := model
+		// Inherit the parent's model and current generation settings by default.
+		// Take a settings snapshot rather than sharing the mutable pointer: a
+		// later slash-command change should affect new work, not an in-flight
+		// subagent. An explicit model on the definition still wins.
+		subModel, subModelSettings := currentSubagentDefaults(app, model, modelSettings)
+		subModelName := modelName
+		if app != nil {
+			subModelName = app.modelName
+		}
 		if def.Model != "" {
 			subModel = createModel(def.Model, "")
+			subModelName = def.Model
 		}
+		subTools := subagent.FilterTools(def, parentTools)
+		// A subagent's model is fixed for its lifetime, so provider-native
+		// tools can be resolved once. Filter them through the definition too;
+		// custom allowlists must remain authoritative.
+		subTools = append(subTools, subagent.FilterTools(def, grokServerSideTools(subModelName))...)
 
 		return dive.NewAgent(dive.AgentOptions{
-			Name:         name,
-			SystemPrompt: def.Prompt,
-			Model:        subModel,
-			Tools:        subagent.FilterTools(def, parentTools),
+			Name:          name,
+			SystemPrompt:  def.Prompt,
+			Model:         subModel,
+			Tools:         subTools,
+			ModelSettings: subModelSettings,
 		})
 	}
 
@@ -345,11 +385,13 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Set up compaction config
 	var compactionConfig *compaction.CompactionConfig
+	compactionThresholdExplicit := false
 	if ctx.Bool("compaction") {
 		var explicitThreshold int
 		if ctx.IsSet("compaction-threshold") {
 			explicitThreshold = ctx.Int("compaction-threshold")
 		}
+		compactionThresholdExplicit = explicitThreshold > 0
 		compactionConfig = &compaction.CompactionConfig{
 			ContextTokenThreshold: compactionThreshold(explicitThreshold, modelName),
 			Model:                 model,
@@ -371,14 +413,12 @@ func runInteractive(ctx *cli.Context) error {
 		_ = pathValidator.AllowReadPath(dir)
 	}
 
-	// Create model settings
-	modelSettings, _ := newCLIModelSettings(ctx)
-
 	// Create agent options with hooks and extensions
 	agentOpts := dive.AgentOptions{
 		SystemPrompt:  systemPrompt,
 		Model:         model,
 		Tools:         tools,
+		Toolsets:      []dive.Toolset{serverToolset},
 		Extensions:    []dive.Extension{skills},
 		ModelSettings: modelSettings,
 		Hooks: dive.Hooks{
@@ -386,7 +426,6 @@ func runInteractive(ctx *cli.Context) error {
 		},
 	}
 	applyReminderAgentOptions(&agentOpts, modelOnlyReminders)
-	var app *App
 	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos, func(notice contextDemoNotice) {
 		if app != nil {
 			app.notifyContextDemoNotice(notice)
@@ -401,21 +440,32 @@ func runInteractive(ctx *cli.Context) error {
 	// below; the notify closure only runs once the agent processes input, well
 	// after that, so reading it here is safe.
 	if compactionConfig != nil {
-		midTurnThreshold := compactionConfig.ContextTokenThreshold
-		if midTurnThreshold <= 0 {
-			midTurnThreshold = compaction.DefaultContextTokenThreshold
-		}
 		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration,
-			compaction.MidTurnCompactionHook(
-				compactionConfig.Model,
-				midTurnThreshold,
-				compaction.WithMidTurnSystemPrompt(systemPrompt),
-				compaction.WithMidTurnNotify(func(e *compaction.CompactionEvent) {
-					if app != nil {
-						app.notifyMidTurnCompaction(e)
-					}
-				}),
-			),
+			func(ctx context.Context, hctx *dive.HookContext) error {
+				// Build the hook from the current config on every iteration. A
+				// /model switch updates both the summarizer model and an automatic
+				// threshold; capturing their startup values would silently keep
+				// compacting with the old model.
+				threshold := compactionConfig.ContextTokenThreshold
+				if threshold <= 0 {
+					threshold = compaction.DefaultContextTokenThreshold
+				}
+				currentSystemPrompt := systemPrompt
+				if app != nil {
+					currentSystemPrompt = app.agent.SystemPrompt()
+				}
+				hook := compaction.MidTurnCompactionHook(
+					compactionConfig.Model,
+					threshold,
+					compaction.WithMidTurnSystemPrompt(currentSystemPrompt),
+					compaction.WithMidTurnNotify(func(e *compaction.CompactionEvent) {
+						if app != nil {
+							app.notifyMidTurnCompaction(e)
+						}
+					}),
+				)
+				return hook(ctx, hctx)
+			},
 		)
 	}
 
@@ -439,6 +489,22 @@ func runInteractive(ctx *cli.Context) error {
 	app.currentSession = currentSession
 	app.operatorReminders = operatorReminders
 	app.contextDemos = contextDemos
+	app.modelSettings = modelSettings
+	app.reasoningEffort = effort
+	app.showThinking = showThinking
+	app.showDetailedUsage = showDetailedUsage
+	app.modelSource = modelSource
+	app.effortSource = effortSource
+	app.thinkingSource = thinkingSource
+	app.detailedUsageSource = detailedUsageSource
+	app.compactionThresholdExplicit = compactionThresholdExplicit
+	// Dynamic tools are not part of Agent.Tools(), so register their friendly
+	// titles explicitly for transcript rendering.
+	for _, tool := range grokServerSideTools("grok-") {
+		if annotations := tool.Annotations(); annotations != nil && annotations.Title != "" {
+			app.toolTitles[tool.Name()] = annotations.Title
+		}
+	}
 	if historyStore, err := defaultInputHistoryStore(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to configure input history: %v\n", err)
 	} else {
@@ -601,11 +667,9 @@ func runPrint(ctx *cli.Context) error {
 		return err
 	}
 
-	// Get model
-	modelName := ctx.String("model")
-	if modelName == "" {
-		modelName = getDefaultModel()
-	}
+	// Get model: flag > env > settings file > autodetect.
+	effPrintSettings := loadEffectiveCLISettings(workspaceDir)
+	modelName, _ := resolveModelName(ctx, effPrintSettings)
 
 	// Build system prompt
 	systemPrompt := ctx.String("system-prompt")
@@ -633,7 +697,7 @@ func runPrint(ctx *cli.Context) error {
 	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create agent
-	printModelSettings, showThinking := newCLIModelSettings(ctx)
+	printModelSettings, showThinking := newCLIModelSettingsWith(ctx, effPrintSettings)
 
 	agentOpts := dive.AgentOptions{
 		SystemPrompt:  systemPrompt,
@@ -669,23 +733,7 @@ func runPrint(ctx *cli.Context) error {
 }
 
 func newCLIModelSettings(ctx *cli.Context) (*dive.ModelSettings, bool) {
-	maxTokens := ctx.Int("max-tokens")
-	modelSettings := &dive.ModelSettings{
-		MaxTokens: &maxTokens,
-	}
-	showThinking := ctx.Bool("show-thinking")
-	if showThinking {
-		modelSettings.Thinking = llm.ThinkingTypeAdaptive
-		modelSettings.ThinkingDisplay = llm.ThinkingDisplaySummarized
-	}
-	if effort := parseThinkingEffort(ctx.String("thinking-effort")); effort != "" {
-		modelSettings.ReasoningEffort = effort
-	}
-	if ctx.IsSet("temperature") {
-		t := ctx.Float64("temperature")
-		modelSettings.Temperature = &t
-	}
-	return modelSettings, showThinking
+	return newCLIModelSettingsWith(ctx, nil)
 }
 
 func parseThinkingEffort(value string) llm.ReasoningEffort {

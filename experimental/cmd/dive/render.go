@@ -8,30 +8,44 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-runewidth"
-
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
-// Shared accent color palette (teal family, anchored to the splash diamond color)
+// Dive's terminal palette. Brand and interactive states stay in one vivid
+// ocean-cyan family; ordinary hierarchy uses brighter cool slate neutrals.
+// Periwinkle distinguishes literals from prose, while amber, green, and red
+// remain reserved for warning, success, and failure.
 var (
-	accentBright = tui.RGB{R: 80, G: 200, B: 235}
-	accentMid    = tui.RGB{R: 70, G: 175, B: 210}
-	accentDim    = tui.RGB{R: 60, G: 155, B: 185}
-	accentMuted  = tui.RGB{R: 55, G: 135, B: 165}
+	accentBright = tui.RGB{R: 90, G: 204, B: 224}
+	accentMid    = tui.RGB{R: 69, G: 180, B: 203}
+	accentDim    = tui.RGB{R: 87, G: 152, B: 170}
+	accentMuted  = tui.RGB{R: 78, G: 130, B: 146}
+
+	primaryText = tui.RGB{R: 230, G: 235, B: 241}
+	mutedText   = tui.RGB{R: 190, G: 200, B: 211}
+	dimText     = tui.RGB{R: 159, G: 174, B: 189}
+	fadedText   = tui.RGB{R: 112, G: 130, B: 149}
+	subtleBg    = tui.RGB{R: 35, G: 43, B: 52}
+
+	codeText    = tui.RGB{R: 182, G: 187, B: 244}
+	successText = tui.RGB{R: 120, G: 215, B: 163}
+	warningText = tui.RGB{R: 232, G: 181, B: 95}
+	errorText   = tui.RGB{R: 235, G: 115, B: 123}
 )
 
-// Greys for secondary text. These are read on a dark terminal background, where
-// anything below about 150 fails WCAG AA's 4.5:1 — the old 100/110 greys sat
-// near 2.9:1 and were effectively unreadable. dimText is the floor for anything
-// carrying words; use fadedText only for rules, tracks, and other furniture.
-var (
-	dimText   = tui.RGB{R: 152, G: 152, B: 164}
-	mutedText = tui.RGB{R: 170, G: 170, B: 182}
-	fadedText = tui.RGB{R: 110, G: 110, B: 122}
-)
+func successStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(successText).WithBold()
+}
+
+func warningStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(warningText).WithBold()
+}
+
+func errorStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(errorText).WithBold()
+}
 
 // hintStyle is dive's replacement for wonton's Text().Style(hintStyle()), which combines
 // bright black with SGR 2 (faint). Faint on top of an already dark grey is what
@@ -41,24 +55,46 @@ func hintStyle() tui.Style {
 	return tui.NewStyle().WithFgRGB(dimText).WithItalic()
 }
 
-// diveMarkdownTheme returns a custom markdown theme with complementary colors
+// autocompleteOptionStyle keeps actionable paths readable and upright. Italic
+// hint styling is appropriate for explanatory copy, but made file choices feel
+// disabled rather than merely unselected.
+func autocompleteOptionStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(mutedText)
+}
+
+// diveMarkdownTheme assigns every Markdown role explicitly so the renderer
+// never falls back to an unrelated ANSI blue, yellow, or green.
 func diveMarkdownTheme() tui.MarkdownTheme {
 	theme := tui.DefaultMarkdownTheme()
 
-	// Cyan-blue headers with decreasing brightness for hierarchy
 	theme.H1Style = tui.NewStyle().WithBold().WithUnderline().WithFgRGB(accentBright)
-	theme.H2Style = tui.NewStyle().WithBold().WithFgRGB(accentMid)
-	theme.H3Style = tui.NewStyle().WithBold().WithFgRGB(accentDim)
-	theme.H4Style = tui.NewStyle().WithBold().WithFgRGB(accentMuted)
+	theme.H2Style = tui.NewStyle().WithBold().WithFgRGB(accentBright)
+	theme.H3Style = tui.NewStyle().WithBold().WithFgRGB(accentMid)
+	theme.H4Style = tui.NewStyle().WithBold().WithFgRGB(primaryText)
+	theme.H5Style = tui.NewStyle().WithBold().WithFgRGB(mutedText)
+	theme.H6Style = tui.NewStyle().WithBold().WithFgRGB(dimText)
 
-	// Light purple for inline code (like Claude Code)
-	theme.CodeStyle = tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})
+	theme.BoldStyle = tui.NewStyle().WithBold().WithFgRGB(primaryText)
+	theme.ItalicStyle = tui.NewStyle().WithItalic().WithFgRGB(dimText)
+	theme.CodeStyle = tui.NewStyle().WithFgRGB(codeText)
+	theme.LinkStyle = tui.NewStyle().WithUnderline().WithFgRGB(accentBright)
+	theme.StrikethroughStyle = tui.NewStyle().WithStrikethrough().WithFgRGB(dimText)
+	theme.BlockQuoteStyle = tui.NewStyle().WithItalic().WithFgRGB(dimText)
+	theme.CodeBlockStyle = tui.NewStyle().WithFgRGB(primaryText)
+	theme.HorizontalRuleStyle = tui.NewStyle().WithFgRGB(fadedText)
+	theme.SyntaxTheme = "github-dark"
+	theme.TableBorderStyle = tui.NewStyle().WithFgRGB(fadedText)
+	theme.TableHeaderStyle = tui.NewStyle().WithBold().WithFgRGB(primaryText)
+	theme.TableCellStyle = tui.NewStyle().WithFgRGB(mutedText)
 
 	return theme
 }
 
 // statusLineView renders the status line above the input area.
-// Shows: model name, directory, git branch, context %, elapsed time.
+//
+// One row by default: model (effort) in directory on branch · context % ·
+// session total cost. The full token breakdown table (/usage) only renders
+// inline when showDetailedUsage is set, so the chrome stays one row tall.
 func (a *App) statusLineView() tui.View {
 	mutedColor := dimText
 	accentStyle := tui.NewStyle().WithFgRGB(accentDim)
@@ -68,10 +104,16 @@ func (a *App) statusLineView() tui.View {
 	parts := []tui.View{
 		tui.Text(" %s", a.modelDisplayName()).Style(accentStyle),
 	}
+	if eff := strings.TrimSpace(string(a.reasoningEffort)); eff != "" {
+		parts = append(parts, tui.Text(" · %s", eff).Style(mutedStyle))
+	}
+	if a.showThinking {
+		parts = append(parts, tui.Text(" · thinking").Style(mutedStyle))
+	}
 	dirName := filepath.Base(a.workspaceDir)
 	parts = append(parts,
 		tui.Text(" in ").Style(mutedStyle),
-		tui.Text("%s", dirName).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 200, G: 200, B: 210}).WithBold()),
+		tui.Text("%s", dirName).Style(tui.NewStyle().WithFgRGB(primaryText).WithBold()),
 	)
 	if branch := a.gitBranch; branch != "" {
 		parts = append(parts,
@@ -79,10 +121,18 @@ func (a *App) statusLineView() tui.View {
 			tui.Text("%s", branch).Style(accentStyle),
 		)
 	}
+	// Context % and session total cost ride the same row. Cost is the
+	// session total (or turn total before a second turn differs); the
+	// per-scope table lives in /usage and, when enabled, below this row.
+	if a.lastUsage != nil {
+		parts = append(parts, tui.Text(" · %d%%", a.contextPercent()).Style(mutedStyle))
+	}
+	if cost := a.sessionTotalCostString(); cost != "" {
+		parts = append(parts, tui.Text(" · %s", cost).Style(tui.NewStyle().WithFgRGB(successText)))
+	}
 	// Speed badge — fast mode bills at a different rate, so surface it.
 	if a.lastUsage != nil && a.lastUsage.Speed == "fast" {
-		parts = append(parts, tui.Text(" ⚡fast").Style(
-			tui.NewStyle().WithFgRGB(tui.RGB{R: 230, G: 190, B: 80}).WithBold()))
+		parts = append(parts, tui.Text(" ⚡fast").Style(warningStyle()))
 	}
 
 	// A flash rides the right edge of this row rather than adding one of its
@@ -97,38 +147,41 @@ func (a *App) statusLineView() tui.View {
 	}
 	rows := []tui.View{tui.Group(parts...)}
 
-	// Line 2: context-window usage bar (shown after the first LLM response).
-	if a.lastUsage != nil {
-		contextPct := a.contextPercent()
-		barColor := accentDim
-		if contextPct > 75 {
-			barColor = tui.RGB{R: 200, G: 150, B: 60}
+	// Detailed token breakdown: opt-in via /usage full (show_detailed_usage).
+	// /usage always shows the full report on demand regardless of this flag.
+	if a.showDetailedUsage {
+		if panel := a.tokensPanelView(); panel != nil {
+			rows = append(rows, panel)
 		}
-		if contextPct > 90 {
-			barColor = tui.RGB{R: 200, G: 70, B: 70}
-		}
-		bar := tui.Progress(contextPct, 100).
-			Width(20).
-			HidePercent().
-			Style(tui.NewStyle().WithFgRGB(barColor)).
-			EmptyStyle(tui.NewStyle().WithFgRGB(fadedText))
-		rows = append(rows, tui.Group(
-			tui.Text(" ").Style(mutedStyle),
-			bar,
-			tui.Text(" %d%% context", contextPct).Style(mutedStyle),
-		))
-	}
-
-	// Tokens panel: a clearly-labeled per-scope breakdown of input, cache
-	// reads (hits) vs writes (misses), output, and hit rate.
-	if panel := a.tokensPanelView(); panel != nil {
-		rows = append(rows, panel)
 	}
 
 	if len(rows) == 1 {
 		return rows[0]
 	}
 	return tui.Stack(rows...).Gap(0)
+}
+
+// sessionTotalCostString returns the session total cost for the status line,
+// falling back to the current turn before session usage diverges. Empty when
+// no cost has been reported yet.
+func (a *App) sessionTotalCostString() string {
+	if a.sessionUsage != nil && a.sessionUsage.Cost != nil {
+		return formatCost(a.sessionUsage.Cost.Total)
+	}
+	if a.interactionUsage != nil && a.interactionUsage.Cost != nil {
+		return formatCost(a.interactionUsage.Cost.Total)
+	}
+	return ""
+}
+
+// trimTrailingWhitespacePerLine strips trailing spaces and tabs from each
+// line. Used for user-bubble display only; the message itself is unmodified.
+func trimTrailingWhitespacePerLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatTokenCount formats a token count for display (e.g. 1234 -> "1.2k", 56 -> "56").
@@ -174,11 +227,11 @@ func (a *App) tokensPanelView() tui.View {
 	showCost := turn.Cost != nil || (showSession && sess.Cost != nil)
 
 	headerStyle := tui.NewStyle().WithFgRGB(dimText)
-	scopeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170}).WithBold()
-	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
-	readStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold() // green: cache hits
-	writeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 225, G: 175, B: 80}).WithBold() // amber: cache writes
-	costStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 120, G: 205, B: 150}).WithBold() // green: money
+	scopeStyle := tui.NewStyle().WithFgRGB(mutedText).WithBold()
+	valStyle := tui.NewStyle().WithFgRGB(primaryText).WithBold()
+	readStyle := successStyle()
+	writeStyle := warningStyle()
+	costStyle := successStyle()
 
 	const (
 		labelW = 10
@@ -266,11 +319,11 @@ func cacheHitStyle(u *llm.Usage, ok bool) tui.Style {
 	pct := (u.CacheReadInputTokens * 100) / denom
 	switch {
 	case pct >= 80:
-		return tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold()
+		return successStyle()
 	case pct >= 50:
-		return tui.NewStyle().WithFgRGB(tui.RGB{R: 225, G: 175, B: 80}).WithBold()
+		return warningStyle()
 	default:
-		return tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 90, B: 90}).WithBold()
+		return errorStyle()
 	}
 }
 
@@ -363,12 +416,16 @@ func (a *App) textMessageView(msg Message) tui.View {
 		return msg.View
 
 	case roleUser:
-		bg := tui.RGB{R: 48, G: 48, B: 54}
+		bg := subtleBg
 		caret := tui.Text("❯ ").Style(
-			tui.NewStyle().WithFgRGB(dimText).WithBgRGB(bg),
+			tui.NewStyle().WithFgRGB(accentDim).WithBgRGB(bg),
 		)
-		text := tui.Text("%s", msg.Content).Wrap().Style(
-			tui.NewStyle().WithBgRGB(bg),
+		// Pasted blocks often carry trailing spaces/tabs per line. Left in
+		// place they paint as lit runs against the bubble background in
+		// scrollback, so trim them for display. The stored message (and
+		// what is sent) is untouched.
+		text := tui.Text("%s", trimTrailingWhitespacePerLine(msg.Content)).Wrap().Style(
+			tui.NewStyle().WithFgRGB(primaryText).WithBgRGB(bg),
 		)
 		return tui.Group(caret, text, tui.Fill(' ').BgRGB(bg.R, bg.G, bg.B))
 
@@ -381,7 +438,7 @@ func (a *App) textMessageView(msg Message) tui.View {
 		// so all lines (including wrapped) align to column 2 (like Claude Code)
 		return tui.ZStack(
 			tui.PaddingLTRB(2, 0, 0, 0, tui.Markdown(content, nil).Theme(diveMarkdownTheme())),
-			tui.Text("⏺"),
+			tui.Text("⏺").Style(tui.NewStyle().WithFgRGB(accentMid)),
 		).Align(tui.AlignLeft)
 
 	case roleReasoning:
@@ -403,7 +460,7 @@ func (a *App) textMessageView(msg Message) tui.View {
 		)
 
 	case roleSystem:
-		return tui.Text("%s", msg.Content).Wrap().Warning()
+		return tui.Text("%s", msg.Content).Wrap().Style(warningStyle())
 
 	case roleNotice:
 		if msg.Marker != "" {
@@ -419,9 +476,11 @@ func (a *App) textMessageView(msg Message) tui.View {
 	}
 }
 
-// introView renders a bordered splash header (Codex-style)
+// introView renders a compact three-line startup header. Its content is captured
+// when the intro message is appended, so later setting changes do not rewrite
+// the scrollback history.
 func (a *App) introView(msg Message) tui.View {
-	// Parse lines from content: model, workspace, optional session info
+	// Parse lines from content: model and effort, workspace, optional session info.
 	lines := strings.Split(msg.Content, "\n")
 	model := ""
 	workspace := ""
@@ -438,66 +497,39 @@ func (a *App) introView(msg Message) tui.View {
 
 	titleStyle := tui.NewStyle().WithFgRGB(accentBright).WithBold()
 	mutedStyle := tui.NewStyle().WithFgRGB(mutedText)
-	labelStyle := tui.NewStyle().WithFgRGB(dimText)
+	detailStyle := tui.NewStyle().WithFgRGB(dimText)
 
-	// Box content
 	content := []tui.View{
 		tui.Group(
-			tui.Text("Dive").Style(titleStyle),
-			tui.Text(" (v0.1.0)").Style(mutedStyle),
+			tui.Text("Dive ").Style(titleStyle),
+			tui.Text("v%s", cliVersion).Style(mutedStyle),
 		),
-		tui.Text(""),
-		tui.Group(
-			tui.Text("model:     ").Style(labelStyle),
-			tui.Text("%s", model).Style(mutedStyle),
-		),
-		tui.Group(
-			tui.Text("directory: ").Style(labelStyle),
-			tui.Text("%s", workspace).Style(mutedStyle),
-		),
+		tui.Text("%s", model).Style(tui.NewStyle().WithFgRGB(primaryText)).Wrap().Flex(1),
+		tui.Text("%s", workspace).Style(detailStyle).Wrap().Flex(1),
 	}
 
 	for _, extra := range extras {
 		if extra != "" {
-			content = append(content, tui.Text("%s", extra).Style(mutedStyle))
+			content = append(content, tui.Text("%s", extra).Style(detailStyle).Wrap())
 		}
 	}
 
-	// Compute box width from longest visible line (using display width for Unicode)
-	textWidths := []int{
-		runewidth.StringWidth("Dive (v0.1.0)"),
-		runewidth.StringWidth("model:     ") + runewidth.StringWidth(model),
-		runewidth.StringWidth("directory: ") + runewidth.StringWidth(workspace),
-	}
-	for _, extra := range extras {
-		textWidths = append(textWidths, runewidth.StringWidth(extra))
-	}
-	maxLen := 0
-	for _, w := range textWidths {
-		if w > maxLen {
-			maxLen = w
-		}
-	}
-	boxWidth := maxLen + 2 + 2 // 2 for border chars + 2 for inner spacing
-
-	return tui.Width(boxWidth, tui.Bordered(tui.Stack(content...)).
-		Border(&tui.RoundedBorder).
-		BorderFg(tui.ColorBrightBlack))
+	return tui.Stack(content...).Gap(0)
 }
 
 // toolCallView renders a tool call message. A running call's marker pulses only
-// when opts.animate is set; a final rendering gets a static cyan dot.
+// when opts.animate is set; final rendering uses semantic success or error color.
 func (a *App) toolCallView(msg Message, opts viewOpts) tui.View {
 	var statusView tui.View
 	switch {
 	case msg.ToolDone && msg.ToolError:
-		statusView = tui.Text("⏺").Error()
+		statusView = tui.Text("⏺").Style(errorStyle())
 	case msg.ToolDone:
-		statusView = tui.Text("⏺").Success()
+		statusView = tui.Text("⏺").Style(successStyle())
 	case opts.animate:
-		statusView = tui.Text("⏺").Animate(tui.Pulse(tui.NewRGB(80, 160, 220), 8).Brightness(0.3, 1.0))
+		statusView = tui.Text("⏺").Animate(tui.Pulse(accentMid, 8).Brightness(0.3, 1.0))
 	default:
-		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
+		statusView = tui.Text("⏺").Style(tui.NewStyle().WithFgRGB(accentMid))
 	}
 
 	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
@@ -558,7 +590,7 @@ func (a *App) formatToolResultView(msg Message, opts viewOpts) tui.View {
 
 	views := make([]tui.View, 0, 4)
 	if msg.ToolError {
-		views = append(views, tui.Text("  ⎿  %s", firstLine).Error())
+		views = append(views, tui.Text("  ⎿  %s", firstLine).Style(errorStyle()))
 	} else {
 		views = append(views, tui.Text("  ⎿  %s", firstLine).Style(style))
 	}
@@ -751,9 +783,9 @@ func renderDiffResult(result string) tui.View {
 		var lineView tui.View
 		switch isDiffLine(lines[i]) {
 		case "+":
-			lineView = tui.Text("      %s", line).Success()
+			lineView = tui.Text("      %s", line).Style(successStyle())
 		case "-":
-			lineView = tui.Text("      %s", line).Error()
+			lineView = tui.Text("      %s", line).Style(errorStyle())
 		default:
 			lineView = tui.Text("      %s", line).Style(toolResultStyle())
 		}
@@ -783,8 +815,8 @@ func (a *App) todoStatusView() tui.View {
 
 	elapsed := time.Since(a.processingStartTime)
 	return tui.Group(
-		tui.Text("✽").Animate(tui.Pulse(tui.NewRGB(180, 140, 220), 20).Brightness(0.4, 1.0)),
-		tui.Text(" %s…", activeTodo.ActiveForm).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})),
+		tui.Text("✽").Animate(tui.Pulse(accentBright, 20).Brightness(0.4, 1.0)),
+		tui.Text(" %s…", activeTodo.ActiveForm).Style(tui.NewStyle().WithFgRGB(accentBright)),
 		tui.Text(" (%s)", formatDuration(elapsed)).Style(hintStyle()),
 	)
 }
@@ -808,16 +840,16 @@ func (a *App) todoListView(opts viewOpts) tui.View {
 		var todoView tui.View
 		switch todo.Status {
 		case TodoStatusCompleted:
-			mutedStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 100})
+			mutedStyle := tui.NewStyle().WithFgRGB(dimText)
 			todoView = tui.Group(
 				tui.Text("  ⎿  ☒ ").Style(mutedStyle),
 				tui.Text("%s", todo.Content).Style(mutedStyle.WithStrikethrough()),
 			)
 		case TodoStatusInProgress:
-			style := tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220}).WithBold()
+			style := tui.NewStyle().WithFgRGB(accentBright).WithBold()
 			todoView = tui.Text("  ⎿  ☐ %s", todo.Content).Style(style)
 		default:
-			style := tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 140})
+			style := tui.NewStyle().WithFgRGB(mutedText)
 			todoView = tui.Text("  ⎿  ☐ %s", todo.Content).Style(style)
 		}
 		views = append(views, todoView)

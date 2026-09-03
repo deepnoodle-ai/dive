@@ -132,7 +132,6 @@ func TestAppFooterCollapse(t *testing.T) {
 	t.Run("footer minimal without autocomplete", func(t *testing.T) {
 		// No autocomplete matches
 		app.autocompleteMatches = nil
-		app.showCompactionStats = false
 		app.showExitHint = false
 
 		// Render to buffer to count actual output lines (not screen lines)
@@ -171,28 +170,31 @@ func TestAppFooterCollapse(t *testing.T) {
 	})
 }
 
-// TestAppCompactionStats tests the compaction stats display
-func TestAppCompactionStats(t *testing.T) {
+// TestAppCompactionSummary tests that a compaction takes the turn-summary slot
+func TestAppCompactionSummary(t *testing.T) {
 	agent := &dive.Agent{}
 	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
 
-	t.Run("shows compaction stats when enabled", func(t *testing.T) {
-		app.showCompactionStats = true
+	t.Run("compaction replaces Worked for in the summary slot", func(t *testing.T) {
+		app.showCompactionSummary = true
+		app.compactionEventTime = time.Now()
 		app.lastCompactionEvent = &compaction.CompactionEvent{
 			TokensBefore:      150000,
 			TokensAfter:       50000,
 			MessagesCompacted: 25,
 		}
 
-		screen := renderLiveView(t, app, 80, 24)
+		var buf bytes.Buffer
+		tui.Fprint(&buf, app.turnSummaryView(), tui.WithWidth(80))
+		out := buf.String()
 
-		// Should show compaction info
-		termtest.AssertContains(t, screen, "150000")
-		termtest.AssertContains(t, screen, "50000")
-		termtest.AssertContains(t, screen, "25")
+		assert.Contains(t, out, "Compacted")
+		assert.Contains(t, out, "150000")
+		assert.Contains(t, out, "50000")
+		assert.NotContains(t, out, "Worked for")
 
 		// Reset
-		app.showCompactionStats = false
+		app.showCompactionSummary = false
 		app.lastCompactionEvent = nil
 	})
 }
@@ -303,7 +305,6 @@ func TestAppSnapshotView(t *testing.T) {
 		app.dialogState = nil
 		app.showTodos = false
 		app.autocompleteMatches = nil
-		app.showCompactionStats = false
 		app.showExitHint = false
 
 		screen := renderLiveView(t, app, 80, 24)

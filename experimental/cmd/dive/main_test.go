@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,27 @@ import (
 	"github.com/deepnoodle-ai/wonton/cli"
 )
 
+func TestProviderServerToolsetFollowsCurrentModel(t *testing.T) {
+	modelName := "gpt-5.6-sol"
+	toolset := providerServerToolset(func() string { return modelName })
+
+	tools, err := toolset.Tools(context.Background())
+	assert.NoError(t, err)
+	assert.Empty(t, tools)
+
+	modelName = "grok-4.6"
+	tools, err = toolset.Tools(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, tools, 2)
+	assert.Equal(t, "web_search", tools[0].Name())
+	assert.Equal(t, "x_search", tools[1].Name())
+
+	modelName = "claude-opus-5"
+	tools, err = toolset.Tools(context.Background())
+	assert.NoError(t, err)
+	assert.Empty(t, tools)
+}
+
 func TestGetDefaultModel(t *testing.T) {
 	// All provider env vars that getDefaultModel checks.
 	allKeys := []string{
@@ -23,6 +45,8 @@ func TestGetDefaultModel(t *testing.T) {
 		"XAI_API_KEY",
 		"GROK_API_KEY",
 		"MISTRAL_API_KEY",
+		"MODEL_API_KEY",
+		"META_API_KEY",
 	}
 
 	tests := []struct {

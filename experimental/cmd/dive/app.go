@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -99,6 +100,21 @@ type compactionEvent struct {
 	midTurn bool
 }
 
+// compactionStartEvent marks the beginning of a manual /compact run. Handled
+// on the event loop to flip the compacting flag before the background
+// summarization starts.
+type compactionStartEvent struct {
+	baseEvent
+}
+
+// compactionEndEvent carries the outcome of a manual /compact run back to the
+// event loop, where the transcript can be updated safely.
+type compactionEndEvent struct {
+	baseEvent
+	event *compaction.CompactionEvent
+	err   error
+}
+
 // toolStreamEvent carries a chunk of streaming output for a tool call.
 // Used by any tool that produces incremental output (Bash stdout, sub-agents).
 type toolStreamEvent struct {
@@ -146,6 +162,8 @@ const (
 	TodoStatusInProgress
 	TodoStatusCompleted
 )
+
+const autocompleteWindowSize = 8
 
 // Todo represents a task item
 type Todo struct {
@@ -237,7 +255,7 @@ type DialogState struct {
 	Message        string
 	ContentPreview string
 
-	// For confirm (Claude Code style)
+	// Confirmation dialog state.
 	ConfirmChan              chan ConfirmResult
 	ConfirmSelectedIdx       int    // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
 	ConfirmFeedback          string // User feedback text (for PromptChoice input option)
@@ -371,6 +389,14 @@ type App struct {
 	processing          bool
 	processingStartTime time.Time
 
+	// compacting is true while a manual /compact summarization runs in the
+	// background. The LLM call takes seconds; running it off the event loop
+	// keeps ticks, keystrokes, and the spinner animating instead of freezing
+	// the UI. New turns are blocked until it finishes because it rewrites
+	// the session's messages.
+	compacting          bool
+	compactingStartTime time.Time
+
 	// Git branch shown in the status line. Cached because `git rev-parse` costs
 	// ~5 ms and the status line renders on every frame; refreshed on a timer and
 	// at turn boundaries, never from a view function.
@@ -413,12 +439,28 @@ type App struct {
 	// API endpoint for model creation (preserved for model switching)
 	apiEndpoint string
 
+	// Mutable model configuration, visible in the status line and persisted
+	// to ~/.dive/settings.json by /model, /effort, /thinking, and /usage.
+	// modelSettings is the same pointer handed to the agent, so in-session
+	// changes apply to the next turn without rebuilding anything.
+	modelSettings       *dive.ModelSettings
+	reasoningEffort     llm.ReasoningEffort
+	showThinking        bool
+	showDetailedUsage   bool
+	modelSource         string // flag, env, settings, autodetect, session
+	effortSource        string // flag, env, settings, default, session
+	thinkingSource      string // flag, env, settings, default, session
+	detailedUsageSource string // flag, env, settings, default, session
+
 	// Compaction configuration and state
-	compactionConfig         *compaction.CompactionConfig
-	lastCompactionEvent      *compaction.CompactionEvent
-	compactionEventTime      time.Time
-	showCompactionStats      bool
-	compactionStatsStartTime time.Time
+	compactionConfig            *compaction.CompactionConfig
+	compactionThresholdExplicit bool
+	lastCompactionEvent         *compaction.CompactionEvent
+	compactionEventTime         time.Time
+	// showCompactionSummary puts the latest compaction in the turn-summary
+	// slot ("Worked for…") until the next turn starts. The scrollback notice
+	// is the durable record; this is the at-a-glance one.
+	showCompactionSummary bool
 
 	// Status line state
 	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
@@ -510,7 +552,7 @@ func (a *App) LiveView() tui.View {
 	views := make([]tui.View, 0)
 
 	// Show streaming content during processing
-	if a.processing {
+	if a.processing || a.compacting {
 		views = append(views, tui.Text(""))
 		liveContent := a.buildLiveView(true)
 		if liveContent != nil {
@@ -548,8 +590,9 @@ func (a *App) inputAreaView() []tui.View {
 	views = append(views,
 		tui.InputField(&a.inputText).
 			ID("main-input").
-			Prompt(" ❯ ").
-			PromptStyle(tui.NewStyle().WithFgRGB(dimText)).
+			Prompt("❯").
+			PromptStyle(tui.NewStyle().WithFgRGB(accentBright).WithBold()).
+			TextStyle(tui.NewStyle().WithFgRGB(primaryText)).
 			Placeholder("Type a message... (@filename, or drop a file to attach)").
 			Multiline(true).
 			MaxHeight(10).
@@ -584,38 +627,33 @@ func (a *App) inputAreaView() []tui.View {
 	)
 	views = append(views, tui.Divider())
 
-	// Show autocomplete options, compaction stats, or exit hint below the bottom divider
+	// Show autocomplete options or exit hint below the bottom divider
 	// Only reserve space when autocomplete is active (collapses otherwise)
 	footerViews := make([]tui.View, 0, 8)
 
 	if len(a.autocompleteMatches) > 0 {
-		count := len(a.autocompleteMatches)
-		if count > 8 {
-			count = 8
-		}
 		prefix := "@"
 		if a.autocompleteType == "command" {
 			prefix = "/"
 		}
-		for i := 0; i < count; i++ {
+		start, end := autocompleteWindow(len(a.autocompleteMatches), a.autocompleteIndex)
+		for i := start; i < end; i++ {
 			match := a.autocompleteMatches[i]
 			if i == a.autocompleteIndex {
-				footerViews = append(footerViews, tui.Text(" ❯ %s%s", prefix, match).Fg(tui.ColorCyan))
+				position := ""
+				if len(a.autocompleteMatches) > autocompleteWindowSize {
+					position = fmt.Sprintf("  (%d/%d)", i+1, len(a.autocompleteMatches))
+				}
+				footerViews = append(footerViews, tui.Text(" ❯ %s%s%s", prefix, match, position).
+					Style(tui.NewStyle().WithFgRGB(accentBright).WithBold()))
 			} else {
-				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Style(hintStyle()))
+				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Style(autocompleteOptionStyle()))
 			}
 		}
-		// Pad to 8 lines only when autocomplete is active (stable height during selection)
-		for len(footerViews) < 8 {
+		// Keep the footer height stable as the final, shorter window comes into view.
+		for len(footerViews) < autocompleteWindowSize {
 			footerViews = append(footerViews, tui.Text(""))
 		}
-	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
-		footerViews = append(footerViews, tui.Group(
-			tui.Text(" ⚡").Fg(tui.ColorYellow),
-			tui.Text(" Context compacted:").Style(hintStyle()),
-			tui.Text(" %d → %d tokens", a.lastCompactionEvent.TokensBefore, a.lastCompactionEvent.TokensAfter),
-			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Style(hintStyle()),
-		))
 	} else if a.showExitHint {
 		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Style(hintStyle()))
 	}
@@ -628,12 +666,8 @@ func (a *App) inputAreaView() []tui.View {
 		}
 	}
 
-	// Minimum padding at bottom for visual breathing room
-	for len(footerViews) < 2 {
-		footerViews = append(footerViews, tui.Text(""))
-	}
-
 	views = append(views, footerViews...)
+	views = append(views, tui.Text(""))
 	return views
 }
 
@@ -647,15 +681,12 @@ func (a *App) attachmentsView() tui.View {
 	rows := make([]tui.View, 0, len(a.attachments))
 	for _, att := range a.attachments {
 		rows = append(rows, tui.Group(
-			tui.Text(" ⏺ ").Fg(tui.ColorCyan),
+			tui.Text(" ⏺ ").Style(tui.NewStyle().WithFgRGB(accentMid)),
 			tui.Text("%s (%s)", att.Name, formatBytes(int(att.Size))).Style(hintStyle()),
 		))
 	}
 	return tui.Stack(rows...).Gap(0)
 }
-
-// Purple color for Claude Code style UI elements
-var purpleColor = tui.RGB{R: 180, G: 140, B: 220}
 
 // dialogView builds the view for tool dialogs
 func (a *App) dialogView() tui.View {
@@ -667,13 +698,12 @@ func (a *App) dialogView() tui.View {
 
 	switch a.dialogState.Type {
 	case DialogTypeConfirm:
-		// Claude Code style confirmation dialog using PromptChoice
-		purpleStyle := tui.NewStyle().WithFgRGB(purpleColor)
-		confirmTextStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210})
-		confirmInfoStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210}).WithItalic()
+		accentStyle := tui.NewStyle().WithFgRGB(accentBright)
+		confirmTextStyle := tui.NewStyle().WithFgRGB(primaryText)
+		confirmInfoStyle := tui.NewStyle().WithFgRGB(mutedText).WithItalic()
 
 		// Upper divider (solid line)
-		views = append(views, tui.Divider().Char('─').Style(purpleStyle))
+		views = append(views, tui.Divider().Char('─').Style(accentStyle))
 
 		// Title and subtitle
 		views = append(views, tui.Text(" %s", a.dialogState.Title).Style(confirmTextStyle.WithBold()))
@@ -683,20 +713,20 @@ func (a *App) dialogView() tui.View {
 
 		// Content preview with dashed dividers
 		if a.dialogState.ContentPreview != "" {
-			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+			views = append(views, tui.Divider().Char('╌').Style(accentStyle))
 			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
 				switch isDiffLine(line) {
 				case "+":
-					views = append(views, tui.Text(" %s", line).Success())
+					views = append(views, tui.Text(" %s", line).Style(successStyle()))
 				case "-":
-					views = append(views, tui.Text(" %s", line).Error())
+					views = append(views, tui.Text(" %s", line).Style(errorStyle()))
 				default:
 					views = append(views, tui.Text(" %s", line).Style(confirmTextStyle))
 				}
 			}
-			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+			views = append(views, tui.Divider().Char('╌').Style(accentStyle))
 		} else {
-			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+			views = append(views, tui.Divider().Char('╌').Style(accentStyle))
 		}
 
 		// Question
@@ -720,7 +750,7 @@ func (a *App) dialogView() tui.View {
 				Option("Yes").
 				Option(fmt.Sprintf("Yes, allow all %s during this session (shift+tab)", allowLabel)).
 				Option("No").
-				CursorStyle(purpleStyle).
+				CursorStyle(accentStyle).
 				HintText("").
 				OnSelect(func(idx int, inputText string) {
 					switch idx {
@@ -765,7 +795,8 @@ func (a *App) dialogView() tui.View {
 		selectChan := a.dialogState.SelectChan
 		numOptions := len(a.dialogState.Options)
 		promptChoice := tui.PromptChoice(&a.dialogState.SelectIndex, &a.dialogState.SelectOtherText).
-			ID("select-list")
+			ID("select-list").
+			CursorStyle(tui.NewStyle().WithFgRGB(accentBright))
 
 		// Add all predefined options
 		for _, opt := range a.dialogState.Options {
@@ -826,7 +857,8 @@ func (a *App) dialogView() tui.View {
 
 		views = append(views,
 			tui.CheckboxList(items, a.dialogState.MultiSelectChecked, &a.dialogState.MultiSelectCursor).
-				ID("multiselect-list"),
+				ID("multiselect-list").
+				CursorStyle(tui.NewStyle().WithFgRGB(accentBright)),
 		)
 
 		views = append(views, tui.Text(""))
@@ -850,7 +882,8 @@ func (a *App) dialogView() tui.View {
 			tui.InputField(&a.dialogState.InputValue).
 				ID("dialog-input").
 				Prompt(" > ").
-				PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
+				PromptStyle(tui.NewStyle().WithFgRGB(accentBright)).
+				TextStyle(tui.NewStyle().WithFgRGB(primaryText)).
 				Placeholder(defaultValue).
 				Width(60).
 				OnSubmit(func(value string) {
@@ -916,10 +949,6 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		if a.showExitHint && time.Since(a.lastCtrlC) >= 2*time.Second {
 			a.showExitHint = false
 		}
-		// Clear compaction stats after 5 seconds
-		if a.showCompactionStats && time.Since(a.compactionStatsStartTime) >= 5*time.Second {
-			a.showCompactionStats = false
-		}
 
 	// Custom events from background goroutines
 	case processingStartEvent:
@@ -946,6 +975,11 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
 		a.handleCompaction(e.event, e.midTurn)
+	case compactionStartEvent:
+		a.compacting = true
+		a.compactingStartTime = time.Now()
+	case compactionEndEvent:
+		a.handleCompactEnd(e)
 	case toolStreamEvent:
 		a.handleToolStream(e)
 	case toolProgressEvent:
@@ -1036,6 +1070,14 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 
 // updateAutocomplete updates autocomplete state based on current input
 func (a *App) updateAutocomplete() {
+	// History browsing owns Up/Down until the user edits the recalled entry.
+	// In particular, recalling "/help" must not open command completion and
+	// steal the next arrow key from history navigation.
+	if a.historyIndex >= 0 {
+		a.clearAutocomplete()
+		return
+	}
+
 	// Check for command autocomplete (/ at start of input)
 	if strings.HasPrefix(a.inputText, "/") {
 		prefix := a.inputText[1:]
@@ -1051,9 +1093,6 @@ func (a *App) updateAutocomplete() {
 			a.autocompletePrefix = prefix
 			a.autocompleteType = "command"
 			a.autocompleteMatches = a.getCommandMatches(prefix)
-			if len(a.autocompleteMatches) > 8 {
-				a.autocompleteMatches = a.autocompleteMatches[:8]
-			}
 			a.autocompleteIndex = 0
 		}
 		return
@@ -1080,9 +1119,6 @@ func (a *App) updateAutocomplete() {
 		a.autocompletePrefix = prefix
 		a.autocompleteType = "file"
 		a.autocompleteMatches = a.getFileMatches(prefix)
-		if len(a.autocompleteMatches) > 8 {
-			a.autocompleteMatches = a.autocompleteMatches[:8]
-		}
 		a.autocompleteIndex = 0
 	}
 }
@@ -1101,6 +1137,12 @@ func (a *App) setInputText(value string) {
 // never triggers a filesystem lookup.
 func (a *App) handleInputChange(value string) {
 	prev := a.lastInput
+	if value != prev {
+		// An edit turns recalled history back into a live draft. Completion can
+		// now respond to the edited text, and Down must not replace it with a
+		// different history entry.
+		a.historyIndex = -1
+	}
 	a.lastInput = value
 	a.pruneAttachments(value)
 
@@ -1217,6 +1259,30 @@ func (a *App) clearAutocomplete() {
 	a.autocompleteIndex = 0
 	a.autocompletePrefix = ""
 	a.autocompleteType = ""
+}
+
+// autocompleteWindow returns the visible slice of a longer completion list.
+// The selection stays on screen while moving one row at a time, rather than
+// discarding matches beyond the first page.
+func autocompleteWindow(total, selected int) (start, end int) {
+	if total <= 0 {
+		return 0, 0
+	}
+	if selected < 0 {
+		selected = 0
+	} else if selected >= total {
+		selected = total - 1
+	}
+
+	start = selected - autocompleteWindowSize + 1
+	if start < 0 {
+		start = 0
+	}
+	end = start + autocompleteWindowSize
+	if end > total {
+		end = total
+	}
+	return start, end
 }
 
 // selectAutocomplete selects the current autocomplete option
@@ -1385,7 +1451,7 @@ func (a *App) submitInput(value string) {
 	}
 
 	trimmed := strings.TrimSpace(a.inputText)
-	if trimmed == "" || a.processing {
+	if trimmed == "" || a.processing || a.compacting {
 		return
 	}
 
@@ -1678,6 +1744,12 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 	// Calculate tokens before (from last LLM call = actual context size)
 	tokensBefore := compaction.CalculateContextTokens(lastUsage)
 
+	// This runs on the agent's background goroutine after the turn's LLM
+	// calls, so the event loop keeps rendering — but the turn's
+	// processingEnd is delayed until the summary call returns. Say what
+	// the pause is so it doesn't read as a hang.
+	a.postFlash("Compacting context…")
+
 	// Perform compaction using the session's Compact method
 	err = a.currentSession.Compact(a.ctx, func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error) {
 		compactedMsgs, _, err := compaction.CompactMessages(
@@ -1744,6 +1816,8 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 
 	a.processing = true
 	a.processingStartTime = time.Now()
+	// The turn-summary slot belongs to the new turn now.
+	a.showCompactionSummary = false
 	a.interactionUsage = &llm.Usage{}
 	if a.sessionUsage == nil {
 		a.sessionUsage = &llm.Usage{}
@@ -1891,8 +1965,9 @@ func shouldDisplayToolError(_ string, isError bool, _ string) bool {
 }
 
 // handleCompaction processes a compaction event and updates UI state.
-// The compaction notification is shown in the live view for 3 seconds,
-// and detailed stats are displayed in the footer for 5 seconds.
+// Between turns the result lands in exactly two places: a scrollback notice
+// (the durable record) and the turn-summary slot (the at-a-glance one, until
+// the next turn starts).
 func (a *App) handleCompaction(event *compaction.CompactionEvent, midTurn bool) {
 	a.lastCompactionEvent = event
 	// Reset usage so the context bar reflects post-compaction state.
@@ -1900,15 +1975,16 @@ func (a *App) handleCompaction(event *compaction.CompactionEvent, midTurn bool) 
 	a.lastUsage = nil
 	if midTurn {
 		// Mid-turn compaction happens while the agent is still working, so
-		// surface it as a scrollback line rather than the transient footer
-		// stats used between turns.
-		a.appendNotice(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
+		// only the scrollback line applies — the turn-summary slot belongs
+		// to the turn still in progress.
+		a.appendNotice("⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
 			event.TokensBefore, event.TokensAfter, event.MessagesCompacted)
 		return
 	}
 	a.compactionEventTime = time.Now()
-	a.showCompactionStats = true
-	a.compactionStatsStartTime = time.Now()
+	a.showCompactionSummary = true
+	a.appendNotice("⚡ Context compacted: ~%d → ~%d tokens (%d messages summarized)",
+		event.TokensBefore, event.TokensAfter, event.MessagesCompacted)
 }
 
 // notifyMidTurnCompaction surfaces a mid-turn compaction (from
@@ -2202,12 +2278,16 @@ func (a *App) appendIntro() int {
 		wsDisplay = "~" + wsDisplay[len(home):]
 	}
 
-	content := a.modelDisplayName() + "\n" + wsDisplay
-	if !a.contextDemos.empty() {
-		content += "\ncontext: " + a.contextDemos.displaySummary() + " · /context to inspect"
+	modelSummary := a.modelDisplayName()
+	if eff := strings.TrimSpace(string(a.reasoningEffort)); eff != "" {
+		modelSummary += " with " + eff + " effort"
 	}
+	content := modelSummary + "\n" + wsDisplay
 	if scope := workspaceScopeSummary(a.workspaceDir); scope != "" {
 		content += "\nscope: " + scope
+	}
+	if !a.contextDemos.empty() {
+		content += "\ncontext: " + a.contextDemos.displaySummary() + " · /context to inspect"
 	}
 	if a.resumeSessionID != "" {
 		content += "\nResuming session: " + a.resumeSessionID
@@ -2396,6 +2476,10 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		return true
 
 	case "clear":
+		if a.compacting {
+			a.appendNotice("Wait for compaction to finish before clearing.")
+			return true
+		}
 		// Drop the transcript first, so anything the reset has to say about
 		// itself lands in the fresh one rather than the discarded one. nil,
 		// not [:0]: the old messages hold report views worth releasing.
@@ -2462,8 +2546,20 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.handleModelCommand(cmdArgs)
 		return true
 
+	case "effort":
+		a.handleEffortCommand(cmdArgs)
+		return true
+
+	case "thinking":
+		a.handleThinkingCommand(cmdArgs)
+		return true
+
+	case "status":
+		a.handleStatusCommand()
+		return true
+
 	case "usage", "cost":
-		a.printUsageReport()
+		a.handleUsageCommand(cmdArgs)
 		return true
 
 	case "copy":
@@ -2516,10 +2612,21 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 	return true
 }
 
-// handleCompactCommand performs manual compaction of the conversation
+// handleCompactCommand validates a manual /compact request on the event loop,
+// then runs the summarizer in the background so ticks, keystrokes, and the
+// spinner keep animating while the LLM call takes seconds.
 func (a *App) handleCompactCommand() {
 	if a.compactionConfig == nil {
 		a.appendNotice("Compaction is disabled.")
+		return
+	}
+
+	if a.processing {
+		a.appendNotice("Finish the current turn before compacting.")
+		return
+	}
+	if a.compacting {
+		a.appendNotice("Already compacting...")
 		return
 	}
 
@@ -2540,8 +2647,6 @@ func (a *App) handleCompactCommand() {
 		return
 	}
 
-	a.appendNotice("Compacting conversation...")
-
 	// Calculate tokens before compaction (estimate)
 	tokensBefore := 0
 	for _, msg := range msgs {
@@ -2552,33 +2657,72 @@ func (a *App) handleCompactCommand() {
 		}
 	}
 
-	// Perform compaction using session's Compact method
+	model := a.compactionConfig.Model
+	if model == nil && a.agent != nil {
+		model = a.agent.Model()
+	}
 	summaryPrompt := a.compactionConfig.SummaryPrompt
 	if summaryPrompt == "" {
 		summaryPrompt = compaction.DefaultCompactionSummaryPrompt
 	}
+	sess := a.currentSession
+	compact := func() (event *compaction.CompactionEvent, err error) {
+		err = sess.Compact(a.ctx, func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error) {
+			compactedMsgs, evt, err := compaction.CompactMessages(
+				ctx,
+				model,
+				messages,
+				"",
+				summaryPrompt,
+				tokensBefore,
+			)
+			event = evt
+			return compactedMsgs, err
+		})
+		return event, err
+	}
 
-	var event *compaction.CompactionEvent
-	err = a.currentSession.Compact(a.ctx, func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error) {
-		compactedMsgs, evt, err := compaction.CompactMessages(
-			ctx,
-			a.compactionConfig.Model,
-			messages,
-			"",
-			summaryPrompt,
-			tokensBefore,
-		)
-		event = evt
-		return compactedMsgs, err
-	})
-	if err != nil {
-		a.appendNotice("Compaction failed: %v", err)
+	// Without a runner there is no event loop to report back to (unit
+	// tests); run inline so callers still get the transcript notices.
+	if a.runner == nil {
+		event, err := compact()
+		a.handleCompactEnd(compactionEndEvent{event: event, err: err})
 		return
 	}
 
-	// Show stats
-	if event != nil {
-		a.appendNotice("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
+	a.runner.SendEvent(compactionStartEvent{baseEvent: newBaseEvent()})
+	// No scrollback notice here: the compacting spinner in the live view
+	// already says what's happening. The result notice lands on completion.
+
+	go func() {
+		event, err := compact()
+		a.runner.SendEvent(compactionEndEvent{
+			baseEvent: newBaseEvent(),
+			event:     event,
+			err:       err,
+		})
+	}()
+}
+
+// handleCompactEnd finishes a manual /compact run on the event loop.
+func (a *App) handleCompactEnd(e compactionEndEvent) {
+	a.compacting = false
+	if e.err != nil {
+		// Surface cancellations quietly; the user asked to stop.
+		if errors.Is(e.err, context.Canceled) {
+			a.appendNotice("Compaction canceled.")
+			return
+		}
+		a.appendNotice("Compaction failed: %v", e.err)
+		return
+	}
+
+	if e.event != nil {
+		// handleCompaction writes the scrollback notice and takes the
+		// turn-summary slot.
+		a.handleCompaction(e.event, false)
+	} else {
+		a.appendNotice("Compacted conversation.")
 	}
 	a.warnIfManyCompactions()
 }
@@ -2589,9 +2733,12 @@ func (a *App) printHelp() {
 		tui.Text("  /quit, /q      Exit"),
 		tui.Text("  /clear         Clear conversation and screen"),
 		tui.Text("  /compact       Compact conversation to save context"),
-		tui.Text("  /model         Switch model"),
+		tui.Text("  /model [name]  Switch model (saved to ~/.dive/settings.json)"),
+		tui.Text("  /effort [lvl]  Show or switch thinking effort (none, minimal, low, medium, high, xhigh, max)"),
+		tui.Text("  /thinking [on|off]  Toggle summarized model thinking"),
+		tui.Text("  /status        Show model, effort, thinking, usage, and session"),
 		tui.Text("  /todos, /t     Toggle todo list"),
-		tui.Text("  /usage, /cost  Show token & cache usage breakdown"),
+		tui.Text("  /usage [full|brief]  Show usage breakdown; full/brief toggles the live panel"),
 		tui.Text("  /context       Inspect context-demo reminders from the latest turn"),
 		tui.Text("  /copy [N|all]  Copy the selection, or a code block from the last reply"),
 		tui.Text("  /mouse         Toggle mouse reporting"),
@@ -2677,8 +2824,8 @@ func (a *App) usageReportView() tui.View {
 	}
 
 	labelStyle := tui.NewStyle().WithFgRGB(dimText)
-	rowLabelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170})
-	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
+	rowLabelStyle := tui.NewStyle().WithFgRGB(mutedText)
+	valStyle := tui.NewStyle().WithFgRGB(primaryText).WithBold()
 
 	const (
 		labelW = 16
@@ -2825,23 +2972,18 @@ func (a *App) buildLiveView(withActivity bool) tui.View {
 	}
 	views = append(views, activityViews...)
 
-	// Show compaction notification (if recent)
-	if a.lastCompactionEvent != nil && time.Since(a.compactionEventTime) < 3*time.Second {
-		views = append(views, tui.Group(
-			tui.Text("⚡").Fg(tui.ColorYellow),
-			tui.Text(" Context compacted").Fg(tui.ColorYellow),
-			tui.Text(" %d → %d tokens, %d messages summarized",
-				a.lastCompactionEvent.TokensBefore,
-				a.lastCompactionEvent.TokensAfter,
-				a.lastCompactionEvent.MessagesCompacted).Style(hintStyle()),
-		))
-	}
-
 	// Show generation progress indicator (below tool calls)
-	if a.streamingMessageIndex >= 0 {
+	if a.compacting {
 		views = append(views, tui.Group(
-			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
-			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
+			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Style(warningStyle()),
+			tui.Text(" compacting").Animate(tui.Slide(3, fadedText, warningText)),
+			tui.Text(" (%s)", formatDuration(time.Since(a.compactingStartTime))).Style(hintStyle()),
+		))
+	} else if a.streamingMessageIndex >= 0 {
+		views = append(views, tui.Group(
+			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).
+				Style(tui.NewStyle().WithFgRGB(accentBright)),
+			tui.Text(" thinking").Animate(tui.Slide(3, fadedText, accentBright)),
 			tui.Text(" (%s)", formatDuration(elapsed)).Style(hintStyle()),
 			tui.Text("  ").Style(hintStyle()),
 			tui.Text("esc to interrupt").Style(hintStyle()),
@@ -3053,8 +3195,9 @@ func fuzzyMatch(pattern, text string) int {
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
 	builtins := []string{
-		"clear", "compact", "context", "copy", "cost", "help",
-		"model", "mouse", "quit", "scrollback", "todos", "usage",
+		"clear", "compact", "context", "copy", "cost", "effort", "help",
+		"model", "mouse", "quit", "scrollback", "status", "thinking",
+		"todos", "usage",
 	}
 
 	var matches []string
@@ -3106,6 +3249,13 @@ func (a *App) getFileMatches(prefix string) []string {
 
 		relPath, err := filepath.Rel(a.workspaceDir, path)
 		if err != nil || relPath == "." {
+			return nil
+		}
+
+		if strings.HasPrefix(info.Name(), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -3217,7 +3367,7 @@ func (a *App) handleModelCommand(args string) {
 		Type:         DialogTypeSelect,
 		Active:       true,
 		Title:        "Select model",
-		Message:      "Switch between models. Applies to this session.",
+		Message:      "Switch between models. Saved to ~/.dive/settings.json.",
 		Options:      options,
 		DefaultIndex: defaultIdx,
 		SelectIndex:  defaultIdx,
@@ -3260,7 +3410,15 @@ func (a *App) switchModel(modelID string) {
 		return
 	}
 	if modelID == a.modelName {
-		a.appendNotice("Already using %s", a.modelDisplayName())
+		// Selecting the active model can still be meaningful when it came
+		// from autodetection, an environment variable, or a one-off flag: the
+		// explicit slash command should make it the remembered user default.
+		a.modelSource = "session"
+		if err := saveUserModel(modelID); err != nil {
+			a.appendNotice("Already using %s, but saving to settings failed: %v", a.modelDisplayName(), err)
+			return
+		}
+		a.appendNotice("Already using %s; saved to ~/.dive/settings.json", a.modelDisplayName())
 		return
 	}
 
@@ -3277,6 +3435,9 @@ func (a *App) switchModel(modelID string) {
 	// Update compaction model so compaction uses the new model
 	if a.compactionConfig != nil {
 		a.compactionConfig.Model = newModel
+		if !a.compactionThresholdExplicit {
+			a.compactionConfig.ContextTokenThreshold = compactionThreshold(0, modelID)
+		}
 	}
 
 	// Update the model line in the system prompt so the agent knows its identity
@@ -3288,5 +3449,5 @@ func (a *App) switchModel(modelID string) {
 		}
 	}
 
-	a.appendNotice("Switched to %s", a.modelDisplayName())
+	a.persistModelSwitch(modelID)
 }

@@ -393,8 +393,9 @@ func blocksContainImage(blocks []*dive.ToolResultContent) bool {
 // flattened to their joined text (with placeholders for non-text blocks);
 // other structured content is JSON-marshaled. The Responses API has no
 // equivalent of Anthropic's is_error flag on tool results, so when IsError is
-// set the output text is prefixed with "Error: " so the model can tell the
-// call failed rather than the flag being silently dropped.
+// set the output text is normally prefixed with "Error: " so the model can
+// tell the call failed rather than the flag being silently dropped. Results
+// that already carry an explicit <error> envelope are preserved verbatim.
 func toolResultOutputText(c *llm.ToolResultContent) (string, error) {
 	var output string
 	if blocks := providers.ToolResultBlocks(c); blocks != nil {
@@ -418,7 +419,8 @@ func toolResultOutputText(c *llm.ToolResultContent) (string, error) {
 			output = string(resultJSON)
 		}
 	}
-	if c.IsError && !strings.HasPrefix(output, "Error:") {
+	hasErrorEnvelope := strings.HasPrefix(output, "<error>") && strings.HasSuffix(output, "</error>")
+	if c.IsError && !strings.HasPrefix(output, "Error:") && !hasErrorEnvelope {
 		output = "Error: " + output
 	}
 	return output, nil

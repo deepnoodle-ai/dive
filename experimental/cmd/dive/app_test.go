@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestHandleCompaction(t *testing.T) {
 	// Verify state was updated correctly
 	assert.NotNil(t, app.lastCompactionEvent, "lastCompactionEvent should be set")
 	assert.Equal(t, event, app.lastCompactionEvent, "lastCompactionEvent should match the event")
-	assert.True(t, app.showCompactionStats, "showCompactionStats should be true")
+	assert.True(t, app.showCompactionSummary, "showCompactionSummary should take the turn-summary slot")
 
 	// Verify the event values
 	assert.Equal(t, 100000, app.lastCompactionEvent.TokensBefore)
@@ -43,8 +44,41 @@ func TestHandleCompaction(t *testing.T) {
 	// Verify timestamps are recent
 	assert.True(t, time.Since(app.compactionEventTime) < time.Second,
 		"compactionEventTime should be recent")
-	assert.True(t, time.Since(app.compactionStatsStartTime) < time.Second,
-		"compactionStatsStartTime should be recent")
+
+	// The result lands in the scrollback too.
+	assert.Contains(t, app.messages[len(app.messages)-1].Content, "Context compacted")
+
+	// The next turn reclaims the turn-summary slot.
+	app.handleProcessingStart(processingStartEvent{baseEvent: newBaseEvent(), userInput: "hi"})
+	assert.False(t, app.showCompactionSummary, "a new turn should clear the compaction summary")
+}
+
+func TestManualCompactionRunsOffTheEventLoop(t *testing.T) {
+	app, fake := newFakeApp(t)
+
+	// Starting compaction flips the flag; the live view shows progress
+	// instead of freezing on the last frame.
+	app.HandleEvent(compactionStartEvent{baseEvent: newBaseEvent()})
+	assert.True(t, app.compacting, "compacting should be true after start event")
+
+	var buf bytes.Buffer
+	tui.Fprint(&buf, app.buildLiveView(false), tui.WithWidth(80))
+	// The "compacting" label is per-character animated, so ANSI codes sit
+	// between its letters; the spinner glyph proves the progress line rendered.
+	assert.Contains(t, buf.String(), "⣾")
+
+	// A second /compact while one is running is refused, not queued.
+	app.compactionConfig = &compaction.CompactionConfig{}
+	before := len(fake.events)
+	app.handleCompactCommand()
+	assert.True(t, app.compacting, "second compact must not clear the flag")
+	assert.Equal(t, before, len(fake.events), "second compact must not start another run")
+	assert.Contains(t, app.messages[len(app.messages)-1].Content, "Already compacting")
+
+	// Failure clears the flag and lands in the transcript.
+	app.HandleEvent(compactionEndEvent{baseEvent: newBaseEvent(), err: errors.New("boom")})
+	assert.False(t, app.compacting, "compacting should be false after end event")
+	assert.Contains(t, app.messages[len(app.messages)-1].Content, "Compaction failed")
 }
 
 func TestShouldDisplayToolError(t *testing.T) {

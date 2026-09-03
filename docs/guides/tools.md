@@ -75,6 +75,16 @@ toolkit.NewBashTool(toolkit.BashToolOptions{
 })
 ```
 
+The result is one text block with stdout and stderr interleaved in emission
+order. Exit 0 returns that text verbatim (including an empty string). A nonzero
+exit returns `<error>Exit code N\n...merged output...</error>`. Large combined
+output is truncated with an explicit marker.
+
+Each invocation starts a fresh shell. `cd`, exported environment variables,
+shell options, and exit status do not carry into the next call; an explicit
+`working_directory` applies to that call only. Filesystem and other external
+changes made by a command do persist.
+
 ## Web
 
 ### WebSearch

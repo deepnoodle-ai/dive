@@ -1,12 +1,11 @@
 package toolkit
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -43,8 +42,9 @@ type BashInput struct {
 	// When provided, this is displayed instead of the raw command (5-10 words recommended).
 	Description string `json:"description,omitempty"`
 
-	// WorkingDirectory sets the working directory for command execution.
-	// If empty, the command runs in the current working directory.
+	// WorkingDirectory sets the working directory for this invocation.
+	// If empty, the command runs in the Dive process's working directory.
+	// Directory changes never carry over to a later invocation.
 	// Must be within the workspace if path validation is enabled.
 	WorkingDirectory string `json:"working_directory,omitempty"`
 }
@@ -70,7 +70,7 @@ type BashToolOptions struct {
 // BashTool executes shell commands and captures their output.
 //
 // On Unix systems, commands are executed via /bin/bash -c. On Windows, commands
-// are executed via cmd /C. The tool captures stdout, stderr, and the exit code.
+// are executed via cmd /C. Stdout and stderr are merged in emission order.
 //
 // Features:
 //   - Configurable timeout (default 2 minutes, max 10 minutes)
@@ -131,7 +131,12 @@ Parameters:
 - command: The bash command to run (required)
 - timeout: Timeout in milliseconds (max 600000ms / 10 minutes, default 120000ms / 2 minutes)
 - description: Brief description of what the command does (5-10 words)
-- working_directory: Directory to run the command in
+- working_directory: Directory for this invocation; it does not become the default for later calls
+
+State:
+- Each call starts a fresh shell in working_directory, or the Dive process working directory when omitted
+- Working-directory changes, environment variables, shell options, and exit status do not persist between calls
+- Filesystem and other external changes made by commands do persist
 
 Limitations:
 - No interactive commands (vim, less, password prompts)
@@ -139,7 +144,9 @@ Limitations:
 - Large outputs may be truncated
 
 `
-	desc += fmt.Sprintf("Running on '%s' operating system.", runtime.GOOS)
+	shell, shellArgs := shellCommand()
+	shellInvocation := strings.Join(append([]string{shell}, shellArgs...), " ")
+	desc += fmt.Sprintf("Commands run via '%s' on '%s'.", shellInvocation, runtime.GOOS)
 	return desc
 }
 
@@ -163,7 +170,7 @@ func (t *BashTool) Schema() *schema.Schema {
 			},
 			"working_directory": {
 				Type:        "string",
-				Description: "The working directory for command execution.",
+				Description: "The working directory for this invocation only. It does not persist to later calls.",
 			},
 		},
 	}
@@ -197,9 +204,9 @@ func (t *BashTool) PreviewCall(ctx context.Context, input *BashInput) *dive.Tool
 
 // Call executes the shell command and returns its output.
 //
-// The result includes stdout, stderr, and the exit code as a JSON object.
-// If the command fails (non-zero exit code), an error result is returned
-// but no Go error is returned - the LLM receives the failure information.
+// A successful command returns its merged stdout/stderr verbatim. A non-zero
+// exit returns the same body wrapped in <error> with its numeric exit code, but
+// no Go error; the LLM receives the command failure as a tool result.
 //
 // The context can be used to cancel long-running commands.
 func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult, error) {
@@ -232,42 +239,25 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 	}
 
 	// Execute command
-	stdout, stderr, exitCode, err := t.execute(ctx, input.Command, input.WorkingDirectory, timeout)
+	output, exitCode, err := t.execute(ctx, input.Command, input.WorkingDirectory, timeout)
 	if err != nil {
 		return dive.NewToolResultError(err.Error()), nil
 	}
 
-	// Build result
-	result := map[string]interface{}{
-		"stdout":      stdout,
-		"stderr":      stderr,
-		"return_code": exitCode,
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return dive.NewToolResultError(fmt.Sprintf("error marshaling result: %s", err.Error())), nil
-	}
-
-	// Build display
-	display := input.Description
-	if display == "" {
-		display = fmt.Sprintf("Ran `%s`", truncateCommand(input.Command, 40))
-	}
-	display = fmt.Sprintf("%s (exit %d)", display, exitCode)
-
-	// Return error result if command failed
 	if exitCode != 0 {
-		return dive.NewToolResultError(string(resultJSON)).WithDisplay(display), nil
+		return dive.NewToolResultError(formatBashFailure(exitCode, output)), nil
 	}
 
-	return dive.NewToolResultText(string(resultJSON)).WithDisplay(display), nil
+	return dive.NewToolResultText(output), nil
 }
 
 // execute runs a command with the given timeout and returns its output.
 // It handles context cancellation, timeout enforcement, and output truncation.
-// If dive.StreamOutput is available in the context, stdout is streamed line by line.
-func (t *BashTool) execute(ctx context.Context, command, workingDir string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
+// If dive.StreamOutput is available in the context, merged output is streamed
+// as it arrives. The child's stdout and stderr descriptors point to the same OS
+// pipe, so the kernel preserves their write order without a stdout-first or
+// stderr-first post-processing step.
+func (t *BashTool) execute(ctx context.Context, command, workingDir string, timeout time.Duration) (output string, exitCode int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -280,65 +270,41 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 		cmd.Dir = workingDir
 	}
 
-	// Set up stdout streaming via pipe if streaming is available
-	var stdoutBuf bytes.Buffer
-	stdoutPipe, pipeErr := cmd.StdoutPipe()
+	mergedReader, mergedWriter, pipeErr := os.Pipe()
 	if pipeErr != nil {
-		// Fall back to buffer if pipe fails
-		cmd.Stdout = &stdoutBuf
-		stdoutPipe = nil
+		return "", -1, fmt.Errorf("error creating command output pipe: %s", pipeErr.Error())
 	}
-
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+	defer mergedReader.Close()
+	cmd.Stdout = mergedWriter
+	cmd.Stderr = mergedWriter
 
 	runErr := cmd.Start()
 	if runErr != nil {
+		_ = mergedWriter.Close()
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", "", -1, fmt.Errorf("command timed out after %s", timeout)
+			return "", -1, fmt.Errorf("command timed out after %s", timeout)
 		}
-		return "", "", -1, fmt.Errorf("error: %s", runErr.Error())
+		return "", -1, fmt.Errorf("error: %s", runErr.Error())
 	}
+	// The parent must close its copy so the reader observes EOF after the child
+	// closes both descriptors.
+	_ = mergedWriter.Close()
 
-	// Read stdout, streaming lines as they arrive.
-	// bufio.Scanner with ScanLines handles the final non-newline-terminated line.
-	var scanErr error
-	if stdoutPipe != nil {
-		scanner := bufio.NewScanner(stdoutPipe)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		start := time.Now()
-		var lineCount, byteCount int
-		var lastProgress time.Time
-		for scanner.Scan() {
-			line := scanner.Text() + "\n"
-			stdoutBuf.WriteString(line)
-			dive.StreamOutput(ctx, line)
-
-			// StreamOutput above carries the raw text deltas. ReportProgress is
-			// the parallel structured channel: a latest-wins snapshot of how far
-			// the command has gotten. Throttled to ~10/sec so the cadence tracks
-			// elapsed time rather than output volume.
-			lineCount++
-			byteCount += len(line)
-			if now := time.Now(); now.Sub(lastProgress) >= 100*time.Millisecond {
-				lastProgress = now
-				dive.ReportProgress(ctx, &dive.ToolProgress{
-					Display: fmt.Sprintf("%d lines · %s", lineCount, humanizeBytes(byteCount)),
-					Metadata: map[string]any{
-						"lines":      lineCount,
-						"bytes":      byteCount,
-						"elapsed_ms": time.Since(start).Milliseconds(),
-					},
-				})
-			}
+	var merged bytes.Buffer
+	chunk := make([]byte, 32*1024)
+	var captureErr error
+	for {
+		n, readErr := mergedReader.Read(chunk)
+		if n > 0 {
+			part := chunk[:n]
+			_, _ = merged.Write(part)
+			dive.StreamOutput(ctx, string(part))
 		}
-		if err := scanner.Err(); err != nil {
-			// A scan error (e.g. a line exceeding the buffer limit, or a read
-			// failure) means output was lost; record it so we don't silently
-			// truncate and report success. Drain the rest of the pipe so the
-			// child process can't block writing to a full pipe before Wait.
-			scanErr = err
-			io.Copy(io.Discard, stdoutPipe)
+		if readErr != nil {
+			if readErr != io.EOF {
+				captureErr = readErr
+			}
+			break
 		}
 	}
 
@@ -348,20 +314,21 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else if ctx.Err() == context.DeadlineExceeded {
-			return "", "", -1, fmt.Errorf("command timed out after %s", timeout)
+			return "", -1, fmt.Errorf("command timed out after %s", timeout)
 		} else {
-			return "", "", -1, fmt.Errorf("error: %s", runErr.Error())
+			return "", -1, fmt.Errorf("error: %s", runErr.Error())
 		}
 	}
 
-	if scanErr != nil {
-		return "", "", -1, fmt.Errorf("error reading command output: %s", scanErr.Error())
+	if captureErr != nil {
+		return "", -1, fmt.Errorf("error reading command output: %s", captureErr.Error())
 	}
 
-	stdout = truncateOutput(stdoutBuf.String(), t.maxOutputLen)
-	stderr = truncateOutput(stderrBuf.String(), t.maxOutputLen)
+	return truncateOutput(merged.String(), t.maxOutputLen), exitCode, nil
+}
 
-	return stdout, stderr, exitCode, nil
+func formatBashFailure(exitCode int, output string) string {
+	return fmt.Sprintf("<error>Exit code %d\n%s</error>", exitCode, output)
 }
 
 // shellCommand returns the shell and arguments for command execution.
@@ -370,21 +337,6 @@ func shellCommand() (string, []string) {
 		return "cmd", []string{"/C"}
 	}
 	return "/bin/bash", []string{"-c"}
-}
-
-// humanizeBytes formats a byte count as a compact human-readable string
-// (e.g. 2300 -> "2.2 KB"). Used for ReportProgress display summaries.
-func humanizeBytes(n int) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for v := int64(n) / unit; v >= unit; v /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // truncateOutput limits output length to prevent overwhelming the LLM.

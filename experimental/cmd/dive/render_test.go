@@ -16,6 +16,59 @@ func TestFormatTokenCount(t *testing.T) {
 	assert.Equal(t, "1.0M", formatTokenCount(1000000))
 }
 
+func TestIntroViewUsesCompactThreeLineStartupText(t *testing.T) {
+	app := newTestApp()
+	app.reasoningEffort = llm.ReasoningEffortMedium
+	intro := app.appendIntro()
+
+	screen := tui.SprintScreen(app.introView(app.messages[intro]), tui.WithWidth(80))
+	lines := strings.Split(strings.TrimRight(screen.Text(), "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+
+	assert.Equal(t, 3, len(lines))
+	assert.Equal(t, "Dive v"+cliVersion, lines[0])
+	assert.Equal(t, "test-model with medium effort", lines[1])
+	assert.Equal(t, "/tmp/test", lines[2])
+	assert.NotContains(t, screen.Text(), "█")
+	assert.NotContains(t, screen.Text(), "model:")
+	assert.NotContains(t, screen.Text(), "directory:")
+	assert.NotContains(t, screen.Text(), "╭")
+	assert.NotContains(t, screen.Text(), "╰")
+}
+
+func TestDiveMarkdownThemeUsesSemanticPalette(t *testing.T) {
+	theme := diveMarkdownTheme()
+
+	assertStyleColor := func(name string, style tui.Style, want tui.RGB) {
+		t.Helper()
+		assert.NotNil(t, style.FgRGB, "%s should use an explicit RGB color", name)
+		assert.Equal(t, *style.FgRGB, want, "%s color", name)
+	}
+
+	assertStyleColor("h1", theme.H1Style, accentBright)
+	assertStyleColor("h3", theme.H3Style, accentMid)
+	assertStyleColor("h6", theme.H6Style, dimText)
+	assertStyleColor("bold", theme.BoldStyle, primaryText)
+	assertStyleColor("inline code", theme.CodeStyle, codeText)
+	assertStyleColor("link", theme.LinkStyle, accentBright)
+	assertStyleColor("blockquote", theme.BlockQuoteStyle, dimText)
+	assertStyleColor("code block", theme.CodeBlockStyle, primaryText)
+	assertStyleColor("rule", theme.HorizontalRuleStyle, fadedText)
+	assertStyleColor("table border", theme.TableBorderStyle, fadedText)
+	assert.Equal(t, theme.SyntaxTheme, "github-dark")
+	assert.NotEqual(t, codeText, warningText, "inline literals should not look like warnings")
+}
+
+func TestAutocompleteOptionStyleIsReadableActionableText(t *testing.T) {
+	style := autocompleteOptionStyle()
+
+	assert.NotNil(t, style.FgRGB)
+	assert.Equal(t, mutedText, *style.FgRGB)
+	assert.False(t, style.Italic, "file and command choices should not look like explanatory hints")
+}
+
 func TestFormatCacheCreationTokens(t *testing.T) {
 	assert.Equal(t, "0", formatCacheCreationTokens(&llm.Usage{}), "reported zero should remain zero")
 	assert.Equal(t, "2.0k", formatCacheCreationTokens(&llm.Usage{CacheCreationInputTokens: 2000}))
@@ -49,7 +102,7 @@ func TestCacheHitRate(t *testing.T) {
 func TestCacheHitStyle_UsesTotalInputTokens(t *testing.T) {
 	style := cacheHitStyle(&llm.Usage{InputTokens: 21, CacheReadInputTokens: 79}, true)
 	assert.NotNil(t, style.FgRGB)
-	assert.Equal(t, tui.RGB{R: 225, G: 175, B: 80}, *style.FgRGB,
+	assert.Equal(t, warningText, *style.FgRGB,
 		"79% of the full prompt should use the amber style")
 }
 
@@ -122,6 +175,42 @@ func TestCostString(t *testing.T) {
 	assert.Equal(t, "—", costString(&llm.Usage{}), "unknown cost should render as a dash")
 	assert.Equal(t, "$0", costString(&llm.Usage{Cost: &llm.Cost{Total: 0}}), "known zero cost is $0, not a dash")
 	assert.Equal(t, "$1.27", costString(&llm.Usage{Cost: &llm.Cost{Total: 1.273}}))
+}
+
+func TestStatusLineShowsOnlySessionCostByDefault(t *testing.T) {
+	app := newTestApp()
+	app.gitBranch = "main"
+	app.reasoningEffort = llm.ReasoningEffortHigh
+	app.lastUsage = &llm.Usage{InputTokens: 100}
+	app.interactionUsage = &llm.Usage{
+		InputTokens: 100,
+		Cost:        &llm.Cost{Total: 0.25},
+	}
+	app.sessionUsage = &llm.Usage{
+		InputTokens: 400,
+		Cost:        &llm.Cost{Total: 1.273},
+	}
+
+	text := tui.SprintScreen(app.statusLineView(), tui.WithWidth(120), tui.WithHeight(10)).Text()
+	assert.Contains(t, text, "test-model · high in test on main")
+	assert.Contains(t, text, "$1.27")
+	assert.NotContains(t, text, "cache read")
+	assert.NotContains(t, text, "turn")
+
+	app.showDetailedUsage = true
+	text = tui.SprintScreen(app.statusLineView(), tui.WithWidth(120), tui.WithHeight(10)).Text()
+	assert.Contains(t, text, "cache read")
+	assert.Contains(t, text, "turn")
+	assert.Contains(t, text, "session")
+}
+
+func TestSessionTotalCostFallsBackToCurrentTurn(t *testing.T) {
+	app := newTestApp()
+	app.interactionUsage = &llm.Usage{Cost: &llm.Cost{Total: 0.043}}
+	assert.Equal(t, "$0.043", app.sessionTotalCostString())
+
+	app.sessionUsage = &llm.Usage{Cost: &llm.Cost{Total: 1.273}}
+	assert.Equal(t, "$1.27", app.sessionTotalCostString())
 }
 
 func TestTokensPanelView_ShowsCostWhenPresent(t *testing.T) {

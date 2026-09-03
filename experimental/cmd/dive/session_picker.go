@@ -167,7 +167,7 @@ func metaStyle() tui.Style {
 // differs from where the picker was launched, which is the only time it tells
 // the user anything.
 func (p *SessionPickerApp) sessionItemView(info *session.SessionInfo, row int, selected bool) tui.View {
-	titleStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 215, G: 215, B: 225})
+	titleStyle := tui.NewStyle().WithFgRGB(primaryText)
 	marker := tui.Text("  ")
 	gutter := tui.Text("%d ", row+1).Style(metaStyle())
 	if row >= 9 {
