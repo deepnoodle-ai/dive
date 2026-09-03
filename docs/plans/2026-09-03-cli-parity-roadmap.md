@@ -12,20 +12,20 @@ This baseline was checked against the current official [Codex developer commands
 
 ## Current baseline
 
-| Workflow | Dive now | Parity baseline | Assessment |
-|---|---|---|---|
-| Model and effort | Flags/env plus persistent user/project settings; `/model`, `/effort`, `/thinking`, `/status` | Both peers expose model selection; Codex exposes reasoning effort with `/model`, while Claude exposes `/model` and `/effort` | Closed by current patch |
-| Compact status | Model, effort, repository/branch, context %, and session total cost on one row; detailed usage opt-in | Both peers keep primary state visible and offer status/context inspection | Closed by current patch |
-| Session recovery | `--resume` opens a picker | Continue latest, resume by id/name, fork, rename, and session management | Major gap |
-| Input while working | New submission is ignored while processing | Queue a follow-up, steer the active turn, interrupt predictably | Major gap |
-| Prompt history | Up/down history persisted locally | Persistent history plus reverse search and pasted-input recall | Partial |
-| Shell escape | Shell exists as an agent tool | Direct `!` shell mode that does not spend a model turn | Gap |
-| Permissions/workspace | Permission prompts and one dangerous bypass flag | Named permission modes, approval policy, sandbox choice, allowed tools, and additional directories | Major gap |
-| Change inspection | Tool calls are visible and expandable | Built-in diff, review, initialization, and project-instruction workflows | Gap |
-| Non-interactive use | `--print` with text or one JSON result | stdin plus prompt composition, JSONL streaming, schemas, stable exit codes, turn/budget limits | Major gap |
-| Subagents/background work | Agent, monitor, and stop tools exist | Built-in agent/background-job visibility and control | Partial |
-| Extensibility/health | Skills load at startup | MCP/plugin management, diagnostics, auth/login, hooks, feedback/update flows | Gap |
-| Display control | Managed screen, `--inline`, mouse and scrollback commands | Status-line customization, themes/accessibility, alternate-screen controls | Partial |
+| Workflow                  | Dive now                                                                                              | Parity baseline                                                                                                              | Assessment              |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| Model and effort          | Flags/env plus persistent user/project settings; `/model`, `/effort`, `/thinking`, `/status`          | Both peers expose model selection; Codex exposes reasoning effort with `/model`, while Claude exposes `/model` and `/effort` | Closed by current patch |
+| Compact status            | Model, effort, repository/branch, context %, and session total cost on one row; detailed usage opt-in | Both peers keep primary state visible and offer status/context inspection                                                    | Closed by current patch |
+| Session recovery          | `--resume` opens a picker                                                                             | Continue latest, resume by id/name, fork, rename, and session management                                                     | Major gap               |
+| Input while working       | New submission is ignored while processing                                                            | Queue a follow-up, steer the active turn, interrupt predictably                                                              | Major gap               |
+| Prompt history            | Up/down history persisted locally                                                                     | Persistent history plus reverse search and pasted-input recall                                                               | Partial                 |
+| Shell escape              | Shell exists as an agent tool                                                                         | Direct `!` shell mode that does not spend a model turn                                                                       | Gap                     |
+| Permissions/workspace     | Permission prompts and one dangerous bypass flag                                                      | Named permission modes, approval policy, sandbox choice, allowed tools, and additional directories                           | Major gap               |
+| Change inspection         | Tool calls are visible and expandable                                                                 | Built-in diff, review, initialization, and project-instruction workflows                                                     | Gap                     |
+| Non-interactive use       | `--print` with text or one JSON result                                                                | stdin plus prompt composition, JSONL streaming, schemas, stable exit codes, turn/budget limits                               | Major gap               |
+| Subagents/background work | Agent, monitor, and stop tools exist                                                                  | Built-in agent/background-job visibility and control                                                                         | Partial                 |
+| Extensibility/health      | Skills load at startup                                                                                | MCP/plugin management, diagnostics, auth/login, hooks, feedback/update flows                                                 | Gap                     |
+| Display control           | Managed screen, `--inline`, mouse and scrollback commands                                             | Status-line customization, themes/accessibility, alternate-screen controls                                                   | Partial                 |
 
 ## Idea inventory
 
@@ -60,15 +60,15 @@ The divergent pass produced twelve candidate improvements, grouped by the job th
 
 ## Evaluation
 
-| Candidate | User impact | Delivery effort | Risk reduced | Priority |
-|---|---:|---:|---:|---:|
-| Session recovery and branching (#4–5) | Very high | Medium | High | 1 |
-| Queue, steer, interrupt, shell, history (#6–8) | Very high | Medium-high | Medium | 2 |
-| Explicit permissions and workspace scope (#10) | High | Medium | Very high | 3 |
-| Non-interactive contract (#11) | High | High | High | 4 |
-| Diff/review/init (#9) | High | Medium | Medium | 5 |
-| Config inspection and capability validation (#1–3) | Medium | Low-medium | Medium | 6 |
-| MCP/plugins/doctor/background UI (#12) | Medium | High | Medium | 7 |
+| Candidate                                          | User impact | Delivery effort | Risk reduced | Priority |
+| -------------------------------------------------- | ----------: | --------------: | -----------: | -------: |
+| Session recovery and branching (#4–5)              |   Very high |          Medium |         High |        1 |
+| Queue, steer, interrupt, shell, history (#6–8)     |   Very high |     Medium-high |       Medium |        2 |
+| Explicit permissions and workspace scope (#10)     |        High |          Medium |    Very high |        3 |
+| Non-interactive contract (#11)                     |        High |            High |         High |        4 |
+| Diff/review/init (#9)                              |        High |          Medium |       Medium |        5 |
+| Config inspection and capability validation (#1–3) |      Medium |      Low-medium |       Medium |        6 |
+| MCP/plugins/doctor/background UI (#12)             |      Medium |            High |       Medium |        7 |
 
 The ordering favors daily friction and recovery first. Automation is important, but its schema and streaming contract deserve a separate design pass rather than being added piecemeal to `--print`.
 

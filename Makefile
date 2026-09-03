@@ -70,7 +70,7 @@ fmt-md-check:
 vet:
 	go vet ./...
 
-GO_MODULES := . providers/google providers/openai providers/grok a2a otel experimental/mcp experimental/cmd/dive examples
+GO_MODULES := . providers/google providers/openai providers/grok providers/meta a2a otel experimental/mcp experimental/cmd/dive examples
 
 tidy:
 	go mod tidy
@@ -84,7 +84,7 @@ tidy-all:
 build:
 	cd experimental/cmd/dive && go build .
 
-SUB_MODULES := providers/google providers/openai providers/grok a2a otel experimental/mcp experimental/cmd/dive examples
+SUB_MODULES := providers/google providers/openai providers/grok providers/meta a2a otel experimental/mcp experimental/cmd/dive examples
 
 release-prep:
 ifndef VERSION

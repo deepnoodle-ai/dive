@@ -1,6 +1,6 @@
 # Releasing
 
-Dive is one Go module plus eight tagged sub-modules. Everything below assumes
+Dive is one Go module plus nine tagged sub-modules. Everything below assumes
 you are on an up-to-date `main` and have `gh` authenticated.
 
 ## 1. Cut the changelog
@@ -16,6 +16,10 @@ Rename `## [Unreleased]` to the version being released and leave a fresh empty
 
 Before moving on, confirm every merged PR since the last release has an entry.
 `git log v<previous>..HEAD --oneline` is the list to check against.
+
+Keep each changelog entry to one to three source lines. State the user-visible
+change rather than listing every command, flag, or implementation detail; put
+that detail in feature documentation and use Highlights for upgrade context.
 
 ## 2. Sync the module requirements
 
