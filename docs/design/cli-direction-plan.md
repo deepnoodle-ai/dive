@@ -54,12 +54,31 @@ Two more decisions this plan adds:
   `WithInlineKittyKeyboard` always has, so Shift+Enter behaves the same inside and
   outside tmux and startup does not wait on a reply that tmux will not send. See the
   managed-screen design, appendix E.
+- **Decision 1 was revised: `--screen` never shipped.** Rather than a release of
+  opt-in, Phase 5 was pulled forward and the flag deleted in the same batch — the
+  managed screen is the default, `--inline` is the way out. What that trades away is
+  the release of dogfooding decision 1 bought; what it buys is not asking users to
+  learn a flag we intended to delete two releases later. The rollout matrix
+  (Phase 6.4) therefore runs against the default rather than against an opt-in, and
+  is the gate on the release rather than on the flip.
+- **`copy_on_select` is `DIVE_COPY_ON_SELECT=0`, not a settings key.** The CLI reads
+  no settings file at all today — `experimental/settings` has no caller — so a JSON
+  key would have meant wiring the loader in as a side effect of a copy feature. It
+  sits with `DIVE_CLIPBOARD` and `DIVE_DISABLE_MOUSE` until something else needs
+  settings.
+- **The paste placeholder collapses any multi-line paste**, not the ~3 lines or 800
+  characters the plan named: the threshold lives in wonton's `textInput`, and the
+  bound value stays the real text either way. A file drop is one line and is never
+  collapsed, so the dropped-file scan still sees what it needs.
 
 ## Still open
 
-- **Whether `/copy`'s picker ships in Phase 5 or slips.** The picker over code blocks
-  is the better shape but the select-list dialog work is the tail of the phase.
+- **`/copy`'s picker slipped.** `/copy` with no selection lists the last reply's code
+  blocks and `/copy N` takes one, which needs no select-list dialog and is what
+  shipped. The interactive picker is still the better shape.
 - **`--exit-transcript=full|turn|none`.** Add only if dogfooding asks for it.
+- **Phase 6's rollout matrix is not started.** It is now the last thing between this
+  work and a release, since the flip it was meant to gate has already happened.
 
 ## Sequencing
 
@@ -272,6 +291,10 @@ a.footerView())`. `footerView` is `app.go:409–530` minus the transcript-ish pa
 
 ## Phase 5 — Selection and copy
 
+**Status: shipped**, less the `/copy` picker (see "Still open"). Item 8's click
+targets needed `ViewportState.ItemAt` in wonton, which is where a click stops being
+a screen row and becomes an item.
+
 **Goal:** close the regression the managed screen opens. This is the phase that decides
 whether the change is acceptable — Gemini CLI shipped an alternate-screen mode and
 reverted its default until copying worked everywhere, which is the clearest available
@@ -316,6 +339,11 @@ evidence that copy is the gate.
 ---
 
 ## Phase 6 — Exit, escape hatches, rollout, flip
+
+**Status: 1 and 5 shipped** — the exit dump and the flip to `--inline` — pulled
+forward with Phase 5 so the default never had to move twice. Items 2, 3 and 4
+(`/scrollback`, Ctrl+L, the rollout matrix) are outstanding, and 4 is now the gate on
+the release rather than on the flip.
 
 **Work:**
 

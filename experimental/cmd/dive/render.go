@@ -328,6 +328,9 @@ func (a *App) contextPercent() int {
 // nothing else about the caller leaks into the result.
 func (a *App) messageView(msg Message, opts viewOpts) tui.View {
 	if msg.Type == MessageTypeToolCall {
+		// A click on the header is the only thing that sets Expanded, so this
+		// is the user's own choice overriding the caller's default.
+		opts.expanded = opts.expanded || msg.Expanded
 		return a.toolCallView(msg, opts)
 	}
 	return a.textMessageView(msg)
@@ -340,6 +343,13 @@ func (a *App) textMessageView(msg Message) tui.View {
 		return a.introView(msg)
 
 	case roleReport:
+		if msg.Collapsed {
+			return tui.Group(
+				tui.Text("▸ ").Style(hintStyle()),
+				tui.Text("%s", msg.CollapsedTitle),
+				tui.Text("  (click to expand)").Style(hintStyle()),
+			)
+		}
 		return msg.View
 
 	case roleUser:

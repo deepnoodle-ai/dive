@@ -8,12 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **`dive --screen` renders the conversation in a managed, scrollable screen**
-  (`DIVE_SCREEN=1`). The transcript becomes application state in the alternate
-  screen instead of terminal scrollback, so it reflows on resize and scrolls
-  with the wheel, PgUp/PgDn, Ctrl+Home/End, and Home/End on an empty input.
-  Opt-in; the inline renderer is unchanged and still the default.
-  `DIVE_DEBUG_FRAMES=1` puts the per-frame cost in the status line.
+- **The CLI renders the conversation in a managed, scrollable screen.** The
+  transcript is application state in the alternate screen instead of terminal
+  scrollback, so it reflows on resize and scrolls with the wheel, PgUp/PgDn,
+  Ctrl+Home/End, and Home/End on an empty input. `DIVE_DEBUG_FRAMES=1` puts the
+  per-frame cost in the status line.
+- **Selection and copy.** Drag to select and copy, double-click for a word,
+  triple-click for a line; a drag held past an edge keeps selecting, and the
+  view stops following so a streamed reply cannot move the words under the
+  pointer. The clipboard ladder is a native tool (`pbcopy`, `wl-copy`, `xclip`,
+  `xsel`, `clip.exe`), then `tmux load-buffer -w -`, then OSC 52, which is the
+  rung that works over SSH; `DIVE_CLIPBOARD=osc52` forces it. An OSC 52 write
+  is reported as sent rather than copied, because the terminal sends no reply.
+- **`/copy`** copies the selection, or lists the last reply's code blocks;
+  `/copy N` and `/copy all` copy them as the model wrote them, not as they were
+  drawn. **`/mouse`** hands selection back to the terminal (`DIVE_DISABLE_MOUSE=1`
+  to start that way), and `/help` names the modifier that does it for one drag.
+- **Clicking a tool call expands its output**, clicking a report's title folds
+  it away, and clicking the "N new lines" indicator jumps to the bottom.
+- **The conversation is printed to the terminal on exit**, after the alternate
+  screen is restored, capped at the last 2,000 lines and followed by the resume
+  line. Without it a managed-screen session would leave nothing behind.
 
 ### Fixed
 
@@ -28,6 +43,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **BREAKING: the managed screen is the CLI's default.** `--screen` and
+  `DIVE_SCREEN` are gone; `--inline` (or `DIVE_INLINE=1`) selects the old
+  renderer that writes finished messages to the terminal's own scrollback. The
+  trade is scrollback and your terminal's find bar in exchange for scrolling,
+  reflow on resize, and streaming markdown. One consequence to know about:
+  `dive < file` and `dive | cat` are now refused with a pointer to `--print`,
+  rather than writing alternate-screen escapes into a pipe.
 - **The CLI transcript is one list with one renderer.** Every message the CLI
   shows now lives in `a.messages` and renders through
   `messageView(msg, viewOpts)`; the `*Static` renderers and the 36 `runner.Print`

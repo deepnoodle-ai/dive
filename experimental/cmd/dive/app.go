@@ -179,6 +179,16 @@ type Message struct {
 	// Rev counts in-place mutations of this message. Bumped by touch.
 	Rev uint32
 
+	// Expanded shows a tool call's result in full. Set by clicking the tool
+	// call's header row; only tool calls read it.
+	Expanded bool
+
+	// Collapsed hides a report's body, leaving CollapsedTitle in its place.
+	// The title is captured when the report is collapsed rather than rendered
+	// on demand, since a report is a pre-built view with no text to read.
+	Collapsed      bool
+	CollapsedTitle string
+
 	// emitted records that this message has already been written to inline
 	// scrollback. Unused by the managed screen, which renders a.messages.
 	emitted bool
@@ -281,9 +291,9 @@ type App struct {
 	runner     uiRunner
 	scrollback scrollbackWriter
 
-	// Managed screen (--screen / DIVE_SCREEN=1). In this mode the transcript is
-	// application state rendered into the alternate screen rather than terminal
-	// scrollback; see screen.go.
+	// Managed screen (the default; --inline / DIVE_INLINE=1 opts out). In this
+	// mode the transcript is application state rendered into the alternate
+	// screen rather than terminal scrollback; see screen.go.
 	screenMode   bool
 	frameMetrics bool // DIVE_DEBUG_FRAMES=1: show per-frame cost in the status line
 	viewport     tui.ViewportState
@@ -292,6 +302,20 @@ type App struct {
 	termWidth    int
 	termHeight   int
 	startTime    time.Time
+
+	// Selection and copy. mouseEnabled is what /mouse and DIVE_DISABLE_MOUSE
+	// toggle: with reporting off the terminal's own selection works again, at
+	// the cost of every gesture the app provides. copyOnSelect copies as soon
+	// as a drag ends, the way a terminal does; DIVE_COPY_ON_SELECT=0 turns it
+	// off, leaving the highlight for /copy or Ctrl+C to act on. clipboard is
+	// the injection seam — tests read what was copied without a real clipboard.
+	mouseEnabled bool
+	copyOnSelect bool
+	clipboard    clipboardCopier
+
+	// altScrollDisabled records that we turned the terminal's alternate-scroll
+	// mode off, which is the only thing that entitles us to turn it back on.
+	altScrollDisabled bool
 
 	// Frame cost, for DIVE_DEBUG_FRAMES=1.
 	viewTimeTotal time.Duration
@@ -510,6 +534,11 @@ func (a *App) inputAreaView() []tui.View {
 			Placeholder("Type a message... (@filename, or drop a file to attach)").
 			Multiline(true).
 			MaxHeight(10).
+			// A pasted block shows as "[pasted N lines]" and is edited as one
+			// unit. The bound value stays the real text, so what gets sent —
+			// and what the dropped-file scan reads — is what was pasted. A
+			// file drop is a single line and so is never collapsed.
+			PastePlaceholder(true).
 			OnChange(func(value string) {
 				// A focused input consumes its own keystrokes (wonton
 				// >= v0.0.35), so capture dropped files and refresh
@@ -849,6 +878,10 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		return nil
 	case tui.TickEvent:
 		a.frame = e.Frame
+		// A pointer held still outside the viewport sends no further events, so
+		// a drag past an edge only keeps growing if something nudges it once a
+		// frame. No-op unless a drag is actually being held there.
+		a.viewport.DragAutoScroll()
 		// Flush any buffered streaming text (batches updates to 30 FPS max)
 		a.flushStreamBuffer()
 		// Keep the status line's branch fresh without forking git per frame.
@@ -1198,6 +1231,15 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 	// Handle global keys
 	switch e.Key {
 	case tui.KeyCtrlC:
+		// With copy-on-select off the highlight is left sitting there waiting
+		// to be copied, and Ctrl+C is the key every terminal has trained users
+		// to press for exactly that. Only when there is a selection: cancel and
+		// exit are what Ctrl+C means the rest of the time.
+		if !a.copyOnSelect && a.viewport.HasSelection() {
+			a.copySelection()
+			a.viewport.ClearSelection()
+			return nil
+		}
 		if a.processing {
 			a.cancel()
 		} else {
@@ -1212,7 +1254,11 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 		}
 		return nil
 	case tui.KeyEscape:
-		if a.processing {
+		// A highlight is the most recent thing Escape can undo, and dropping it
+		// also hands following back, so it comes before cancelling the turn.
+		if a.viewport.HasSelection() {
+			a.viewport.ClearSelection()
+		} else if a.processing {
 			a.cancel()
 		} else if a.screenMode && !a.viewport.AtBottom {
 			// Idle and scrolled away: Escape is the cheapest way back.
@@ -2049,8 +2095,8 @@ func lastNonEmptyLine(text string) string {
 	return ""
 }
 
-// Run starts the interactive UI: the managed screen when --screen is set,
-// otherwise the inline renderer that writes finished messages to scrollback.
+// Run starts the interactive UI: the managed screen, or with --inline the
+// renderer that writes finished messages to the terminal's own scrollback.
 func (a *App) Run() error {
 	if a.screenMode {
 		return a.runScreen()
@@ -2364,6 +2410,14 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.printUsageReport()
 		return true
 
+	case "copy":
+		a.handleCopyCommand(cmdArgs)
+		return true
+
+	case "mouse":
+		a.toggleMouse()
+		return true
+
 	case "context":
 		a.printContextDemoReport()
 		return true
@@ -2479,6 +2533,8 @@ func (a *App) printHelp() {
 		tui.Text("  /todos, /t     Toggle todo list"),
 		tui.Text("  /usage, /cost  Show token & cache usage breakdown"),
 		tui.Text("  /context       Inspect context-demo reminders from the latest turn"),
+		tui.Text("  /copy [N|all]  Copy the selection, or a code block from the last reply"),
+		tui.Text("  /mouse         Toggle mouse reporting"),
 		tui.Text("  /help, /?      Show this help"),
 	}
 
@@ -2508,8 +2564,21 @@ func (a *App) printHelp() {
 		tui.Text("  Enter          Send message"),
 		tui.Text("  Shift+Enter    New line"),
 		tui.Text("  Ctrl+C twice   Exit"),
-		tui.Text(""),
 	)
+
+	if a.screenMode {
+		views = append(views,
+			tui.Text(""),
+			tui.Text("Selecting:").Bold(),
+			tui.Text("  %-15s%s", "drag", "Select and copy"),
+			tui.Text("  %-15s%s", "double-click", "Select a word · triple-click selects the line"),
+			tui.Text("  %-15s%s", "click a tool", "Expand or collapse its output"),
+			tui.Text("  %-15s%s", nativeSelectionModifier()+"+drag", "Select with your terminal instead of the app"),
+			tui.Text("  %-15s%s", "/mouse", "Hand selection back to the terminal for good"),
+		)
+	}
+
+	views = append(views, tui.Text(""))
 
 	a.appendReport(tui.Stack(views...))
 }
@@ -2920,7 +2989,7 @@ func fuzzyMatch(pattern, text string) int {
 // getCommandMatches returns slash commands matching the prefix for autocomplete
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
-	builtins := []string{"clear", "compact", "context", "cost", "help", "model", "quit", "todos", "usage"}
+	builtins := []string{"clear", "compact", "context", "copy", "cost", "help", "model", "mouse", "quit", "todos", "usage"}
 
 	var matches []string
 

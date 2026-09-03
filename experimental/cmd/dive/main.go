@@ -155,10 +155,10 @@ func main() {
 			cli.Bool("resume", "r").
 				Default(false).
 				Help("Resume a previous session"),
-			cli.Bool("screen").
+			cli.Bool("inline").
 				Default(false).
-				Env("DIVE_SCREEN").
-				Help("Render the conversation in a managed, scrollable screen instead of terminal scrollback"),
+				Env("DIVE_INLINE").
+				Help("Write the conversation to terminal scrollback instead of the managed, scrollable screen"),
 			cli.Bool("compaction").
 				Default(true).
 				Env("DIVE_COMPACTION").
@@ -441,10 +441,13 @@ func runInteractive(ctx *cli.Context) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to read startup instructions: %v\n", err)
 	}
 	app.startupAttachment = attachment
-	app.screenMode = ctx.Bool("screen")
+	app.screenMode = !ctx.Bool("inline")
 	// DIVE_DEBUG_FRAMES=1 puts the per-frame cost in the status line. Only the
 	// managed screen has frames to measure.
 	app.frameMetrics = app.screenMode && os.Getenv("DIVE_DEBUG_FRAMES") == "1"
+	// Copy as soon as a drag ends, the way a terminal does. Off, the highlight
+	// waits for /copy or Ctrl+C.
+	app.copyOnSelect = os.Getenv("DIVE_COPY_ON_SELECT") != "0"
 
 	// Wire up dialog and monitor notifier
 	tuiDialog.app = app
