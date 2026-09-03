@@ -11,13 +11,32 @@ import (
 	"github.com/deepnoodle-ai/dive/permission"
 )
 
-// Settings represents the Dive project settings loaded from .dive/settings.json.
+var userSettingsRoot = os.UserHomeDir
+
+// Settings represents Dive settings.
+//
+// Three tiers merge into one effective value, later tiers winning per key:
+// ~/.dive/settings.json (user) < .dive/settings.json (project base) <
+// .dive/settings.local.json (local overrides). This mirrors Claude Code's
+// settings semantics. Only Model, ThinkingEffort, ShowThinking, and
+// ShowDetailedUsage are honored from the user tier today; Permissions and
+// Sandbox continue to come from the project tiers.
 // This mirrors the format used by Claude Code's .claude/settings.local.json.
 type Settings struct {
 	// Permissions contains allow and deny lists for tool operations.
 	Permissions SettingsPermissions `json:"permissions"`
 	// Sandbox contains sandboxing configuration.
 	Sandbox *sandbox.Config `json:"sandbox,omitempty"`
+	// Model is the default model ID (e.g. "claude-opus-4-6").
+	Model *string `json:"model,omitempty"`
+	// ThinkingEffort is the default reasoning effort (none, minimal, low,
+	// medium, high, xhigh, max, or a provider-specific value).
+	ThinkingEffort *string `json:"thinking_effort,omitempty"`
+	// ShowThinking requests summarized model thinking when supported.
+	ShowThinking *bool `json:"show_thinking,omitempty"`
+	// ShowDetailedUsage renders the full token breakdown under the status
+	// line. By default only the session total cost is shown inline.
+	ShowDetailedUsage *bool `json:"show_detailed_usage,omitempty"`
 }
 
 // SettingsPermissions contains permission rules in Claude Code format.
@@ -36,10 +55,9 @@ type SettingsPermissions struct {
 }
 
 // LoadSettings loads settings from the .dive directory in the given directory.
-// Both settings.json (the project base) and settings.local.json (user-specific
-// overrides) are read when present and merged, mirroring Claude Code
-// semantics: settings.local.json overrides settings.json rather than
-// replacing it wholesale.
+// Project tiers only (.dive/settings.json + .dive/settings.local.json); see
+// LoadEffectiveSettings for the user tier as well. Kept hermetic so tests
+// never touch the real home directory.
 //
 // Merge rules, applied recursively to the raw JSON documents:
 //   - Objects/maps merge per key, with the local value winning on conflict.
@@ -54,7 +72,6 @@ type SettingsPermissions struct {
 // If neither file exists, returns an empty Settings with no error.
 func LoadSettings(dir string) (*Settings, error) {
 	diveDir := filepath.Join(dir, ".dive")
-
 	base, err := readSettingsMap(filepath.Join(diveDir, "settings.json"))
 	if err != nil {
 		return nil, err
@@ -63,12 +80,13 @@ func LoadSettings(dir string) (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
+	return unmarshalSettings(mergeSettingsMaps(base, local))
+}
 
-	merged := mergeSettingsMaps(base, local)
+func unmarshalSettings(merged map[string]any) (*Settings, error) {
 	if merged == nil {
 		return &Settings{}, nil
 	}
-
 	data, err := json.Marshal(merged)
 	if err != nil {
 		return nil, err
@@ -78,6 +96,138 @@ func LoadSettings(dir string) (*Settings, error) {
 		return nil, err
 	}
 	return &settings, nil
+}
+
+// LoadEffectiveSettings merges the user tier (~/.dive/settings.json) with the
+// project tiers (.dive/settings.json, .dive/settings.local.json). Later tiers
+// win per key using mergeSettingsMaps. A project dir of "" skips the project
+// tiers, returning the user settings alone.
+func LoadEffectiveSettings(dir string) (*Settings, error) {
+	userPath, err := UserSettingsPath()
+	if err != nil {
+		return nil, err
+	}
+	user, err := readSettingsMap(userPath)
+	if err != nil {
+		return nil, err
+	}
+	// The global file currently owns only CLI presentation/model defaults.
+	// Keep project security settings project-scoped until the permission and
+	// sandbox loaders deliberately support a global trust tier.
+	user = filterUserSettings(user)
+	var base, local map[string]any
+	if dir != "" {
+		diveDir := filepath.Join(dir, ".dive")
+		base, err = readSettingsMap(filepath.Join(diveDir, "settings.json"))
+		if err != nil {
+			return nil, err
+		}
+		local, err = readSettingsMap(filepath.Join(diveDir, "settings.local.json"))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	merged := mergeSettingsMaps(user, base)
+	merged = mergeSettingsMaps(merged, local)
+	return unmarshalSettings(merged)
+}
+
+func filterUserSettings(user map[string]any) map[string]any {
+	if user == nil {
+		return nil
+	}
+	filtered := make(map[string]any, 4)
+	for _, key := range []string{"model", "thinking_effort", "show_thinking", "show_detailed_usage"} {
+		if value, ok := user[key]; ok {
+			filtered[key] = value
+		}
+	}
+	return filtered
+}
+
+// UserSettingsPath returns the global user settings path (~/.dive/settings.json).
+func UserSettingsPath() (string, error) {
+	home, err := userSettingsRoot()
+	if err != nil {
+		return "", fmt.Errorf("settings: find home directory: %w", err)
+	}
+	return filepath.Join(home, ".dive", "settings.json"), nil
+}
+
+// SetUserSettingsRootForTesting overrides the root used by UserSettingsPath
+// and returns a function that restores the previous resolver. It exists so
+// tests in importing packages can isolate settings writes without depending on
+// whether the host platform uses HOME, USERPROFILE, or another home variable.
+// Tests using this process-wide hook must not run in parallel.
+func SetUserSettingsRootForTesting(root string) func() {
+	previous := userSettingsRoot
+	userSettingsRoot = func() (string, error) { return root, nil }
+	return func() { userSettingsRoot = previous }
+}
+
+// SaveUserSettings persists user-tier defaults (model, thinking_effort,
+// show_thinking, show_detailed_usage) to ~/.dive/settings.json. Nil fields are
+// left untouched; non-nil fields overwrite. Unknown keys already in the file
+// are preserved.
+func SaveUserSettings(update *Settings) error {
+	if update == nil {
+		return fmt.Errorf("settings: update must not be nil")
+	}
+	path, err := UserSettingsPath()
+	if err != nil {
+		return err
+	}
+	existing, err := readSettingsMap(path)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		existing = make(map[string]any)
+	}
+	if update.Model != nil {
+		existing["model"] = *update.Model
+	}
+	if update.ThinkingEffort != nil {
+		existing["thinking_effort"] = *update.ThinkingEffort
+	}
+	if update.ShowThinking != nil {
+		existing["show_thinking"] = *update.ShowThinking
+	}
+	if update.ShowDetailedUsage != nil {
+		existing["show_detailed_usage"] = *update.ShowDetailedUsage
+	}
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return fmt.Errorf("settings: encode %s: %w", path, err)
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("settings: create directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "settings.json.tmp-*")
+	if err != nil {
+		return fmt.Errorf("settings: create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("settings: write %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("settings: close %s: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("settings: save %s: %w", path, err)
+	}
+	committed = true
+	return nil
 }
 
 // readSettingsMap reads a settings file into a generic JSON map. Returns

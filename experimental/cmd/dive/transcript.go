@@ -16,7 +16,7 @@ const (
 	roleReasoning = "reasoning" // streamed thinking
 	roleSystem    = "system"    // errors, shown in the warning style
 	roleContext   = "context"   // input the app injected on the user's behalf
-	roleIntro     = "intro"     // the splash box
+	roleIntro     = "intro"     // the startup header
 	roleNotice    = "notice"    // a dim one-liner (warnings, status, hints)
 	roleReport    = "report"    // a pre-built view (/usage, /help, /todos, /context)
 )

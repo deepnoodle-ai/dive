@@ -97,17 +97,20 @@ func (a *App) footerView() tui.View {
 
 	// Tell the user what they are not looking at, and how to get back to it.
 	if !a.viewport.AtBottom && a.viewport.LinesBelow > 0 {
-		views = append(views, tui.Group(
-			tui.Text(" ↓ %d new line%s", a.viewport.LinesBelow, pluralSuffix(a.viewport.LinesBelow)).
-				Style(tui.NewStyle().WithFgRGB(accentDim)),
-			tui.Text(" · End to jump to the latest").Style(hintStyle()),
-		))
+		views = append(views,
+			tui.Text(""),
+			tui.Group(
+				tui.Text(" ↓ %d new line%s", a.viewport.LinesBelow, pluralSuffix(a.viewport.LinesBelow)).
+					Style(tui.NewStyle().WithFgRGB(accentDim)),
+				tui.Text(" · End to jump to the latest").Style(hintStyle()),
+			),
+		)
 	}
 
 	// The spinner's slot, and what takes its place once the turn is done. Both
 	// get a blank line above and below: this sits between the transcript and the
 	// input box, and without them it crowds both.
-	if a.processing {
+	if a.processing || a.compacting {
 		if live := a.buildLiveView(false); live != nil {
 			views = append(views, tui.Text(""), live, tui.Text(""))
 		}
@@ -394,9 +397,9 @@ func (a *App) inViewport(x, y int) bool {
 // two coordinate systems because the two targets live in different ones: the
 // transcript's are the viewport's, the scroll indicator's are the screen's.
 func (a *App) handleScreenClick(screenY, x, y int) {
-	// The indicator is the footer's first row, and saying "N new lines below"
-	// while not being a way to reach them would be a poor joke.
-	if !a.viewport.AtBottom && a.viewport.LinesBelow > 0 && screenY == a.viewport.Height {
+	// The indicator follows its blank spacer in the footer, and saying "N new
+	// lines below" while not being a way to reach them would be a poor joke.
+	if !a.viewport.AtBottom && a.viewport.LinesBelow > 0 && screenY == a.viewport.Height+1 {
 		a.viewport.ScrollToBottom()
 		return
 	}
@@ -485,7 +488,19 @@ func (a *App) copyToClipboard(text string) {
 // It stands until the next turn starts. A long turn is often left running while
 // the user is elsewhere, and coming back to a blank space answers neither "is it
 // finished?" nor "how long was I gone?".
+//
+// A fresh compaction takes the slot instead: the scrollback holds the full
+// notice, and this is the at-a-glance confirmation. The next turn reclaims it.
 func (a *App) turnSummaryView() tui.View {
+	if a.showCompactionSummary && a.lastCompactionEvent != nil {
+		return tui.Group(
+			tui.Text(" ⚡").Style(warningStyle()),
+			tui.Text(" Compacted ~%d → ~%d tokens",
+				a.lastCompactionEvent.TokensBefore,
+				a.lastCompactionEvent.TokensAfter).Style(hintStyle()),
+			tui.Text(" · done %s", a.compactionEventTime.Format("3:04 PM")).Style(hintStyle()),
+		)
+	}
 	if a.lastTurnEndedAt.IsZero() {
 		return nil
 	}

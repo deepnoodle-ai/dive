@@ -68,6 +68,28 @@ func TestEncodeToolResultErrorKeepsTextForm(t *testing.T) {
 	assert.Contains(t, string(data), `"output":"Error: boom\n\n[image content omitted]"`)
 }
 
+// TestEncodeToolResultExplicitErrorEnvelopePreserved verifies self-describing
+// error output is not changed on its way to a Responses API model.
+func TestEncodeToolResultExplicitErrorEnvelopePreserved(t *testing.T) {
+	const output = "<error>Exit code 3\nhello stdout\nhello stderr</error>"
+	items, err := encodeMessages([]*llm.Message{
+		llm.NewToolResultMessage(&llm.ToolResultContent{
+			ToolUseID: "call_1",
+			IsError:   true,
+			Content: []*dive.ToolResultContent{
+				{Type: dive.ToolResultContentTypeText, Text: output},
+			},
+		}),
+	})
+	assert.NoError(t, err)
+	data, err := json.Marshal(items)
+	assert.NoError(t, err)
+	var decoded []map[string]any
+	assert.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Len(t, decoded, 1)
+	assert.Equal(t, output, decoded[0]["output"])
+}
+
 // TestEncodeToolResultEmptyOutput verifies a tool result with nothing to
 // render produces an explicit placeholder rather than an empty output string.
 func TestEncodeToolResultEmptyOutput(t *testing.T) {

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **The CLI remembers model, thinking effort, thinking display, and usage detail in `~/.dive/settings.json`.** Resolution is flag > env > settings file > default; `/model`, `/effort`, `/thinking`, and `/usage full|brief` switch mid-session and persist, `/status` shows the effective configuration, and the status line always shows model and effort.
+- **The CLI status line is one row by default.** Model, effort, directory, branch, context %, and session total cost share a line; the token breakdown table only renders inline with `show_detailed_usage` (`--show-detailed-usage` / `/usage full`), while `/usage` still shows the full report on demand.
 - **The CLI renders the conversation in a managed, scrollable screen.** The
   transcript reflows on resize and scrolls with the wheel, PgUp/PgDn,
   Ctrl+Home/End, and Home/End.
@@ -43,6 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **The CLI now uses one cohesive terminal color system.** Markdown, dialogs, inputs, tools, todos, usage reports, and progress states share brighter ocean-cyan accents and cool slate neutrals; periwinkle marks literals, while amber, green, and red are reserved for warning, success, and failure. Wonton v0.2.1 supplies explicit input-text styling.
+- **The CLI startup display is now compact three-line text.** Version, model with thinking effort, and workspace replace the bordered field list; exceptional scope, context, and resume details remain beneath it.
+- **The Bash tool now returns one plain-text stdout/stderr stream in emission order.** Successful output is unwrapped (including an empty string); nonzero exits use `<error>Exit code N\n…</error>`, and combined-output truncation always carries a marker. Each call remains a fresh shell: cwd, environment, options, and exit status reset, while filesystem changes persist.
 - **BREAKING: the managed screen is the CLI's default.** `--screen` and
   `DIVE_SCREEN` are gone; `--inline` (or `DIVE_INLINE=1`) selects the old
   renderer. `dive < file` and `dive | cat` are now refused, pointing at `--print`.
@@ -54,11 +59,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **CLI history navigation no longer gets trapped by recalled slash commands.** Command and file autocomplete stay closed while browsing history, edits return the recalled entry to normal completion behavior, and all autocomplete matches remain reachable through an eight-row sliding window.
+- **CLI model switches now update downstream work, not just the status label.** Newly spawned subagents inherit the current model, effort, and thinking settings; compaction uses the switched model and recalculates automatic thresholds while preserving explicit thresholds.
+- **The CLI footer keeps one explicit blank row below the status line instead of two.** Multiline user messages also trim pasted trailing spaces and tabs for display without changing the content sent to the model.
 - **The `--resume` session picker is one line per session.** The workspace path
   moves under the list, empty sessions are dropped, and long titles are cut on
   whole characters rather than mid-rune.
 - **Dim text in the CLI is readable on a dark background.** Secondary greys and
   hints sat near 2.9:1 contrast.
+- **`/compact` no longer freezes the UI.** The summarizer runs in the background
+  with a compacting spinner; input for new turns is held until it finishes. The
+  result shows as a scrollback notice and in the turn-summary slot, replacing
+  the footer stats.
 - **`/clear` no longer panics without a session store.**
 - **Encrypted reasoning is requested whenever the model reasons** — the
   `reasoning.encrypted_content` include was sent only when the caller named a

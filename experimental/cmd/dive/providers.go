@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
@@ -51,4 +52,21 @@ func grokServerSideTools(modelName string) []dive.Tool {
 		tools = append(tools, xs)
 	}
 	return tools
+}
+
+// providerServerToolset resolves provider-native tools for the current model
+// before every request. The tool instances are cached; only their visibility
+// changes. This keeps /model switches from retaining tools that the new
+// provider cannot accept or omitting tools that it supports.
+func providerServerToolset(modelName func() string) dive.Toolset {
+	grokTools := grokServerSideTools("grok-")
+	return &dive.ToolsetFunc{
+		ToolsetName: "provider-server-tools",
+		Resolve: func(context.Context) ([]dive.Tool, error) {
+			if modelName != nil && strings.HasPrefix(modelName(), "grok-") {
+				return grokTools, nil
+			}
+			return nil, nil
+		},
+	}
 }

@@ -350,7 +350,7 @@ func TestClickingTheScrollIndicatorJumpsToTheBottom(t *testing.T) {
 	renderScreen(t, app, 80, 24)
 	assert.False(t, app.viewport.AtBottom, "scrolled up, so the indicator is showing")
 
-	click(app, 4, app.viewport.Height, 1)
+	click(app, 4, app.viewport.Height+1, 1)
 	assert.True(t, app.viewport.AtBottom, "the indicator is also the way back")
 }
 

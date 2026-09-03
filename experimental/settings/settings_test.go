@@ -3,11 +3,20 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
+
+func useTestUserSettingsRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	restore := SetUserSettingsRootForTesting(root)
+	t.Cleanup(restore)
+	return root
+}
 
 func TestLoadSettings(t *testing.T) {
 	t.Run("returns empty settings when file doesn't exist", func(t *testing.T) {
@@ -285,3 +294,112 @@ func TestMatchPath(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveUserSettingsRoundTrip(t *testing.T) {
+	root := useTestUserSettingsRoot(t)
+
+	assert.NoError(t, SaveUserSettings(&Settings{
+		Model:             strPtr("claude-opus-4-6"),
+		ThinkingEffort:    strPtr("high"),
+		ShowThinking:      boolPtr(true),
+		ShowDetailedUsage: boolPtr(false),
+	}))
+
+	eff, err := LoadEffectiveSettings("")
+	assert.NoError(t, err)
+	assert.NotNil(t, eff.Model)
+	assert.Equal(t, "claude-opus-4-6", *eff.Model)
+	assert.NotNil(t, eff.ThinkingEffort)
+	assert.Equal(t, "high", *eff.ThinkingEffort)
+	assert.NotNil(t, eff.ShowThinking)
+	assert.True(t, *eff.ShowThinking)
+	assert.NotNil(t, eff.ShowDetailedUsage)
+	assert.False(t, *eff.ShowDetailedUsage)
+
+	path, err := UserSettingsPath()
+	assert.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, ".dive", "settings.json"), path)
+	info, err := os.Stat(path)
+	assert.NoError(t, err)
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
+}
+
+func TestSaveUserSettingsRejectsNilUpdate(t *testing.T) {
+	assert.Error(t, SaveUserSettings(nil))
+}
+
+func TestSaveUserSettingsPreservesUnrelatedKeys(t *testing.T) {
+	useTestUserSettingsRoot(t)
+
+	path, err := UserSettingsPath()
+	assert.NoError(t, err)
+	assert.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	assert.NoError(t, os.WriteFile(path, []byte(`{"model":"old","custom":{"keep":true}}`), 0o644))
+
+	assert.NoError(t, SaveUserSettings(&Settings{ThinkingEffort: strPtr("low")}))
+
+	eff, err := LoadEffectiveSettings("")
+	assert.NoError(t, err)
+	assert.Equal(t, "old", *eff.Model)
+	assert.Equal(t, "low", *eff.ThinkingEffort)
+
+	// Unknown keys survive the rewrite.
+	data, err := os.ReadFile(path)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"keep"`)
+}
+
+func TestLoadEffectiveSettingsProjectOverridesUser(t *testing.T) {
+	useTestUserSettingsRoot(t)
+	assert.NoError(t, SaveUserSettings(&Settings{
+		Model:          strPtr("user-model"),
+		ThinkingEffort: strPtr("low"),
+	}))
+
+	project := t.TempDir()
+	diveDir := filepath.Join(project, ".dive")
+	assert.NoError(t, os.Mkdir(diveDir, 0o755))
+	assert.NoError(t, os.WriteFile(
+		filepath.Join(diveDir, "settings.json"),
+		[]byte(`{"model":"project-model"}`), 0o644))
+
+	eff, err := LoadEffectiveSettings(project)
+	assert.NoError(t, err)
+	assert.Equal(t, "project-model", *eff.Model)
+	assert.Equal(t, "low", *eff.ThinkingEffort)
+}
+
+func TestLoadEffectiveSettingsKeepsSecurityConfigurationProjectScoped(t *testing.T) {
+	useTestUserSettingsRoot(t)
+	userPath, err := UserSettingsPath()
+	assert.NoError(t, err)
+	assert.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o700))
+	assert.NoError(t, os.WriteFile(userPath, []byte(`{
+  "model": "user-model",
+  "permissions": {"allow": ["Bash(*)"]},
+  "sandbox": {"enabled": false}
+}`), 0o600))
+
+	project := t.TempDir()
+	diveDir := filepath.Join(project, ".dive")
+	assert.NoError(t, os.Mkdir(diveDir, 0o755))
+	assert.NoError(t, os.WriteFile(
+		filepath.Join(diveDir, "settings.json"),
+		[]byte(`{"permissions":{"deny":["Bash(rm:*)"]},"sandbox":{"enabled":true}}`),
+		0o644,
+	))
+
+	eff, err := LoadEffectiveSettings(project)
+	assert.NoError(t, err)
+	assert.Equal(t, "user-model", *eff.Model)
+	assert.Empty(t, eff.Permissions.Allow)
+	assert.Equal(t, []string{"Bash(rm:*)"}, eff.Permissions.Deny)
+	assert.NotNil(t, eff.Sandbox)
+	assert.True(t, eff.Sandbox.Enabled)
+}
+
+func strPtr(s string) *string { return &s }
+
+func boolPtr(b bool) *bool { return &b }

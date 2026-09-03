@@ -3,10 +3,14 @@ package toolkit
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -20,6 +24,14 @@ func TestBashTool_Description(t *testing.T) {
 	desc := tool.Description()
 	assert.Contains(t, desc, "Execute shell commands")
 	assert.Contains(t, desc, runtime.GOOS)
+	assert.Contains(t, desc, "do not persist between calls")
+	assert.Contains(t, desc, "Filesystem and other external changes")
+	if runtime.GOOS == "windows" {
+		assert.Contains(t, desc, "cmd /C")
+	} else {
+		assert.Contains(t, desc, "/bin/bash -c")
+		assert.NotContains(t, desc, "zsh")
+	}
 }
 
 func TestBashTool_Schema(t *testing.T) {
@@ -99,8 +111,8 @@ func TestBashTool_Call_SimpleCommand(t *testing.T) {
 	result, err := tool.Call(ctx, &BashInput{Command: "echo hello"})
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "hello")
-	assert.Contains(t, result.Content[0].Text, "return_code")
+	assert.Equal(t, "hello\n", result.Content[0].Text)
+	assert.Empty(t, result.Display)
 }
 
 func TestBashTool_Call_CommandWithExitCode(t *testing.T) {
@@ -115,13 +127,13 @@ func TestBashTool_Call_CommandWithExitCode(t *testing.T) {
 	result, err := tool.Call(ctx, &BashInput{Command: "true"})
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, `"return_code":0`)
+	assert.Equal(t, "", result.Content[0].Text)
 
 	// Test failing command
 	result, err = tool.Call(ctx, &BashInput{Command: "false"})
 	assert.NoError(t, err)
 	assert.True(t, result.IsError) // Non-zero exit code is an error
-	assert.Contains(t, result.Content[0].Text, `"return_code":1`)
+	assert.Equal(t, "<error>Exit code 1\n</error>", result.Content[0].Text)
 }
 
 func TestBashTool_Call_WorkingDirectory(t *testing.T) {
@@ -145,6 +157,33 @@ func TestBashTool_Call_WorkingDirectory(t *testing.T) {
 	assert.Contains(t, result.Content[0].Text, tempDir)
 }
 
+func TestBashTool_Call_ShellStateDoesNotPersist(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	baseline, err := os.Getwd()
+	assert.NoError(t, err)
+	temporaryDir := t.TempDir()
+	quotedTemporaryDir := "'" + strings.ReplaceAll(temporaryDir, "'", "'\"'\"'") + "'"
+	tool := NewBashTool(BashToolOptions{WorkspaceDir: string(filepath.Separator)})
+	ctx := context.Background()
+
+	result, err := tool.Call(ctx, &BashInput{
+		Command: "cd " + quotedTemporaryDir + " && pwd && export DIVE_BASH_STATE_TEST=value && false",
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, temporaryDir)
+
+	result, err = tool.Call(ctx, &BashInput{
+		Command: `printf 'status=%s\n' "$?"; pwd; printf 'env=%s\n' "${DIVE_BASH_STATE_TEST-unset}"`,
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Equal(t, "status=0\n"+baseline+"\nenv=unset\n", result.Content[0].Text)
+}
+
 func TestBashTool_Call_Stderr(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping on Windows - bash not available")
@@ -157,8 +196,7 @@ func TestBashTool_Call_Stderr(t *testing.T) {
 	result, err := tool.Call(ctx, &BashInput{Command: "echo error >&2"})
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "stderr")
-	assert.Contains(t, result.Content[0].Text, "error")
+	assert.Equal(t, "error\n", result.Content[0].Text)
 }
 
 func TestBashTool_Call_WithDescription(t *testing.T) {
@@ -175,8 +213,122 @@ func TestBashTool_Call_WithDescription(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
-	assert.Contains(t, result.Display, "Print greeting")
-	assert.Contains(t, result.Display, "exit 0")
+	assert.Equal(t, "hello\n", result.Content[0].Text)
+	assert.Empty(t, result.Display)
+}
+
+func TestBashTool_Call_InterleavesStdoutAndStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	tool := NewBashTool()
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "printf 'out 1\\n'; printf 'err 1\\n' >&2; printf 'out 2\\n'; printf 'err 2\\n' >&2",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Equal(t, "out 1\nerr 1\nout 2\nerr 2\n", result.Content[0].Text)
+}
+
+func TestBashTool_Call_FailureWrapsMergedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	tool := NewBashTool()
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "printf 'hello stdout\\n'; printf 'hello stderr' >&2; exit 3",
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Equal(t,
+		"<error>Exit code 3\nhello stdout\nhello stderr</error>",
+		result.Content[0].Text,
+	)
+}
+
+func TestBashTool_Call_StreamsMergedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	var streamed strings.Builder
+	var progressCalls int
+	ctx := dive.WithToolStreamFunc(context.Background(), func(_ string, text string) {
+		streamed.WriteString(text)
+	})
+	ctx = dive.WithToolProgressFunc(ctx, func(_ string, _ *dive.ToolProgress) {
+		progressCalls++
+	})
+	tool := NewBashTool()
+	result, err := tool.Call(ctx, &BashInput{
+		Command: "printf 'out\\n'; printf 'err\\n' >&2",
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, result.Content[0].Text, streamed.String())
+	assert.Equal(t, "out\nerr\n", streamed.String())
+	assert.Equal(t, 0, progressCalls, "Bash should expose only the text stream, not structured progress metadata")
+}
+
+func TestBashTool_Call_TruncatesCombinedOutputOnce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	tool := NewBashTool(BashToolOptions{MaxOutputLength: 8})
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "printf '12345'; printf '67890' >&2",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Equal(t, "12345678\n... (output truncated)", result.Content[0].Text)
+}
+
+func TestBashTool_Call_DrainsOutputAfterCaptureLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	tool := NewBashTool(BashToolOptions{MaxOutputLength: 64})
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "for ((i=0; i<20000; i++)); do printf x; done",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Equal(t, 64+len(outputTruncationMarker), len(result.Content[0].Text))
+	assert.Equal(t, 1, strings.Count(result.Content[0].Text, outputTruncationMarker))
+}
+
+func TestBashTool_Call_TimeoutTerminatesDescendantsHoldingOutputPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix process-group behavior")
+	}
+
+	tool := NewBashTool()
+	started := time.Now()
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "sleep 30 &",
+		Timeout: 100,
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Less(t, time.Since(started), 2*time.Second,
+		"an inherited output pipe must not delay timeout handling")
+}
+
+func TestBoundedOutputRetainsOnlyConfiguredLimit(t *testing.T) {
+	output := boundedOutput{limit: 8}
+
+	n, err := output.Write([]byte("12345"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n)
+	n, err = output.Write([]byte("67890"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n, "discarded bytes are still consumed from the pipe")
+	assert.Equal(t, 8, output.buf.Len())
+	assert.Equal(t, "12345678"+outputTruncationMarker, output.String())
+	assert.Equal(t, 1, strings.Count(output.String(), outputTruncationMarker))
 }
 
 func TestBashTool_Call_Timeout(t *testing.T) {
@@ -194,8 +346,8 @@ func TestBashTool_Call_Timeout(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, result.IsError)
-	// Timeout results in exit code -1 due to signal
-	assert.Contains(t, result.Content[0].Text, `"return_code":-1`)
+	// Timeout kills the command, whose numeric signal exit is -1.
+	assert.Contains(t, result.Content[0].Text, "<error>Exit code -1\n")
 }
 
 func TestTruncateCommand(t *testing.T) {
@@ -261,7 +413,7 @@ func TestBashTool_Call_ReturnsWorkspaceConfigErrorWhenValidatorMissing(t *testin
 	assert.Contains(t, result.Content[0].Text, "path validator is not initialized")
 }
 
-func TestBashTool_Call_LongLineSurfacesError(t *testing.T) {
+func TestBashTool_Call_LongLineIsMarkedAsTruncated(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping on Windows - bash not available")
 	}
@@ -269,13 +421,13 @@ func TestBashTool_Call_LongLineSurfacesError(t *testing.T) {
 	tool := NewBashTool()
 	ctx := context.Background()
 
-	// Produce a single line larger than the 1 MB scanner buffer. Previously
-	// the scan error was ignored, silently truncating output while reporting
-	// success; now the error must be surfaced.
+	// Chunked reads preserve non-newline output and apply the normal marked
+	// truncation policy; there is no scanner line limit.
 	result, err := tool.Call(ctx, &BashInput{
 		Command: "head -c 2000000 /dev/zero | tr '\\0' 'a'",
 	})
 	assert.NoError(t, err)
-	assert.True(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "error reading command output")
+	assert.False(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "... (output truncated)")
+	assert.LessOrEqual(t, len(result.Content[0].Text), DefaultMaxOutputLength+40)
 }

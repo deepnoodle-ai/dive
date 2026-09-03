@@ -82,14 +82,21 @@ func TestScreenFrameLayout(t *testing.T) {
 		"",
 		"",
 		"",
+		"",
 		strings.Repeat("─", 60),
-		" ❯  Type a message... (@filename, or drop a file to attach)",
+		"❯ Type a message... (@filename, or drop a file to attach)",
 		strings.Repeat("─", 60),
 		" test-model in test on main",
+		"",
 	}
 	for y, row := range want {
 		assert.Equal(t, row, strings.TrimRight(screen.Row(y), " "), "row %d", y)
 	}
+	assert.Equal(t, 14, len(want), "the golden must cover the complete frame")
+	assert.Equal(t, " test-model in test on main", strings.TrimRight(screen.Row(12), " "),
+		"the status row should sit above the explicit footer row")
+	assert.Equal(t, "", strings.TrimRight(screen.Row(13), " "),
+		"the explicit footer row should remain blank")
 }
 
 func TestScreenIndicatesWhatIsBelowWhenScrolledUp(t *testing.T) {
@@ -103,6 +110,9 @@ func TestScreenIndicatesWhatIsBelowWhenScrolledUp(t *testing.T) {
 	assert.True(t, app.viewport.LinesBelow > 0)
 	assert.Contains(t, screen.Text(), "new line")
 	assert.Contains(t, screen.Text(), "End to jump")
+	assert.Empty(t, strings.TrimSpace(screen.Row(app.viewport.Height)),
+		"the scroll indicator should always have a blank row above it")
+	assert.Contains(t, screen.Row(app.viewport.Height+1), "new line")
 
 	// And it goes away once the user is back at the end.
 	app.viewport.ScrollToBottom()
@@ -198,8 +208,9 @@ func TestWheelScrollsOneLine(t *testing.T) {
 	assert.True(t, app.viewport.AtBottom)
 
 	// Read the position straight after each event rather than re-rendering
-	// between them: the "N new lines" row appears as soon as the transcript is
-	// scrolled and costs the viewport a line, which would move the end.
+	// between them: the "N new lines" row and its spacer appear as soon as the
+	// transcript is scrolled and cost the viewport two lines, which would move
+	// the end.
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelUp})
 	assert.Equal(t, 1, app.viewport.LinesBelow, "one notch is one line")
 	app.HandleEvent(tui.MouseEvent{Type: tui.MouseScroll, Button: tui.MouseButtonWheelUp})

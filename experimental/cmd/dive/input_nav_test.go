@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
@@ -34,6 +35,39 @@ func TestHandleInputNavKey_HistoryRecall(t *testing.T) {
 	assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowDown}))
 	assert.Equal(t, "", a.inputText)
 	assert.Equal(t, -1, a.historyIndex)
+}
+
+func TestHandleInputNavKey_SlashCommandHistoryDoesNotOpenAutocomplete(t *testing.T) {
+	a := newTestApp()
+	a.history = []string{"/help", "latest prompt"}
+
+	assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowUp}))
+	a.updateAutocomplete() // input OnKey does this after history navigation
+	assert.Equal(t, "latest prompt", a.inputText)
+	assert.Empty(t, a.autocompleteMatches)
+
+	assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowUp}))
+	a.updateAutocomplete()
+	assert.Equal(t, "/help", a.inputText)
+	assert.Empty(t, a.autocompleteMatches, "recalled commands must not steal arrows from history")
+
+	assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowDown}))
+	assert.Equal(t, "latest prompt", a.inputText)
+}
+
+func TestEditingRecalledCommandLeavesHistoryAndEnablesAutocomplete(t *testing.T) {
+	a := newTestApp()
+	a.history = []string{"/help"}
+
+	assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowUp}))
+	a.updateAutocomplete()
+	assert.Empty(t, a.autocompleteMatches)
+
+	a.inputText = "/he"
+	a.handleInputChange(a.inputText)
+	a.updateAutocomplete()
+	assert.Equal(t, -1, a.historyIndex)
+	assert.Contains(t, a.autocompleteMatches, "help")
 }
 
 func TestHandleInputNavKey_PassthroughWhenNoHistory(t *testing.T) {
@@ -92,4 +126,37 @@ func TestHandleInputNavKey_AutocompleteTakesPrecedenceOverHistory(t *testing.T) 
 	assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowDown}))
 	assert.Equal(t, 1, a.autocompleteIndex)
 	assert.Equal(t, "", a.inputText)
+}
+
+func TestCommandAutocompleteNavigatesBeyondFirstWindow(t *testing.T) {
+	a := newTestApp()
+	a.inputText = "/"
+	a.updateAutocomplete()
+	assert.True(t, len(a.autocompleteMatches) > autocompleteWindowSize)
+
+	for range autocompleteWindowSize {
+		assert.True(t, a.handleInputNavKey(tui.KeyEvent{Key: tui.KeyArrowDown}))
+	}
+	assert.Equal(t, autocompleteWindowSize, a.autocompleteIndex)
+	selected := a.autocompleteMatches[a.autocompleteIndex]
+
+	var rendered bytes.Buffer
+	tui.Fprint(&rendered, tui.Stack(a.inputAreaView()...), tui.WithWidth(80))
+	assert.Contains(t, rendered.String(), "(9/")
+	assert.Contains(t, rendered.String(), "/"+selected)
+	assert.NotContains(t, rendered.String(), "/"+a.autocompleteMatches[0], "the completion window should follow the selection")
+}
+
+func TestAutocompleteWindowFollowsSelection(t *testing.T) {
+	start, end := autocompleteWindow(15, 0)
+	assert.Equal(t, 0, start)
+	assert.Equal(t, 8, end)
+
+	start, end = autocompleteWindow(15, 8)
+	assert.Equal(t, 1, start)
+	assert.Equal(t, 9, end)
+
+	start, end = autocompleteWindow(15, 14)
+	assert.Equal(t, 7, start)
+	assert.Equal(t, 15, end)
 }
