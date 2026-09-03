@@ -2306,6 +2306,12 @@ func (a *App) convertLLMMessage(msg *llm.Message, toolResults map[string]*llm.To
 				if resultText != "" {
 					appMsg.ToolResultLines = strings.Split(resultText, "\n")
 					appMsg.ToolResult = appMsg.ToolResultLines[0]
+					// A Read that ran live collapses to "Read N lines" instead of
+					// the file's first line. A replayed one has to say the same,
+					// or resuming a session rewrites what it looked like.
+					if !appMsg.ToolError && strings.EqualFold(c.Name, "read") {
+						appMsg.ToolReadLines = strings.Count(resultText, "\n") + 1
+					}
 				}
 			}
 			out = append(out, appMsg)

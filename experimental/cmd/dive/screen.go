@@ -592,8 +592,11 @@ func (a *App) appendSessionHistory() {
 	if err != nil {
 		return
 	}
+	// Indexed once: the index covers the whole conversation, so rebuilding it per
+	// message walked every message again for the same answer.
+	toolResults := toolResultsByID(sessionMsgs)
 	for _, msg := range sessionMsgs {
-		for _, m := range a.convertLLMMessage(msg, toolResultsByID(sessionMsgs)) {
+		for _, m := range a.convertLLMMessage(msg, toolResults) {
 			a.appendMessage(m)
 		}
 	}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +13,23 @@ import (
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
-const pickerHere = "/Users/curtis/git/deepnoodle/dive"
+// The picker shortens a workspace path against the real home directory, so the
+// fixtures have to sit under whatever that is here. A hard-coded home made the
+// "~" assertions pass on one machine and fail on every other, CI included.
+var (
+	pickerHome      = userHomeForTests()
+	pickerHere      = filepath.Join(pickerHome, "git", "deepnoodle", "dive")
+	pickerElsewhere = filepath.Join(pickerHome, "git", "other", "repo")
+)
+
+func userHomeForTests() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Nothing to shorten against; the assertions that care say so plainly.
+		return ""
+	}
+	return home
+}
 
 func sessionInfo(title, workspace string, turns int, ago time.Duration) *session.SessionInfo {
 	return &session.SessionInfo{
@@ -70,13 +88,13 @@ func TestPickerGivesEachSessionOneLine(t *testing.T) {
 func TestPickerShowsTheSelectedSessionsDirectory(t *testing.T) {
 	p := newPicker(
 		sessionInfo("here", pickerHere, 2, time.Minute),
-		sessionInfo("elsewhere", "/Users/curtis/git/other/repo", 3, time.Hour),
+		sessionInfo("elsewhere", pickerElsewhere, 3, time.Hour),
 	)
 
-	assert.Contains(t, renderPicker(t, p, 80).Text(), "~/git/deepnoodle/dive")
+	assert.Contains(t, renderPicker(t, p, 80).Text(), filepath.Join("~", "git", "deepnoodle", "dive"))
 
 	p.HandleEvent(tui.KeyEvent{Key: tui.KeyArrowDown})
-	assert.Contains(t, renderPicker(t, p, 80).Text(), "~/git/other/repo")
+	assert.Contains(t, renderPicker(t, p, 80).Text(), filepath.Join("~", "git", "other", "repo"))
 }
 
 func TestPickerMetaSurvivesALongTitle(t *testing.T) {

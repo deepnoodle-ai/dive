@@ -35,7 +35,10 @@ func TestWorkspaceBoundaryExplainsNestedGitScope(t *testing.T) {
 	app := NewApp(&dive.Agent{}, nil, nested, "test-model", "", nil, "", nil, "")
 	app.contextDemos = allContextDemos()
 	var output bytes.Buffer
-	tui.Fprint(&output, app.introView(app.messages[app.appendIntro()]), tui.WithWidth(120))
+	// Indexed after the append, not inside it: Go does not specify whether
+	// app.messages is evaluated before or after the call that grows it.
+	intro := app.appendIntro()
+	tui.Fprint(&output, app.introView(app.messages[intro]), tui.WithWidth(120))
 	assert.Contains(t, output.String(), "context: all 5 demos · /context to inspect")
 	assert.Contains(t, output.String(), "scope: directory only · Git root:")
 }

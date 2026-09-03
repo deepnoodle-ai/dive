@@ -550,8 +550,10 @@ func (a *App) formatToolResultView(msg Message, opts viewOpts) tui.View {
 
 	style := toolResultStyle()
 	firstLine := lines[0]
-	if !opts.expanded && len(firstLine) > 80 {
-		firstLine = firstLine[:77] + "..."
+	if !opts.expanded {
+		// Runes, not bytes: a tool result is arbitrary text, and cutting one
+		// mid-character renders a replacement glyph.
+		firstLine = truncateRunes(firstLine, 80)
 	}
 
 	views := make([]tui.View, 0, 4)

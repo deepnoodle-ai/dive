@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/deepnoodle-ai/wonton/clipboard"
 )
@@ -167,10 +169,23 @@ func copyToPrimary(text string) {
 	}
 }
 
+// clipboardToolTimeout bounds a rung of the ladder. Copying runs off the event
+// loop, so a tool that never returns would leak a goroutine per copy and the
+// user would never hear back — and a drag copies on every release.
+const clipboardToolTimeout = 5 * time.Second
+
 // runClipboardTool feeds text to a command's stdin and waits for it.
 func runClipboardTool(name string, args []string, text string) error {
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), clipboardToolTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = strings.NewReader(text)
+	// CombinedOutput waits on the output pipes, not just on the process, and a
+	// clipboard tool that forks to hold the selection — xclip does exactly this
+	// — keeps the inherited pipe open for as long as it owns the clipboard.
+	// WaitDelay bounds that second wait; killing the context alone would not.
+	cmd.WaitDelay = time.Second
 	// A clipboard tool that has something to say is reporting a failure, and
 	// its message is more useful than "exit status 1".
 	out, err := cmd.CombinedOutput()

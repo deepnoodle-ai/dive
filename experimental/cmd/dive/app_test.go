@@ -172,6 +172,46 @@ func TestConvertLLMMessageShowsThinkingContent(t *testing.T) {
 	assert.Contains(t, out, "The final answer.")
 }
 
+// A resumed session has to look like the one it resumed. A Read renders as
+// "Read N lines" while it is live, so replay has to count the lines too rather
+// than falling back to dumping the file's first line.
+func TestReplayingAReadCollapsesItTheWayTheLiveOneDid(t *testing.T) {
+	app, _ := newFakeApp(t)
+	call := &llm.ToolUseContent{ID: "call-1", Name: "Read", Input: []byte(`{"file_path":"a.go"}`)}
+	results := map[string]*llm.ToolResultContent{
+		"call-1": {ToolUseID: "call-1", Content: "package main\n\nfunc main() {}"},
+	}
+
+	msgs := app.convertLLMMessage(&llm.Message{
+		Role: llm.Assistant, Content: []llm.Content{call},
+	}, results)
+
+	assert.Equal(t, len(msgs), 1)
+	assert.Equal(t, msgs[0].ToolReadLines, 3)
+
+	var buf bytes.Buffer
+	tui.Fprint(&buf, app.formatToolResultView(msgs[0], viewOpts{}), tui.WithWidth(80))
+	assert.Contains(t, buf.String(), "Read 3 lines")
+	assert.NotContains(t, buf.String(), "package main", "the file body is not the summary")
+}
+
+// An errored Read has something to say, so it keeps its message rather than
+// being collapsed into a line count of the error text.
+func TestReplayingAFailedReadKeepsTheError(t *testing.T) {
+	app, _ := newFakeApp(t)
+	call := &llm.ToolUseContent{ID: "call-1", Name: "Read", Input: []byte(`{"file_path":"nope.go"}`)}
+	results := map[string]*llm.ToolResultContent{
+		"call-1": {ToolUseID: "call-1", IsError: true, Content: "no such file: nope.go"},
+	}
+
+	msgs := app.convertLLMMessage(&llm.Message{
+		Role: llm.Assistant, Content: []llm.Content{call},
+	}, results)
+
+	assert.Equal(t, msgs[0].ToolReadLines, 0)
+	assert.Equal(t, msgs[0].ToolResult, "no such file: nope.go")
+}
+
 func TestMessageThinkingText(t *testing.T) {
 	text := messageThinkingText(&llm.Message{
 		Role: llm.Assistant,
