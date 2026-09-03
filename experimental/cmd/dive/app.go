@@ -363,7 +363,8 @@ type App struct {
 	needNewTextMessage bool              // set after tool calls to create new text message
 
 	// Command history
-	history []string
+	history      []string
+	historyStore *inputHistoryStore
 
 	// UI state
 	frame               uint64
@@ -1398,7 +1399,7 @@ func (a *App) submitInput(value string) {
 
 	a.setInputText("") // Clear input
 	a.historyIndex = -1
-	a.history = append(a.history, trimmed)
+	a.recordInputHistory(trimmed)
 
 	// Handle commands
 	if strings.HasPrefix(trimmed, "/") {
@@ -1411,6 +1412,16 @@ func (a *App) submitInput(value string) {
 	includeStartupAttachment := !a.firstUserSent
 	a.firstUserSent = true
 	go a.processMessageAsync(trimmed, attachments, includeStartupAttachment)
+}
+
+func (a *App) recordInputHistory(input string) {
+	a.history = limitInputHistory(append(a.history, input))
+	if a.historyStore == nil {
+		return
+	}
+	if err := a.historyStore.Save(a.history); err != nil {
+		a.setFlash("Could not save input history: %v", err)
+	}
 }
 
 // processMessageAsync handles message processing in background.
