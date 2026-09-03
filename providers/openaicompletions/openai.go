@@ -828,6 +828,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 			}
 		}
 		req.ToolChoice = toolChoice
+		req.ParallelToolCalls = config.ParallelToolCalls
 	}
 
 	req.Tools = tools

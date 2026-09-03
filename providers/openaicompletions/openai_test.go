@@ -105,6 +105,28 @@ func TestApplyRequestConfig_OpenAIPromptCacheKey(t *testing.T) {
 	assert.Equal(t, "stable-session-key", req.PromptCacheKey)
 }
 
+func TestApplyRequestConfig_ForcedSingleToolCall(t *testing.T) {
+	provider := New(WithModel("gpt-4o-2024-08-06"))
+	add := llm.NewToolDefinition().
+		WithName("add").
+		WithDescription("Returns the sum of two numbers").
+		WithSchema(&schema.Schema{Type: "object"})
+	parallel := false
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{
+		Tools:             []llm.Tool{add},
+		ToolChoice:        &llm.ToolChoice{Type: llm.ToolChoiceTypeTool, Name: "add"},
+		ParallelToolCalls: &parallel,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, req.ToolChoice, map[string]any{
+		"type":     "function",
+		"function": map[string]any{"name": "add"},
+	})
+	assert.NotNil(t, req.ParallelToolCalls)
+	assert.False(t, *req.ParallelToolCalls)
+}
+
 func TestApplyReportedUsageCostRejectsNegativeCharge(t *testing.T) {
 	reported := -0.01
 	usage := llm.Usage{}
@@ -501,7 +523,8 @@ func TestToolUseStream(t *testing.T) {
 	iterator, err := provider.Stream(ctx,
 		llm.WithModel("gpt-4o-2024-08-06"),
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
-		llm.WithToolChoice(llm.ToolChoiceAuto),
+		llm.WithToolChoice(&llm.ToolChoice{Type: llm.ToolChoiceTypeTool, Name: "add"}),
+		llm.WithParallelToolCalls(false),
 		llm.WithTools(add),
 	)
 	assert.NoError(t, err)
@@ -517,18 +540,15 @@ func TestToolUseStream(t *testing.T) {
 	assert.True(t, accumulator.IsComplete())
 
 	response := accumulator.Response()
-	toolCalls := response.ToolCalls()
-	assert.Equal(t, 1, len(toolCalls))
-
 	assert.NotNil(t, response)
-	assert.Equal(t, llm.Assistant, response.Role)
+	toolCalls := response.ToolCalls()
+	assert.Len(t, toolCalls, 1)
 
-	// Check that we have at least one tool call
-	assert.GreaterOrEqual(t, len(response.ToolCalls()), 1)
+	assert.Equal(t, response.Role, llm.Assistant)
 
 	// Check that the tool call is for the add function
-	toolCall := response.ToolCalls()[0]
-	assert.Equal(t, "add", toolCall.Name)
+	toolCall := toolCalls[0]
+	assert.Equal(t, toolCall.Name, "add")
 
 	// Check that the arguments contain the numbers
 	assert.Contains(t, string(toolCall.Input), "567")
