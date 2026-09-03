@@ -9,7 +9,7 @@ require (
 	github.com/deepnoodle-ai/dive/providers/google v1.27.0
 	github.com/deepnoodle-ai/dive/providers/grok v1.27.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.27.0
-	github.com/deepnoodle-ai/wonton v0.0.41-0.20260903020832-f9340ca32c4a
+	github.com/deepnoodle-ai/wonton v0.1.0
 	github.com/mattn/go-runewidth v0.0.29
 	golang.org/x/term v0.45.0
 	google.golang.org/genai v1.71.0
