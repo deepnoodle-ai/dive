@@ -17,6 +17,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   at 2x and output at 1.5x above 272K input tokens. Long-context cache writes
   have no `llm.PricingInfo` field and are still costed at the standard rate.
 
+### Changed
+
+- **openai-go upgraded to v3.56.0**, the release that adds `gpt-6-astra` and its
+  API surface: async tool calling, `configuration_update` items, mid-turn
+  steering, and misalignment errors. Dive does not use those types yet.
+
 ### Fixed
 
 - **Provider watch no longer reports documentation filenames as models.** A
