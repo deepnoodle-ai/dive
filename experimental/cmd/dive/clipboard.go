@@ -38,11 +38,17 @@ type clipboardReport struct {
 
 // notice is the user-facing line. An OSC 52 write has to be described as a
 // request rather than a result, because that is all it is.
+//
+// It also names /scrollback, because the request is often refused: neither
+// Terminal.app nor a default iTerm2 honours OSC 52, and this rung is reached
+// exactly when nothing else can work — dive over SSH — so the user has no other
+// way to find out that the copy went nowhere.
 func (r clipboardReport) notice() string {
 	if r.verified {
 		return fmt.Sprintf("Copied %d line%s (%s)", r.lines, pluralSuffix(r.lines), r.via)
 	}
-	return fmt.Sprintf("Sent %d line%s to the terminal clipboard (%s)", r.lines, pluralSuffix(r.lines), r.via)
+	return fmt.Sprintf("Sent %d line%s to the terminal clipboard (%s) — if nothing landed, your terminal may not allow it; /scrollback always works.",
+		r.lines, pluralSuffix(r.lines), r.via)
 }
 
 // clipboardCopier puts text on the clipboard and says how it went. A field on

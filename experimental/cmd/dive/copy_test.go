@@ -136,7 +136,7 @@ func TestAnUnverifiableCopyIsNotDescribedAsADoneDeal(t *testing.T) {
 
 	// OSC 52 draws no reply from the terminal, so there is nothing to confirm.
 	sent := clipboardReport{lines: 12, via: "OSC 52", verified: false}
-	assert.Equal(t, sent.notice(), "Sent 12 lines to the terminal clipboard (OSC 52)")
+	assert.Equal(t, sent.notice(), "Sent 12 lines to the terminal clipboard (OSC 52) — if nothing landed, your terminal may not allow it; /scrollback always works.")
 }
 
 func TestForcingOSC52WritesTheSequenceAndSkipsEveryNativeTool(t *testing.T) {
