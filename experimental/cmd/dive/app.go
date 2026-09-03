@@ -317,6 +317,10 @@ type App struct {
 	// mode off, which is the only thing that entitles us to turn it back on.
 	altScrollDisabled bool
 
+	// fullRepaint redraws every cell each frame (DIVE_FULL_REPAINT=1), for
+	// hosts that leave fragments of the last frame on screen.
+	fullRepaint bool
+
 	// Frame cost, for DIVE_DEBUG_FRAMES=1.
 	viewTimeTotal time.Duration
 	viewTimeCount int64
@@ -878,6 +882,13 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		return nil
 	case tui.TickEvent:
 		a.frame = e.Frame
+		// Some hosts — ConPTY among them — leave fragments of the previous
+		// frame behind, which a diffing flush has no reason to overwrite.
+		// Redrawing every cell costs bandwidth and fixes it, so it is a switch
+		// rather than the default.
+		if a.fullRepaint {
+			a.repaint()
+		}
 		// A pointer held still outside the viewport sends no further events, so
 		// a drag past an edge only keeps growing if something nudges it once a
 		// frame. No-op unless a drag is actually being held there.
@@ -1230,6 +1241,9 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 
 	// Handle global keys
 	switch e.Key {
+	case tui.KeyCtrlL:
+		a.repaint()
+		return nil
 	case tui.KeyCtrlC:
 		// With copy-on-select off the highlight is left sitting there waiting
 		// to be copied, and Ctrl+C is the key every terminal has trained users
@@ -2418,6 +2432,10 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.toggleMouse()
 		return true
 
+	case "scrollback":
+		a.handleScrollbackCommand(cmdArgs)
+		return true
+
 	case "context":
 		a.printContextDemoReport()
 		return true
@@ -2535,6 +2553,7 @@ func (a *App) printHelp() {
 		tui.Text("  /context       Inspect context-demo reminders from the latest turn"),
 		tui.Text("  /copy [N|all]  Copy the selection, or a code block from the last reply"),
 		tui.Text("  /mouse         Toggle mouse reporting"),
+		tui.Text("  /scrollback    Show the conversation in your terminal, for find and bulk copy"),
 		tui.Text("  /help, /?      Show this help"),
 	}
 
@@ -2575,6 +2594,8 @@ func (a *App) printHelp() {
 			tui.Text("  %-15s%s", "click a tool", "Expand or collapse its output"),
 			tui.Text("  %-15s%s", nativeSelectionModifier()+"+drag", "Select with your terminal instead of the app"),
 			tui.Text("  %-15s%s", "/mouse", "Hand selection back to the terminal for good"),
+			tui.Text("  %-15s%s", "/scrollback", "Hand the whole conversation over, for find and bulk copy"),
+			tui.Text("  %-15s%s", "Ctrl+L", "Repaint the screen"),
 		)
 	}
 
@@ -2989,7 +3010,10 @@ func fuzzyMatch(pattern, text string) int {
 // getCommandMatches returns slash commands matching the prefix for autocomplete
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
-	builtins := []string{"clear", "compact", "context", "copy", "cost", "help", "model", "mouse", "quit", "todos", "usage"}
+	builtins := []string{
+		"clear", "compact", "context", "copy", "cost", "help",
+		"model", "mouse", "quit", "scrollback", "todos", "usage",
+	}
 
 	var matches []string
 

@@ -78,7 +78,9 @@ Two more decisions this plan adds:
   shipped. The interactive picker is still the better shape.
 - **`--exit-transcript=full|turn|none`.** Add only if dogfooding asks for it.
 - **Phase 6's rollout matrix is not started.** It is now the last thing between this
-  work and a release, since the flip it was meant to gate has already happened.
+  work and a release, since the flip it was meant to gate has already happened. The
+  kill criterion still stands: if copy does not work on iTerm2, Terminal.app and one
+  SSH session without a mode toggle, the default goes back.
 
 ## Sequencing
 
@@ -340,10 +342,11 @@ evidence that copy is the gate.
 
 ## Phase 6 — Exit, escape hatches, rollout, flip
 
-**Status: 1 and 5 shipped** — the exit dump and the flip to `--inline` — pulled
-forward with Phase 5 so the default never had to move twice. Items 2, 3 and 4
-(`/scrollback`, Ctrl+L, the rollout matrix) are outstanding, and 4 is now the gate on
-the release rather than on the flip.
+**Status: 1, 2, 3 and 5 shipped** — the exit dump, `/scrollback`, Ctrl+L and the flip
+to `--inline` — pulled forward with Phase 5 so the default never had to move twice.
+Item 4, the rollout matrix, is outstanding, and is now the gate on the release rather
+than on the flip. It is manual by nature: ten terminals, six questions each, and no
+way to answer any of them from a test.
 
 **Work:**
 

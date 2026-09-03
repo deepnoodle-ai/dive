@@ -29,6 +29,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **The conversation is printed to the terminal on exit**, after the alternate
   screen is restored, capped at the last 2,000 lines and followed by the resume
   line. Without it a managed-screen session would leave nothing behind.
+- **`/scrollback`** leaves the alternate screen and writes the conversation into
+  the terminal's own, where find, selection and copy all work on it as they
+  always have; `/scrollback raw` writes the source instead, for pasting
+  elsewhere. **Ctrl+L** repaints, and `DIVE_FULL_REPAINT=1` repaints every
+  frame for hosts that leave fragments of the last one behind.
 
 ### Fixed
 

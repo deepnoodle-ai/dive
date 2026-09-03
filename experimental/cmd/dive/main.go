@@ -448,6 +448,7 @@ func runInteractive(ctx *cli.Context) error {
 	// Copy as soon as a drag ends, the way a terminal does. Off, the highlight
 	// waits for /copy or Ctrl+C.
 	app.copyOnSelect = os.Getenv("DIVE_COPY_ON_SELECT") != "0"
+	app.fullRepaint = app.screenMode && os.Getenv("DIVE_FULL_REPAINT") == "1"
 
 	// Wire up dialog and monitor notifier
 	tuiDialog.app = app
