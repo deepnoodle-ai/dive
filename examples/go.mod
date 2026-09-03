@@ -5,13 +5,13 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/deepnoodle-ai/dive v1.27.0
-	github.com/deepnoodle-ai/dive/a2a v1.27.0
-	github.com/deepnoodle-ai/dive/experimental/mcp v1.27.0
-	github.com/deepnoodle-ai/dive/otel v1.27.0
-	github.com/deepnoodle-ai/dive/providers/google v1.27.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.27.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.27.0
+	github.com/deepnoodle-ai/dive v1.28.0
+	github.com/deepnoodle-ai/dive/a2a v1.28.0
+	github.com/deepnoodle-ai/dive/experimental/mcp v1.28.0
+	github.com/deepnoodle-ai/dive/otel v1.28.0
+	github.com/deepnoodle-ai/dive/providers/google v1.28.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.28.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.28.0
 	github.com/deepnoodle-ai/wonton v0.2.1
 	github.com/fatih/color v1.19.0
 	github.com/mark3labs/mcp-go v1.0.0

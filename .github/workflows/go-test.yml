@@ -52,6 +52,6 @@ jobs:
 
       - name: Run provider module tests
         run: |
-          for module in providers/openai providers/google providers/grok; do
+          for module in providers/openai providers/google providers/grok providers/meta; do
             (cd "$module" && go test -v ./...)
           done

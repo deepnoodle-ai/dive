@@ -379,38 +379,38 @@ flip.
 ### Rollout results (2026-09-02, one Mac)
 
 The ten-terminal sweep was scoped down to this machine. The useful discovery is that
-the matrix is mostly *not* manual: driving the built binary under `pty.fork()` and
+the matrix is mostly _not_ manual: driving the built binary under `pty.fork()` and
 injecting SGR mouse reports answers every app-side question, and `pbpaste` /
-`tmux show-buffer` verify the result. Only the questions about what a *terminal
-emulator* does need a human or an AppleScript window.
+`tmux show-buffer` verify the result. Only the questions about what a _terminal
+emulator_ does need a human or an AppleScript window.
 
 App-side, all verified end to end against the real binary on wonton v0.1.0:
 
-| Question | Result |
-| --- | --- |
-| Drag selects and copies | yes — `Copied N lines (pbcopy)`, exact region |
-| Double-click / triple-click | word / whole line |
-| Coordinates past column 223 | correct at 300 columns — SGR `?1006` is unbounded |
-| tmux rung | `Copied N lines (tmux)`, right text in the buffer |
-| OSC 52 rung, forced | one write, correct base64, reported as *Sent* not *Copied* |
-| OSC 52 rung, natural fallback | reached with no clipboard tool and no `$TMUX` |
-| `/mouse` off, then on | both directions; a drag while off copies nothing |
-| `?1007l` / `?1007h` | one each — we only ever restore a mode we set |
-| Mode balance | `?1049` `?1002` `?1006` `?2004` `?25` all N/N |
-| `/copy`, `/copy N`, `/copy all` | list, single block, all blocks; source text, tabs intact |
-| `/copy 9` out of range | `No code block 9 — the last reply has 2.` |
-| `/scrollback raw` | labelled transcript, fences intact, Enter returns, modes rebalance |
-| Exit dump + resume line | after the alt-screen restore, in scrollback |
+| Question                        | Result                                                             |
+| ------------------------------- | ------------------------------------------------------------------ |
+| Drag selects and copies         | yes — `Copied N lines (pbcopy)`, exact region                      |
+| Double-click / triple-click     | word / whole line                                                  |
+| Coordinates past column 223     | correct at 300 columns — SGR `?1006` is unbounded                  |
+| tmux rung                       | `Copied N lines (tmux)`, right text in the buffer                  |
+| OSC 52 rung, forced             | one write, correct base64, reported as _Sent_ not _Copied_         |
+| OSC 52 rung, natural fallback   | reached with no clipboard tool and no `$TMUX`                      |
+| `/mouse` off, then on           | both directions; a drag while off copies nothing                   |
+| `?1007l` / `?1007h`             | one each — we only ever restore a mode we set                      |
+| Mode balance                    | `?1049` `?1002` `?1006` `?2004` `?25` all N/N                      |
+| `/copy`, `/copy N`, `/copy all` | list, single block, all blocks; source text, tabs intact           |
+| `/copy 9` out of range          | `No code block 9 — the last reply has 2.`                          |
+| `/scrollback raw`               | labelled transcript, fences intact, Enter returns, modes rebalance |
+| Exit dump + resume line         | after the alt-screen restore, in scrollback                        |
 
 **The one bad finding — OSC 52 is off by default on this Mac.** Probed by emitting the
 sequence in each terminal and reading `pbpaste`, with a marker file proving the probe
 ran:
 
-| Terminal | Honours OSC 52 out of the box |
-| --- | --- |
-| Terminal.app | **no** (no support at all) |
-| iTerm2 | **no** — `AllowClipboardAccess` is unset, i.e. off |
-| Ghostty | not established; its default `clipboard-write` is `ask`, so it prompts |
+| Terminal     | Honours OSC 52 out of the box                                          |
+| ------------ | ---------------------------------------------------------------------- |
+| Terminal.app | **no** (no support at all)                                             |
+| iTerm2       | **no** — `AllowClipboardAccess` is unset, i.e. off                     |
+| Ghostty      | not established; its default `clipboard-write` is `ask`, so it prompts |
 
 This does not affect local use: on macOS `pbcopy` is rung 1 and copy works everywhere.
 It bites in exactly one place — **dive over SSH on a remote host, from Terminal.app or

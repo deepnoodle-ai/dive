@@ -1,6 +1,6 @@
 # Releasing
 
-Dive is one Go module plus eight tagged sub-modules. Everything below assumes
+Dive is one Go module plus nine tagged sub-modules. Everything below assumes
 you are on an up-to-date `main` and have `gh` authenticated.
 
 ## 1. Cut the changelog

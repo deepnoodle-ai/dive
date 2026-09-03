@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-09-03
+
 ### Added
 
 - **The CLI remembers model, thinking effort, thinking display, and usage detail in `~/.dive/settings.json`.** Resolution is flag > env > settings file > default; `/model`, `/effort`, `/thinking`, and `/usage full|brief` switch mid-session and persist, `/status` shows the effective configuration, and the status line always shows model and effort.
@@ -59,6 +61,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **OpenAI-compatible providers now honor `llm.WithParallelToolCalls`.** The
+  Chat Completions adapter previously dropped the option, so callers could not
+  disable parallel tool calls; `false` is now serialized as
+  `parallel_tool_calls: false`.
 - **CLI history navigation no longer gets trapped by recalled slash commands.** Command and file autocomplete stay closed while browsing history, edits return the recalled entry to normal completion behavior, and all autocomplete matches remain reachable through an eight-row sliding window.
 - **CLI model switches now update downstream work, not just the status label.** Newly spawned subagents inherit the current model, effort, and thinking settings; compaction uses the switched model and recalculates automatic thresholds while preserving explicit thresholds.
 - **The CLI footer keeps one explicit blank row below the status line instead of two.** Multiline user messages also trim pasted trailing spaces and tabs for display without changing the content sent to the model.
