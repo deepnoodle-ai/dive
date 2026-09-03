@@ -73,22 +73,24 @@ func (r *lockedRunner) SendEvent(e tui.Event) {
 
 func (r *lockedRunner) Stop() {}
 
-// waitForNotice waits for a notice containing want, and returns it.
-func (r *lockedRunner) waitForNotice(t *testing.T, want string) string {
+// waitForFlash waits for a flash containing want, and returns it. Copy results
+// arrive this way rather than as notices: they are transient status, not
+// transcript.
+func (r *lockedRunner) waitForFlash(t *testing.T, want string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		r.mu.Lock()
 		for _, e := range r.events {
-			if n, ok := e.(noticeEvent); ok && strings.Contains(n.text, want) {
+			if f, ok := e.(flashEvent); ok && strings.Contains(f.text, want) {
 				r.mu.Unlock()
-				return n.text
+				return f.text
 			}
 		}
 		r.mu.Unlock()
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("no notice containing %q arrived", want)
+	t.Fatalf("no flash containing %q arrived", want)
 	return ""
 }
 
@@ -388,7 +390,7 @@ func TestCopyFailureIsReportedRatherThanSwallowed(t *testing.T) {
 	release(app, x+width, y)
 	clip.next(t)
 
-	assert.Contains(t, runner.waitForNotice(t, "Copy failed"), "pbcopy: no such file")
+	assert.Contains(t, runner.waitForFlash(t, "Copy failed"), "pbcopy: no such file")
 }
 
 func TestASuccessfulCopySaysHowManyLinesAndByWhat(t *testing.T) {
@@ -402,7 +404,35 @@ func TestASuccessfulCopySaysHowManyLinesAndByWhat(t *testing.T) {
 	release(app, x+width, y)
 	clip.next(t)
 
-	assert.Equal(t, runner.waitForNotice(t, "Copied"), "Copied 1 line (test)")
+	assert.Equal(t, runner.waitForFlash(t, "Copied"), "Copied 1 line (test)")
+}
+
+// Copying must not move the thing being copied. A transcript notice would:
+// every drag would append a line below the selection, growing the list and
+// pushing the view down while the user is still reading it.
+func TestCopyingLeavesTheTranscriptAndTheLayoutAlone(t *testing.T) {
+	app, clip := newSelectingApp(t, 3)
+	runner := app.runner.(*lockedRunner)
+
+	before := renderScreen(t, app, 80, 24).Text()
+	messagesBefore := len(app.messages)
+
+	screen := renderScreen(t, app, 80, 24)
+	x, y, width := findText(t, screen, "answer 2")
+	press(app, x, y)
+	drag(app, x+width, y)
+	release(app, x+width, y)
+	clip.next(t)
+	runner.waitForFlash(t, "Copied")
+	app.HandleEvent(flashEvent{text: "Copied 1 line (test)"})
+
+	assert.Equal(t, len(app.messages), messagesBefore)
+
+	// The status line carries the flash, so the screen is the same height and
+	// every line above it is where it was.
+	after := renderScreen(t, app, 80, 24).Text()
+	assert.Equal(t, len(strings.Split(after, "\n")), len(strings.Split(before, "\n")))
+	assert.Contains(t, after, "Copied 1 line (test)")
 }
 
 func TestEscapeDismissesASelectionBeforeAnythingElse(t *testing.T) {

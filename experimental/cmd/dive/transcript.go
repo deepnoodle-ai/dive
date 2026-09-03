@@ -57,6 +57,41 @@ type noticeEvent struct {
 	text string
 }
 
+// flashEvent is noticeEvent's transient twin: it shows in the status line for a
+// moment instead of joining the transcript.
+type flashEvent struct {
+	baseEvent
+	text string
+}
+
+// flashDuration is how long a flash holds the status line. Long enough to read
+// a short line, short enough that it is gone before it is in the way.
+const flashDuration = 3 * time.Second
+
+// setFlash shows transient feedback in the status line. Event-loop goroutine
+// only — use postFlash from anywhere else.
+func (a *App) setFlash(format string, args ...any) {
+	a.flashText = fmt.Sprintf(format, args...)
+	a.flashUntil = time.Now().Add(flashDuration)
+}
+
+// postFlash queues a flash from any goroutine.
+func (a *App) postFlash(format string, args ...any) {
+	if a.runner == nil {
+		return
+	}
+	a.runner.SendEvent(flashEvent{baseEvent: newBaseEvent(), text: fmt.Sprintf(format, args...)})
+}
+
+// activeFlash is the flash to draw, or "" when none is live. Expiry is read at
+// render time rather than cleared on a timer, so nothing has to be scheduled.
+func (a *App) activeFlash() string {
+	if a.flashText == "" || time.Now().After(a.flashUntil) {
+		return ""
+	}
+	return a.flashText
+}
+
 // touch records an in-place mutation of message i: the streaming flushes, a
 // tool result arriving, a tool's streamed output or progress line changing.
 // Bumping Rev lets any cache tell a mutation from an append, and the managed

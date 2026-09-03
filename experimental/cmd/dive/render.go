@@ -85,7 +85,14 @@ func (a *App) statusLineView() tui.View {
 			tui.NewStyle().WithFgRGB(tui.RGB{R: 230, G: 190, B: 80}).WithBold()))
 	}
 
-	rows := []tui.View{tui.Group(parts...)}
+	// A flash borrows this row rather than adding one. Replacing it keeps the
+	// status line one row tall whether or not something is being reported, which
+	// is the whole point: transient feedback must not move the transcript.
+	row := tui.Group(parts...)
+	if flash := a.activeFlash(); flash != "" {
+		row = tui.Group(tui.Text(" %s", flash).Style(accentStyle))
+	}
+	rows := []tui.View{row}
 
 	// Line 2: context-window usage bar (shown after the first LLM response).
 	if a.lastUsage != nil {

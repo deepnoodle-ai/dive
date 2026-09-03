@@ -444,23 +444,28 @@ func (a *App) copySelection() {
 // copyToClipboard runs the clipboard ladder and reports what happened. Called
 // from the event loop; the ladder forks a process on its first two rungs, so
 // the work goes to a goroutine and the answer comes back as a notice.
+// The result is a flash, not a transcript notice. A notice would be permanent,
+// and copying happens on every drag — each one would append a line below the
+// text just selected, growing the list and pushing the view the user is still
+// reading. A flash takes the status line for a few seconds and moves nothing.
 func (a *App) copyToClipboard(text string) {
 	if strings.TrimSpace(text) == "" {
-		a.appendNotice("Nothing to copy.")
+		a.setFlash("Nothing to copy.")
 		return
 	}
 	copier := a.clipboard
 	if copier == nil {
+		// Inline mode has no status line to flash, so this one stays a notice.
 		a.appendNotice("Copying needs the managed screen; this session is running with --inline.")
 		return
 	}
 	go func() {
 		report, err := copier(text)
 		if err != nil {
-			a.postNotice("Copy failed: %v", err)
+			a.postFlash("Copy failed: %v", err)
 			return
 		}
-		a.postNotice("%s", report.notice())
+		a.postFlash("%s", report.notice())
 	}()
 }
 

@@ -124,10 +124,13 @@ func TestCopyLooksNoFurtherBackThanTheLastQuestion(t *testing.T) {
 
 func TestCopyingNothingSaysSoInsteadOfSendingAnEmptyClipboard(t *testing.T) {
 	app, clip := newSelectingApp(t, 2)
+	before := len(app.messages)
 
 	app.copyToClipboard("   \n  ")
 	clip.nothing(t)
-	assert.Contains(t, app.messages[len(app.messages)-1].Content, "Nothing to copy")
+	assert.Contains(t, app.activeFlash(), "Nothing to copy")
+	// A flash, so the transcript is untouched and the view does not move.
+	assert.Equal(t, len(app.messages), before)
 }
 
 func TestAnUnverifiableCopyIsNotDescribedAsADoneDeal(t *testing.T) {

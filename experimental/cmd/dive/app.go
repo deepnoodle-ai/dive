@@ -317,6 +317,14 @@ type App struct {
 	// mode off, which is the only thing that entitles us to turn it back on.
 	altScrollDisabled bool
 
+	// A flash is feedback that expires: it takes over the status line for a
+	// moment and then gives it back. Copying needs this rather than a transcript
+	// notice, because a notice is permanent and every drag would leave one —
+	// growing the list under the pointer and pushing the view the user is still
+	// looking at. The status line is always exactly one row, so nothing moves.
+	flashText  string
+	flashUntil time.Time
+
 	// fullRepaint redraws every cell each frame (DIVE_FULL_REPAINT=1), for
 	// hosts that leave fragments of the last frame on screen.
 	fullRepaint bool
@@ -941,6 +949,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleMonitorNotification(e)
 	case noticeEvent:
 		a.appendNotice("%s", e.text)
+	case flashEvent:
+		a.setFlash("%s", e.text)
 	case contextDemoNoticeEvent:
 		a.handleContextDemoNotice(e.notice)
 	case showDialogEvent:
