@@ -82,7 +82,7 @@ func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
 			var req Request
 			err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: tt.effort})
 			assert.NoError(t, err)
-			assert.Equal(t, tt.want, req.ReasoningEffort)
+			assert.Equal(t, req.ReasoningEffort, tt.want)
 		})
 	}
 }
@@ -94,7 +94,7 @@ func TestApplyRequestConfig_UnsupportedReasoningEffortClampsForKnownModel(t *tes
 	var req Request
 	err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: llm.ReasoningEffortNone})
 	assert.NoError(t, err)
-	assert.Equal(t, ReasoningEffortMinimal, req.ReasoningEffort)
+	assert.Equal(t, req.ReasoningEffort, ReasoningEffortMinimal)
 }
 
 func TestApplyRequestConfig_OpenAIPromptCacheKey(t *testing.T) {
@@ -102,7 +102,7 @@ func TestApplyRequestConfig_OpenAIPromptCacheKey(t *testing.T) {
 	var req Request
 	err := provider.applyRequestConfig(&req, &llm.Config{PromptCacheKey: "stable-session-key"})
 	assert.NoError(t, err)
-	assert.Equal(t, "stable-session-key", req.PromptCacheKey)
+	assert.Equal(t, req.PromptCacheKey, "stable-session-key")
 }
 
 func TestApplyRequestConfig_ForcedSingleToolCall(t *testing.T) {
@@ -158,7 +158,7 @@ func TestGenerateTreatsNullUsageAsUnavailable(t *testing.T) {
 		llm.WithMessages(llm.NewUserTextMessage("hello")),
 	)
 	assert.NoError(t, err)
-	assert.Equal(t, "done", response.Message().Text())
+	assert.Equal(t, response.Message().Text(), "done")
 	assert.Nil(t, response.Usage.Cost)
 	assert.True(t, response.Usage.CostEstimateUnavailable)
 }
@@ -180,7 +180,7 @@ func TestAddPromptCacheBreakpoints(t *testing.T) {
 
 	body, err := json.Marshal(messages)
 	assert.NoError(t, err)
-	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
+	assert.Equal(t, strings.Count(string(body), `"prompt_cache_breakpoint"`), 3)
 	assert.True(t, strings.Contains(string(body), `"mode":"explicit"`))
 }
 
@@ -210,7 +210,7 @@ func TestApplyRequestConfig_KeepsTemperatureForModelsThatAcceptIt(t *testing.T) 
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, req.Temperature)
-	assert.Equal(t, temperature, *req.Temperature)
+	assert.Equal(t, *req.Temperature, temperature)
 	assert.Len(t, logger.warnings, 0)
 }
 
@@ -222,7 +222,7 @@ func TestApplyRequestConfig_MistralOmitsReasoningEffort(t *testing.T) {
 	var req Request
 	err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: llm.ReasoningEffortHigh})
 	assert.NoError(t, err)
-	assert.Equal(t, ReasoningEffort(""), req.ReasoningEffort)
+	assert.Equal(t, req.ReasoningEffort, ReasoningEffort(""))
 }
 
 func TestApplyRequestConfig_NormalizesReasoningEffortForTools(t *testing.T) {
@@ -298,7 +298,7 @@ func TestApplyRequestConfig_NormalizesReasoningEffortForTools(t *testing.T) {
 			var req Request
 			err := provider.applyRequestConfig(&req, config)
 			assert.NoError(t, err)
-			assert.Equal(t, tt.want, req.ReasoningEffort)
+			assert.Equal(t, req.ReasoningEffort, tt.want)
 			assert.Len(t, logger.warnings, tt.wantWarnings)
 		})
 	}
@@ -356,8 +356,8 @@ func TestHelloWorldStream(t *testing.T) {
 
 	response := accum.Response()
 	assert.NotNil(t, response)
-	assert.Equal(t, llm.Assistant, response.Role)
-	assert.Equal(t, "1 2 3 4 5 6 7 8 9 10", response.Message().Text())
+	assert.Equal(t, response.Role, llm.Assistant)
+	assert.Equal(t, response.Message().Text(), "1 2 3 4 5 6 7 8 9 10")
 }
 
 func TestToolUse(t *testing.T) {
@@ -387,10 +387,10 @@ func TestToolUse(t *testing.T) {
 
 	// Use ToolCalls() which filters for tool_use content (model may also return text)
 	toolCalls := response.ToolCalls()
-	assert.Equal(t, 1, len(toolCalls))
+	assert.Equal(t, len(toolCalls), 1)
 
 	toolUse := toolCalls[0]
-	assert.Equal(t, "add", toolUse.Name)
+	assert.Equal(t, toolUse.Name, "add")
 
 	// The exact format of the arguments may vary, so we just check that it contains the numbers
 	assert.Contains(t, string(toolUse.Input), "567")
@@ -420,23 +420,23 @@ func TestMultipleToolUse(t *testing.T) {
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(response.Message().Content))
+	assert.Equal(t, len(response.Message().Content), 2)
 
 	c1 := response.Message().Content[0]
-	assert.Equal(t, llm.ContentTypeToolUse, c1.Type())
+	assert.Equal(t, c1.Type(), llm.ContentTypeToolUse)
 
 	toolUse, ok := c1.(*llm.ToolUseContent)
 	assert.True(t, ok)
-	assert.Equal(t, "add", toolUse.Name)
+	assert.Equal(t, toolUse.Name, "add")
 	assert.Contains(t, string(toolUse.Input), "567")
 	assert.Contains(t, string(toolUse.Input), "111")
 
 	c2 := response.Message().Content[1]
-	assert.Equal(t, llm.ContentTypeToolUse, c2.Type())
+	assert.Equal(t, c2.Type(), llm.ContentTypeToolUse)
 
 	toolUse, ok = c2.(*llm.ToolUseContent)
 	assert.True(t, ok)
-	assert.Equal(t, "add", toolUse.Name)
+	assert.Equal(t, toolUse.Name, "add")
 	assert.Contains(t, string(toolUse.Input), "233")
 	assert.Contains(t, string(toolUse.Input), "444")
 }
@@ -479,7 +479,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 
 	response := accumulator.Response()
 	toolCalls := response.ToolCalls()
-	assert.Equal(t, 2, len(toolCalls))
+	assert.Equal(t, len(toolCalls), 2)
 
 	// The two calls can be in any order, so we need to check both
 
@@ -494,11 +494,11 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 		c2 = toolCalls[0]
 	}
 
-	assert.Equal(t, "add", c1.Name)
+	assert.Equal(t, c1.Name, "add")
 	assert.Contains(t, string(c1.Input), "567")
 	assert.Contains(t, string(c1.Input), "111")
 
-	assert.Equal(t, "add", c2.Name)
+	assert.Equal(t, c2.Name, "add")
 	assert.Contains(t, string(c2.Input), "233")
 	assert.Contains(t, string(c2.Input), "444")
 }
@@ -581,20 +581,20 @@ func TestConvertMessages(t *testing.T) {
 	assert.Len(t, converted, 1)
 
 	// Check the message has both tool calls
-	assert.Equal(t, "assistant", converted[0].Role)
+	assert.Equal(t, converted[0].Role, "assistant")
 	assert.Len(t, converted[0].ToolCalls, 2)
 
 	// Check first tool call
-	assert.Equal(t, "call_123", converted[0].ToolCalls[0].ID)
-	assert.Equal(t, "function", converted[0].ToolCalls[0].Type)
-	assert.Equal(t, "Calculator", converted[0].ToolCalls[0].Function.Name)
-	assert.Equal(t, `{"expression":"2 + 2"}`, converted[0].ToolCalls[0].Function.Arguments)
+	assert.Equal(t, converted[0].ToolCalls[0].ID, "call_123")
+	assert.Equal(t, converted[0].ToolCalls[0].Type, "function")
+	assert.Equal(t, converted[0].ToolCalls[0].Function.Name, "Calculator")
+	assert.Equal(t, converted[0].ToolCalls[0].Function.Arguments, `{"expression":"2 + 2"}`)
 
 	// Check second tool call
-	assert.Equal(t, "call_456", converted[0].ToolCalls[1].ID)
-	assert.Equal(t, "function", converted[0].ToolCalls[1].Type)
-	assert.Equal(t, "GoogleSearch", converted[0].ToolCalls[1].Function.Name)
-	assert.Equal(t, `{"query":"math formulas"}`, converted[0].ToolCalls[1].Function.Arguments)
+	assert.Equal(t, converted[0].ToolCalls[1].ID, "call_456")
+	assert.Equal(t, converted[0].ToolCalls[1].Type, "function")
+	assert.Equal(t, converted[0].ToolCalls[1].Function.Name, "GoogleSearch")
+	assert.Equal(t, converted[0].ToolCalls[1].Function.Arguments, `{"query":"math formulas"}`)
 }
 
 // Add a test for tool results
@@ -622,14 +622,14 @@ func TestConvertToolResultMessages(t *testing.T) {
 	assert.Len(t, converted, 2)
 
 	// Check first tool result message
-	assert.Equal(t, "tool", converted[0].Role)
-	assert.Equal(t, "4", converted[0].Content)
-	assert.Equal(t, "call_123", converted[0].ToolCallID)
+	assert.Equal(t, converted[0].Role, "tool")
+	assert.Equal(t, converted[0].Content, "4")
+	assert.Equal(t, converted[0].ToolCallID, "call_123")
 
 	// Check second tool result message
-	assert.Equal(t, "tool", converted[1].Role)
-	assert.Equal(t, "Found math formulas", converted[1].Content)
-	assert.Equal(t, "call_456", converted[1].ToolCallID)
+	assert.Equal(t, converted[1].Role, "tool")
+	assert.Equal(t, converted[1].Content, "Found math formulas")
+	assert.Equal(t, converted[1].ToolCallID, "call_456")
 }
 
 // Test for messages containing both text and tool use content
@@ -655,10 +655,10 @@ func TestConvertTextAndToolUseMessage(t *testing.T) {
 
 	// Verify the conversion - should be a single message with text and tool call
 	assert.Len(t, converted, 1)
-	assert.Equal(t, "assistant", converted[0].Role)
-	assert.Equal(t, "I'll help you calculate that", converted[0].Content)
+	assert.Equal(t, converted[0].Role, "assistant")
+	assert.Equal(t, converted[0].Content, "I'll help you calculate that")
 	assert.Len(t, converted[0].ToolCalls, 1)
-	assert.Equal(t, "Calculator", converted[0].ToolCalls[0].Function.Name)
+	assert.Equal(t, converted[0].ToolCalls[0].Function.Name, "Calculator")
 }
 
 // Test for tool use followed by tool result
@@ -701,18 +701,18 @@ func TestConvertToolUseAndResultMessages(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, converted, 3)
 
-	assert.Equal(t, "assistant", converted[0].Role)
+	assert.Equal(t, converted[0].Role, "assistant")
 	assert.Len(t, converted[0].ToolCalls, 2)
-	assert.Equal(t, "call_111", converted[0].ToolCalls[0].ID)
-	assert.Equal(t, "call_999", converted[0].ToolCalls[1].ID)
+	assert.Equal(t, converted[0].ToolCalls[0].ID, "call_111")
+	assert.Equal(t, converted[0].ToolCalls[1].ID, "call_999")
 
-	assert.Equal(t, "tool", converted[1].Role)
-	assert.Equal(t, "1", converted[1].Content)
-	assert.Equal(t, "call_111", converted[1].ToolCallID)
+	assert.Equal(t, converted[1].Role, "tool")
+	assert.Equal(t, converted[1].Content, "1")
+	assert.Equal(t, converted[1].ToolCallID, "call_111")
 
-	assert.Equal(t, "tool", converted[2].Role)
-	assert.Equal(t, "2", converted[2].Content)
-	assert.Equal(t, "call_999", converted[2].ToolCallID)
+	assert.Equal(t, converted[2].Role, "tool")
+	assert.Equal(t, converted[2].Content, "2")
+	assert.Equal(t, converted[2].ToolCallID, "call_999")
 
 }
 
@@ -791,8 +791,8 @@ func TestConvertMessagesSkipsThinkingContent(t *testing.T) {
 	result, err := convertMessages(messages)
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
-	assert.Equal(t, "assistant", result[0].Role)
-	assert.Equal(t, "The answer is 4.", result[0].Content)
+	assert.Equal(t, result[0].Role, "assistant")
+	assert.Equal(t, result[0].Content, "The answer is 4.")
 }
 
 func TestMistralThinkingChunksDecodeAndReplay(t *testing.T) {
@@ -809,11 +809,11 @@ func TestMistralThinkingChunksDecodeAndReplay(t *testing.T) {
 	assert.Len(t, content, 2)
 	thinking, ok := content[0].(*llm.ThinkingContent)
 	assert.True(t, ok)
-	assert.Equal(t, "First reason. Second reason.", thinking.Thinking)
-	assert.Equal(t, "true", thinking.Metadata[mistralThinkingMetadataKey])
+	assert.Equal(t, thinking.Thinking, "First reason. Second reason.")
+	assert.Equal(t, thinking.Metadata[mistralThinkingMetadataKey], "true")
 	answer, ok := content[1].(*llm.TextContent)
 	assert.True(t, ok)
-	assert.Equal(t, "Final answer.", answer.Text)
+	assert.Equal(t, answer.Text, "Final answer.")
 
 	replayed, err := convertMessagesForProvider([]*llm.Message{{
 		Role:    llm.Assistant,
@@ -824,8 +824,8 @@ func TestMistralThinkingChunksDecodeAndReplay(t *testing.T) {
 	body, err := json.Marshal(replayed[0])
 	assert.NoError(t, err)
 	assert.Equal(t,
-		`{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"First reason. Second reason."}]},{"type":"text","text":"Final answer."}]}`,
-		string(body))
+		string(body),
+		`{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"First reason. Second reason."}]},{"type":"text","text":"Final answer."}]}`)
 }
 
 func TestMistralDoesNotReplayAnotherProvidersThinking(t *testing.T) {
@@ -838,7 +838,7 @@ func TestMistralDoesNotReplayAnotherProvidersThinking(t *testing.T) {
 	}}, "mistral-mistral-small-latest")
 	assert.NoError(t, err)
 	assert.Len(t, messages, 1)
-	assert.Equal(t, "answer", messages[0].Content)
+	assert.Equal(t, messages[0].Content, "answer")
 	assert.Empty(t, messages[0].ContentParts)
 }
 
@@ -854,7 +854,7 @@ func TestOpenRouterReasoningDetailsDecodeAndReplay(t *testing.T) {
 	content := responseMessageContent(message, "openrouter")
 	assert.Len(t, content, 2)
 	thinking := content[0].(*llm.ThinkingContent)
-	assert.Equal(t, "summary", thinking.Thinking)
+	assert.Equal(t, thinking.Thinking, "summary")
 	assert.True(t, json.Valid([]byte(thinking.Metadata[openRouterReasoningDetailsMetadataKey])))
 
 	replayed, err := convertMessagesForProvider([]*llm.Message{{
@@ -863,9 +863,9 @@ func TestOpenRouterReasoningDetailsDecodeAndReplay(t *testing.T) {
 	}}, "openrouter")
 	assert.NoError(t, err)
 	assert.Len(t, replayed, 1)
-	assert.Equal(t, "answer", replayed[0].Content)
+	assert.Equal(t, replayed[0].Content, "answer")
 	assert.Empty(t, replayed[0].Reasoning)
-	assert.Equal(t, message.ReasoningDetails, replayed[0].ReasoningDetails)
+	assert.Equal(t, replayed[0].ReasoningDetails, message.ReasoningDetails)
 }
 
 func TestOpenRouterReplaysMultipleReasoningDetailBlocks(t *testing.T) {
@@ -886,8 +886,8 @@ func TestOpenRouterReplaysMultipleReasoningDetailBlocks(t *testing.T) {
 	var details []map[string]any
 	assert.NoError(t, json.Unmarshal(messages[0].ReasoningDetails, &details))
 	assert.Len(t, details, 2)
-	assert.Equal(t, "first", details[0]["text"])
-	assert.Equal(t, "second", details[1]["text"])
+	assert.Equal(t, details[0]["text"], "first")
+	assert.Equal(t, details[1]["text"], "second")
 }
 
 func TestMessageMarshalContentPartsPreservesOtherFields(t *testing.T) {
@@ -915,8 +915,8 @@ func TestResponseMessageContentPreservesPlainReasoning(t *testing.T) {
 	}, "openrouter")
 	assert.Len(t, content, 2)
 	thinking := content[0].(*llm.ThinkingContent)
-	assert.Equal(t, "visible reasoning", thinking.Thinking)
-	assert.Equal(t, "true", thinking.Metadata[openRouterReasoningMetadataKey])
+	assert.Equal(t, thinking.Thinking, "visible reasoning")
+	assert.Equal(t, thinking.Metadata[openRouterReasoningMetadataKey], "true")
 }
 
 func TestMessageIgnoresNullReasoningDetails(t *testing.T) {
@@ -929,7 +929,7 @@ func TestMessageIgnoresNullReasoningDetails(t *testing.T) {
 	assert.Nil(t, message.ReasoningDetails)
 	content := responseMessageContent(message, "openrouter")
 	assert.Len(t, content, 1)
-	assert.Equal(t, "answer", content[0].(*llm.TextContent).Text)
+	assert.Equal(t, content[0].(*llm.TextContent).Text, "answer")
 }
 
 // TestGenerateUsageDetails verifies that cached prompt tokens and reasoning
@@ -951,12 +951,12 @@ func TestGenerateUsageDetails(t *testing.T) {
 	}`), &result)
 	assert.NoError(t, err)
 	usage := result.Usage.toLLMUsage()
-	assert.Equal(t, 50, usage.InputTokens)
-	assert.Equal(t, 25, usage.OutputTokens)
-	assert.Equal(t, 100, usage.CacheReadInputTokens)
-	assert.Equal(t, 50, usage.CacheCreationInputTokens)
-	assert.Equal(t, 200, usage.TotalInputTokens())
-	assert.Equal(t, 10, usage.ReasoningTokens)
+	assert.Equal(t, usage.InputTokens, 50)
+	assert.Equal(t, usage.OutputTokens, 25)
+	assert.Equal(t, usage.CacheReadInputTokens, 100)
+	assert.Equal(t, usage.CacheCreationInputTokens, 50)
+	assert.Equal(t, usage.TotalInputTokens(), 200)
+	assert.Equal(t, usage.ReasoningTokens, 10)
 }
 
 func TestToLLMUsageClampsInvalidCacheCounts(t *testing.T) {
@@ -985,10 +985,10 @@ func TestToLLMUsageClampsInvalidCacheCounts(t *testing.T) {
 					CacheWriteTokens: tt.written,
 				},
 			}.toLLMUsage()
-			assert.Equal(t, tt.wantInput, usage.InputTokens)
-			assert.Equal(t, tt.wantCached, usage.CacheReadInputTokens)
-			assert.Equal(t, tt.wantWrite, usage.CacheCreationInputTokens)
-			assert.Equal(t, max(0, tt.prompt), usage.TotalInputTokens())
+			assert.Equal(t, usage.InputTokens, tt.wantInput)
+			assert.Equal(t, usage.CacheReadInputTokens, tt.wantCached)
+			assert.Equal(t, usage.CacheCreationInputTokens, tt.wantWrite)
+			assert.Equal(t, usage.TotalInputTokens(), max(0, tt.prompt))
 		})
 	}
 }
