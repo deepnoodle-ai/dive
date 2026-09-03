@@ -61,6 +61,23 @@ func TestInputHistoryStore_LoadRejectsInvalidJSON(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestAppRecordInputHistoryReplacesInvalidHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".dive", "history.json")
+	assert.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	assert.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+
+	app := newTestApp()
+	app.historyStore = &inputHistoryStore{path: path}
+	_, err := app.historyStore.Load()
+	assert.Error(t, err)
+
+	app.recordInputHistory("replacement prompt")
+
+	entries, err := app.historyStore.Load()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"replacement prompt"}, entries)
+}
+
 func TestAppRecordInputHistoryPersistsAcrossApps(t *testing.T) {
 	store := &inputHistoryStore{path: filepath.Join(t.TempDir(), ".dive", "history.json")}
 	first := newTestApp()

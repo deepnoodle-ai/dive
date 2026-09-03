@@ -441,11 +441,13 @@ func runInteractive(ctx *cli.Context) error {
 	app.contextDemos = contextDemos
 	if historyStore, err := defaultInputHistoryStore(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to configure input history: %v\n", err)
-	} else if history, err := historyStore.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load input history: %v\n", err)
 	} else {
 		app.historyStore = historyStore
-		app.history = history
+		if history, err := historyStore.Load(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load input history: %v\n", err)
+		} else {
+			app.history = history
+		}
 	}
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
