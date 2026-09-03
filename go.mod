@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/deepnoodle-ai/wonton v0.0.40
+	github.com/deepnoodle-ai/wonton v0.1.0
 	github.com/gobwas/glob v1.0.0
 	github.com/google/uuid v1.6.0
 	golang.org/x/image v0.45.0
