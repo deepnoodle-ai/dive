@@ -106,7 +106,9 @@ func (a *App) footerView() tui.View {
 
 	if a.processing {
 		if live := a.buildLiveView(false); live != nil {
-			views = append(views, live)
+			// Blank lines above and below: the spinner sits between the
+			// transcript and the input box, and without them it crowds both.
+			views = append(views, tui.Text(""), live, tui.Text(""))
 		}
 	} else if a.showTodos && len(a.todos) > 0 {
 		views = append(views, a.todoListView(viewOpts{animate: true}))

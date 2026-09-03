@@ -36,19 +36,20 @@ type clipboardReport struct {
 	verified bool
 }
 
-// notice is the user-facing line. An OSC 52 write has to be described as a
-// request rather than a result, because that is all it is.
+// notice is the user-facing line. Which rung did the work is ours to worry
+// about, not the user's, so the report says what happened and not how — `via`
+// stays on the struct for tests and failure messages.
 //
-// It also names /scrollback, because the request is often refused: neither
-// Terminal.app nor a default iTerm2 honours OSC 52, and this rung is reached
-// exactly when nothing else can work — dive over SSH — so the user has no other
-// way to find out that the copy went nowhere.
+// An OSC 52 write is described as a request rather than a result, because that
+// is all it is, and it names /scrollback: the request is often refused, and this
+// rung is reached exactly when nothing else can work — dive over SSH — so the
+// user has no other way to find out that the copy went nowhere.
 func (r clipboardReport) notice() string {
 	if r.verified {
-		return fmt.Sprintf("Copied %d line%s (%s)", r.lines, pluralSuffix(r.lines), r.via)
+		return fmt.Sprintf("Copied %d line%s", r.lines, pluralSuffix(r.lines))
 	}
-	return fmt.Sprintf("Sent %d line%s to the terminal clipboard (%s) — if nothing landed, your terminal may not allow it; /scrollback always works.",
-		r.lines, pluralSuffix(r.lines), r.via)
+	return fmt.Sprintf("Sent %d line%s to the terminal clipboard — if nothing landed, your terminal may not allow it; /scrollback always works.",
+		r.lines, pluralSuffix(r.lines))
 }
 
 // clipboardCopier puts text on the clipboard and says how it went. A field on

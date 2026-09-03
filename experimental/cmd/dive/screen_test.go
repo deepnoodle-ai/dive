@@ -440,3 +440,27 @@ func TestClearInScreenModeEmptiesTheViewport(t *testing.T) {
 	assert.Contains(t, screen.Text(), "Dive")
 	assert.True(t, app.viewport.AtBottom)
 }
+
+// The spinner sits between the transcript and the input box. Without a blank
+// line on each side it crowds both, so the gaps are part of the layout rather
+// than something the surrounding views happen to leave behind.
+func TestTheThinkingIndicatorIsGivenRoomOnBothSides(t *testing.T) {
+	app := newScreenApp(t, 3)
+	app.processing = true
+	app.streamingMessageIndex = len(app.messages) - 1
+
+	lines := strings.Split(renderScreen(t, app, 80, 24).Text(), "\n")
+	row := -1
+	for i, line := range lines {
+		if strings.Contains(line, "esc to interrupt") {
+			row = i
+			break
+		}
+	}
+	if row <= 0 || row+1 >= len(lines) {
+		t.Fatalf("no thinking indicator on screen:\n%s", strings.Join(lines, "\n"))
+	}
+
+	assert.Equal(t, strings.TrimSpace(lines[row-1]), "", "a blank line above the spinner")
+	assert.Equal(t, strings.TrimSpace(lines[row+1]), "", "a blank line below the spinner")
+}

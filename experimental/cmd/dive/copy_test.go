@@ -134,12 +134,14 @@ func TestCopyingNothingSaysSoInsteadOfSendingAnEmptyClipboard(t *testing.T) {
 }
 
 func TestAnUnverifiableCopyIsNotDescribedAsADoneDeal(t *testing.T) {
+	// Which rung did the work is not the user's problem, so it is not in the
+	// line — only whether the copy happened or was merely asked for.
 	verified := clipboardReport{lines: 12, via: "pbcopy", verified: true}
-	assert.Equal(t, verified.notice(), "Copied 12 lines (pbcopy)")
+	assert.Equal(t, verified.notice(), "Copied 12 lines")
 
 	// OSC 52 draws no reply from the terminal, so there is nothing to confirm.
 	sent := clipboardReport{lines: 12, via: "OSC 52", verified: false}
-	assert.Equal(t, sent.notice(), "Sent 12 lines to the terminal clipboard (OSC 52) — if nothing landed, your terminal may not allow it; /scrollback always works.")
+	assert.Equal(t, sent.notice(), "Sent 12 lines to the terminal clipboard — if nothing landed, your terminal may not allow it; /scrollback always works.")
 }
 
 func TestForcingOSC52WritesTheSequenceAndSkipsEveryNativeTool(t *testing.T) {

@@ -404,7 +404,7 @@ func TestASuccessfulCopySaysHowManyLinesAndByWhat(t *testing.T) {
 	release(app, x+width, y)
 	clip.next(t)
 
-	assert.Equal(t, runner.waitForFlash(t, "Copied"), "Copied 1 line (test)")
+	assert.Equal(t, runner.waitForFlash(t, "Copied"), "Copied 1 line")
 }
 
 // Copying must not move the thing being copied. A transcript notice would:
@@ -424,7 +424,7 @@ func TestCopyingLeavesTheTranscriptAndTheLayoutAlone(t *testing.T) {
 	release(app, x+width, y)
 	clip.next(t)
 	runner.waitForFlash(t, "Copied")
-	app.HandleEvent(flashEvent{text: "Copied 1 line (test)"})
+	app.HandleEvent(flashEvent{text: "Copied 1 line"})
 
 	assert.Equal(t, len(app.messages), messagesBefore)
 
@@ -432,7 +432,22 @@ func TestCopyingLeavesTheTranscriptAndTheLayoutAlone(t *testing.T) {
 	// every line above it is where it was.
 	after := renderScreen(t, app, 80, 24).Text()
 	assert.Equal(t, len(strings.Split(after, "\n")), len(strings.Split(before, "\n")))
-	assert.Contains(t, after, "Copied 1 line (test)")
+	assert.Contains(t, after, "Copied 1 line")
+
+	// It rides the right edge, so it never displaces the model and branch.
+	x, y, width = findText(t, renderScreen(t, app, 80, 24), "Copied 1 line")
+	assert.Equal(t, x+width, 79, "the flash ends one column in from the right edge")
+	assert.Contains(t, lineAt(t, app, y), "test-model", "the model stays on the same row")
+}
+
+// lineAt is row y of the rendered screen, trailing blanks trimmed.
+func lineAt(t *testing.T, app *App, y int) string {
+	t.Helper()
+	lines := strings.Split(renderScreen(t, app, 80, 24).Text(), "\n")
+	if y >= len(lines) {
+		t.Fatalf("row %d is off screen", y)
+	}
+	return strings.TrimRight(lines[y], " ")
 }
 
 func TestEscapeDismissesASelectionBeforeAnythingElse(t *testing.T) {
