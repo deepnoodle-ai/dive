@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	ModelGPT6Astra       openaisdk.ChatModel = "gpt-6-astra"
 	ModelGPT56                               = "gpt-5.6"
 	ModelGPT56Sol        openaisdk.ChatModel = "gpt-5.6-sol"
 	ModelGPT56Terra      openaisdk.ChatModel = "gpt-5.6-terra"

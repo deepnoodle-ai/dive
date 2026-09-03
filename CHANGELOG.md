@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **OpenAI GPT-6 Astra.** Added `openai.ModelGPT6Astra` (`gpt-6-astra`), a 1.05M
+  context model with reasoning effort `low` through `max` and no temperature
+  parameter. Access is gated to OpenAI's Trusted Access Program, so the
+  capability and pricing entries follow the published documentation rather than
+  a live probe, and the model is not offered as a CLI recommendation yet.
+- **Long-context pricing for OpenAI.** `gpt-6-astra` bills input and cache reads
+  at 2x and output at 1.5x above 272K input tokens. Long-context cache writes
+  have no `llm.PricingInfo` field and are still costed at the standard rate.
+
+### Fixed
+
+- **Provider watch no longer reports documentation filenames as models.** A
+  model linked as `<id>.md` in an upstream index filed a second phantom gap
+  beside the real one.
+
 ## [1.28.0] - 2026-09-03
 
 ### Added

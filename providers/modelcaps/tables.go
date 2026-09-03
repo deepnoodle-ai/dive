@@ -40,6 +40,14 @@ var (
 		llm.ReasoningEffortXHigh,
 		llm.ReasoningEffortMax,
 	}
+	// gpt-6-astra: none is rejected, so the ladder starts at low and runs to max.
+	effortsLowToMax = []llm.ReasoningEffort{
+		llm.ReasoningEffortLow,
+		llm.ReasoningEffortMedium,
+		llm.ReasoningEffortHigh,
+		llm.ReasoningEffortXHigh,
+		llm.ReasoningEffortMax,
+	}
 	// The ladder most Grok models accept: everything except max.
 	grokBelowMax = []llm.ReasoningEffort{
 		llm.ReasoningEffortNone,
@@ -106,6 +114,15 @@ var openAITable = Table{
 	{Prefix: "gpt-5.6-sol", Caps: Capabilities{Efforts: effortsNoneToMax}},
 	{Prefix: "gpt-5.6-terra", Caps: Capabilities{Efforts: effortsNoneToMax}},
 	{Prefix: "gpt-5.6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
+
+	// Documented rather than probed: gpt-6-astra is gated to the Trusted Access
+	// Program and answers "does not exist" for accounts outside it, so this
+	// entry comes from OpenAI's release notes, not a 200/400 from the endpoint.
+	// It is recorded rather than left Unverified because the two exclusions are
+	// stated outright -- no "none" effort, and no custom temperature, top_p, or
+	// logprobs -- and passing those through would send a request already known
+	// to fail. Re-probe once the model is reachable.
+	{Prefix: "gpt-6-astra", Caps: Capabilities{Efforts: effortsLowToMax}},
 
 	{Prefix: "o3", Caps: Capabilities{Efforts: effortsLowToHigh}},
 	{Prefix: "o3-pro", Caps: Capabilities{Efforts: effortsLowToHigh}},

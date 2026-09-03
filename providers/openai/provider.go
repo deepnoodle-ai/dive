@@ -458,6 +458,14 @@ func isNativeOpenAIEndpoint(providerName, endpoint string) bool {
 	return providerName == ProviderName && strings.TrimRight(endpoint, "/") == DefaultEndpoint
 }
 
+// supportsExplicitPromptCaching reports whether to mark cache breakpoints in the
+// request rather than leaving caching implicit.
+//
+// gpt-6-astra is a likely candidate -- it documents prompt_caching support and
+// publishes a separate cache-write rate, the same pair of signals that gates
+// gpt-5.6 -- but it stays off the list until the breakpoints have been sent to
+// the live endpoint. Guessing wrong here fails every request for the model,
+// whereas leaving it off only forgoes explicit breakpoints.
 func supportsExplicitPromptCaching(providerName, endpoint, model string) bool {
 	return isNativeOpenAIEndpoint(providerName, endpoint) && strings.HasPrefix(model, "gpt-5.6")
 }
