@@ -10,7 +10,7 @@ require (
 	github.com/deepnoodle-ai/dive/providers/google v1.27.0
 	github.com/deepnoodle-ai/dive/providers/grok v1.27.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.27.0
-	github.com/deepnoodle-ai/wonton v0.0.39
+	github.com/deepnoodle-ai/wonton v0.1.0
 )
 
 require (

@@ -23,6 +23,24 @@ var (
 	accentMuted  = tui.RGB{R: 55, G: 135, B: 165}
 )
 
+// Greys for secondary text. These are read on a dark terminal background, where
+// anything below about 150 fails WCAG AA's 4.5:1 — the old 100/110 greys sat
+// near 2.9:1 and were effectively unreadable. dimText is the floor for anything
+// carrying words; use fadedText only for rules, tracks, and other furniture.
+var (
+	dimText   = tui.RGB{R: 152, G: 152, B: 164}
+	mutedText = tui.RGB{R: 170, G: 170, B: 182}
+	fadedText = tui.RGB{R: 110, G: 110, B: 122}
+)
+
+// hintStyle is dive's replacement for wonton's Text().Style(hintStyle()), which combines
+// bright black with SGR 2 (faint). Faint on top of an already dark grey is what
+// makes hints vanish against a dark background; this keeps the italic and drops
+// the dimming.
+func hintStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(dimText).WithItalic()
+}
+
 // diveMarkdownTheme returns a custom markdown theme with complementary colors
 func diveMarkdownTheme() tui.MarkdownTheme {
 	theme := tui.DefaultMarkdownTheme()
@@ -42,7 +60,7 @@ func diveMarkdownTheme() tui.MarkdownTheme {
 // statusLineView renders the status line above the input area.
 // Shows: model name, directory, git branch, context %, elapsed time.
 func (a *App) statusLineView() tui.View {
-	mutedColor := tui.RGB{R: 100, G: 100, B: 110}
+	mutedColor := dimText
 	accentStyle := tui.NewStyle().WithFgRGB(accentDim)
 	mutedStyle := tui.NewStyle().WithFgRGB(mutedColor)
 
@@ -55,7 +73,7 @@ func (a *App) statusLineView() tui.View {
 		tui.Text(" in ").Style(mutedStyle),
 		tui.Text("%s", dirName).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 200, G: 200, B: 210}).WithBold()),
 	)
-	if branch := detectGitBranch(a.workspaceDir); branch != "" {
+	if branch := a.gitBranch; branch != "" {
 		parts = append(parts,
 			tui.Text(" on ").Style(mutedStyle),
 			tui.Text("%s", branch).Style(accentStyle),
@@ -67,6 +85,16 @@ func (a *App) statusLineView() tui.View {
 			tui.NewStyle().WithFgRGB(tui.RGB{R: 230, G: 190, B: 80}).WithBold()))
 	}
 
+	// A flash rides the right edge of this row rather than adding one of its
+	// own. The status line is one row tall whether or not something is being
+	// reported, which is the point: transient feedback must not move the
+	// transcript. Right-aligned so it never displaces the model and branch.
+	if flash := a.activeFlash(); flash != "" {
+		parts = append(parts,
+			tui.Spacer().Flex(1),
+			tui.Text("%s ", flash).Style(accentStyle),
+		)
+	}
 	rows := []tui.View{tui.Group(parts...)}
 
 	// Line 2: context-window usage bar (shown after the first LLM response).
@@ -83,7 +111,7 @@ func (a *App) statusLineView() tui.View {
 			Width(20).
 			HidePercent().
 			Style(tui.NewStyle().WithFgRGB(barColor)).
-			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 80, G: 80, B: 90}))
+			EmptyStyle(tui.NewStyle().WithFgRGB(fadedText))
 		rows = append(rows, tui.Group(
 			tui.Text(" ").Style(mutedStyle),
 			bar,
@@ -145,7 +173,7 @@ func (a *App) tokensPanelView() tui.View {
 	showReasoning := turn.ReasoningTokens > 0 || (showSession && sess.ReasoningTokens > 0)
 	showCost := turn.Cost != nil || (showSession && sess.Cost != nil)
 
-	headerStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 110, B: 120})
+	headerStyle := tui.NewStyle().WithFgRGB(dimText)
 	scopeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170}).WithBold()
 	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
 	readStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold() // green: cache hits
@@ -232,7 +260,7 @@ func cacheHitRate(u *llm.Usage) (string, bool) {
 // red (<50%, i.e. cache thrash). Muted when no caching occurred.
 func cacheHitStyle(u *llm.Usage, ok bool) tui.Style {
 	if !ok {
-		return tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+		return tui.NewStyle().WithFgRGB(dimText)
 	}
 	denom := u.TotalInputTokens()
 	pct := (u.CacheReadInputTokens * 100) / denom
@@ -305,64 +333,86 @@ func (a *App) contextPercent() int {
 	return pct
 }
 
-// messageView returns the view for a message (with animations for live updates)
-func (a *App) messageView(msg Message, index int) tui.View {
-	switch msg.Type {
-	case MessageTypeToolCall:
-		return a.toolCallView(msg)
-	default:
-		return a.textMessageView(msg, index)
+// messageView renders any transcript message. This is the only message
+// renderer: opts says whether the frame is a live one or a final one, and
+// nothing else about the caller leaks into the result.
+func (a *App) messageView(msg Message, opts viewOpts) tui.View {
+	if msg.Type == MessageTypeToolCall {
+		// A click on the header is the only thing that sets Expanded, so this
+		// is the user's own choice overriding the caller's default.
+		opts.expanded = opts.expanded || msg.Expanded
+		return a.toolCallView(msg, opts)
 	}
+	return a.textMessageView(msg)
 }
 
-// textMessageView renders a text message (simplified for live updates - no markdown parsing)
-func (a *App) textMessageView(msg Message, index int) tui.View {
+// textMessageView renders a non-tool-call message.
+func (a *App) textMessageView(msg Message) tui.View {
 	switch msg.Role {
-	case "intro":
+	case roleIntro:
 		return a.introView(msg)
 
-	case "user":
+	case roleReport:
+		if msg.Collapsed {
+			return tui.Group(
+				tui.Text("▸ ").Style(hintStyle()),
+				tui.Text("%s", msg.CollapsedTitle),
+				tui.Text("  (click to expand)").Style(hintStyle()),
+			)
+		}
+		return msg.View
+
+	case roleUser:
 		bg := tui.RGB{R: 48, G: 48, B: 54}
 		caret := tui.Text("❯ ").Style(
-			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(bg),
+			tui.NewStyle().WithFgRGB(dimText).WithBgRGB(bg),
 		)
 		text := tui.Text("%s", msg.Content).Wrap().Style(
 			tui.NewStyle().WithBgRGB(bg),
 		)
 		return tui.Group(caret, text, tui.Fill(' ').BgRGB(bg.R, bg.G, bg.B))
 
-	case "assistant":
-		content := strings.TrimRight(msg.Content, "\n")
+	case roleAssistant:
+		content := strings.TrimSpace(msg.Content)
 		if content == "" {
 			return nil
 		}
-		// Hanging indent: ⏺ prefix is fixed, text fills remaining width
-		// so wrapped lines align to column 2 (like Claude Code)
-		return tui.Group(
-			tui.Text("⏺ "),
-			tui.Text("%s", content).Wrap().Flex(1),
-		)
+		// Hanging indent: ⏺ overlaid at (0,0), markdown indented 2 spaces
+		// so all lines (including wrapped) align to column 2 (like Claude Code)
+		return tui.ZStack(
+			tui.PaddingLTRB(2, 0, 0, 0, tui.Markdown(content, nil).Theme(diveMarkdownTheme())),
+			tui.Text("⏺"),
+		).Align(tui.AlignLeft)
 
-	case "reasoning":
-		content := strings.TrimRight(msg.Content, "\n")
+	case roleReasoning:
+		content := strings.TrimSpace(msg.Content)
 		if content == "" {
 			return nil
 		}
-		reasoningStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 125, G: 125, B: 138})
+		reasoningStyle := tui.NewStyle().WithFgRGB(dimText)
 		return tui.Group(
 			tui.Text("◌ ").Style(reasoningStyle),
 			tui.Text("%s", content).Wrap().Style(reasoningStyle).Flex(1),
 		)
 
-	case "context":
-		dimStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+	case roleContext:
+		dimStyle := tui.NewStyle().WithFgRGB(dimText)
 		return tui.Group(
 			tui.Text("↩ ").Style(dimStyle),
 			tui.Text("%s", msg.Content).Wrap().Style(dimStyle),
 		)
 
-	case "system":
+	case roleSystem:
 		return tui.Text("%s", msg.Content).Wrap().Warning()
+
+	case roleNotice:
+		if msg.Marker != "" {
+			return tui.Group(
+				tui.Text("%s", msg.Marker).Style(tui.NewStyle().WithFgRGB(accentMuted)),
+				tui.Text("%s", msg.Content).Wrap().Style(hintStyle()),
+			)
+		}
+		return tui.Text("%s", msg.Content).Wrap().Style(hintStyle())
 
 	default:
 		return tui.Text("%s", msg.Content).Wrap()
@@ -387,8 +437,8 @@ func (a *App) introView(msg Message) tui.View {
 	}
 
 	titleStyle := tui.NewStyle().WithFgRGB(accentBright).WithBold()
-	mutedStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 155})
-	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+	mutedStyle := tui.NewStyle().WithFgRGB(mutedText)
+	labelStyle := tui.NewStyle().WithFgRGB(dimText)
 
 	// Box content
 	content := []tui.View{
@@ -435,17 +485,19 @@ func (a *App) introView(msg Message) tui.View {
 		BorderFg(tui.ColorBrightBlack))
 }
 
-// toolCallView renders a tool call message (with animation)
-func (a *App) toolCallView(msg Message) tui.View {
+// toolCallView renders a tool call message. A running call's marker pulses only
+// when opts.animate is set; a final rendering gets a static cyan dot.
+func (a *App) toolCallView(msg Message, opts viewOpts) tui.View {
 	var statusView tui.View
-	if msg.ToolDone {
-		if msg.ToolError {
-			statusView = tui.Text("⏺").Error()
-		} else {
-			statusView = tui.Text("⏺").Success()
-		}
-	} else {
+	switch {
+	case msg.ToolDone && msg.ToolError:
+		statusView = tui.Text("⏺").Error()
+	case msg.ToolDone:
+		statusView = tui.Text("⏺").Success()
+	case opts.animate:
 		statusView = tui.Text("⏺").Animate(tui.Pulse(tui.NewRGB(80, 160, 220), 8).Brightness(0.3, 1.0))
+	default:
+		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
 	}
 
 	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
@@ -457,11 +509,11 @@ func (a *App) toolCallView(msg Message) tui.View {
 	// snapshot. This is the ReportProgress channel — distinct from the streamed
 	// result line below — and is dropped once the tool completes.
 	if !msg.ToolDone && msg.ToolProgress != "" {
-		views = append(views, tui.Text("  ↳ %s", msg.ToolProgress).Hint())
+		views = append(views, tui.Text("  ↳ %s", msg.ToolProgress).Style(hintStyle()))
 	}
 
 	if len(msg.ToolResultLines) > 0 {
-		if resultView := a.formatToolResultView(msg); resultView != nil {
+		if resultView := a.formatToolResultView(msg, opts); resultView != nil {
 			views = append(views, resultView)
 		}
 	}
@@ -474,11 +526,12 @@ func (a *App) toolCallView(msg Message) tui.View {
 
 // toolResultStyle returns the style for tool result text (brighter than muted)
 func toolResultStyle() tui.Style {
-	return tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 150})
+	return tui.NewStyle().WithFgRGB(mutedText)
 }
 
-// formatToolResultView formats tool result
-func (a *App) formatToolResultView(msg Message) tui.View {
+// formatToolResultView formats tool result. Collapsed (the default) it is the
+// first line plus a count of what was hidden; expanded it is every line.
+func (a *App) formatToolResultView(msg Message, opts viewOpts) tui.View {
 	// Special handling for Read tool - show line count
 	if msg.ToolName == "Read" && msg.ToolReadLines > 0 {
 		resultText := fmt.Sprintf("Read %d line%s", msg.ToolReadLines, pluralSuffix(msg.ToolReadLines))
@@ -495,20 +548,28 @@ func (a *App) formatToolResultView(msg Message) tui.View {
 		return renderDiffResult(strings.Join(lines, "\n"))
 	}
 
-	views := make([]tui.View, 0, 4)
-
+	style := toolResultStyle()
 	firstLine := lines[0]
-	if len(firstLine) > 80 {
-		firstLine = firstLine[:77] + "..."
+	if !opts.expanded {
+		// Runes, not bytes: a tool result is arbitrary text, and cutting one
+		// mid-character renders a replacement glyph.
+		firstLine = truncateRunes(firstLine, 80)
 	}
+
+	views := make([]tui.View, 0, 4)
 	if msg.ToolError {
 		views = append(views, tui.Text("  ⎿  %s", firstLine).Error())
 	} else {
-		views = append(views, tui.Text("  ⎿  %s", firstLine).Style(toolResultStyle()))
+		views = append(views, tui.Text("  ⎿  %s", firstLine).Style(style))
 	}
 
-	if len(lines) > 1 {
-		views = append(views, tui.Text("     … +%d lines", len(lines)-1).Hint())
+	switch {
+	case opts.expanded:
+		for _, line := range lines[1:] {
+			views = append(views, tui.Text("     %s", line).Style(style))
+		}
+	case len(lines) > 1:
+		views = append(views, tui.Text("     … +%d lines", len(lines)-1).Style(hintStyle()))
 	}
 
 	return tui.Stack(views...).Gap(0)
@@ -700,7 +761,7 @@ func renderDiffResult(result string) tui.View {
 	}
 
 	if truncated {
-		views = append(views, tui.Text("      ... (output truncated)").Hint())
+		views = append(views, tui.Text("      ... (output truncated)").Style(hintStyle()))
 	}
 
 	return tui.Stack(views...).Gap(0)
@@ -724,20 +785,23 @@ func (a *App) todoStatusView() tui.View {
 	return tui.Group(
 		tui.Text("✽").Animate(tui.Pulse(tui.NewRGB(180, 140, 220), 20).Brightness(0.4, 1.0)),
 		tui.Text(" %s…", activeTodo.ActiveForm).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})),
-		tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
+		tui.Text(" (%s)", formatDuration(elapsed)).Style(hintStyle()),
 	)
 }
 
-// todoListView renders the todo list (with animations)
-func (a *App) todoListView() tui.View {
+// todoListView renders the todo list. The pulsing "doing X…" header only makes
+// sense on a live frame, so it is gated on opts.animate.
+func (a *App) todoListView(opts viewOpts) tui.View {
 	if len(a.todos) == 0 {
 		return nil
 	}
 
 	views := make([]tui.View, 0, len(a.todos)+1)
 
-	if statusView := a.todoStatusView(); statusView != nil {
-		views = append(views, statusView)
+	if opts.animate {
+		if statusView := a.todoStatusView(); statusView != nil {
+			views = append(views, statusView)
+		}
 	}
 
 	for _, todo := range a.todos {
@@ -771,119 +835,4 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
-}
-
-// Static versions for scroll history (no animations)
-
-func (a *App) messageViewStatic(msg Message) tui.View {
-	switch msg.Type {
-	case MessageTypeToolCall:
-		return a.toolCallViewStatic(msg)
-	default:
-		return a.textMessageViewStatic(msg)
-	}
-}
-
-func (a *App) textMessageViewStatic(msg Message) tui.View {
-	switch msg.Role {
-	case "user":
-		bg := tui.RGB{R: 70, G: 70, B: 78}
-		caret := tui.Text("❯ ").Style(
-			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(bg),
-		)
-		text := tui.Text("%s", msg.Content).Wrap().Style(
-			tui.NewStyle().WithBgRGB(bg),
-		)
-		return tui.Group(caret, text, tui.Fill(' ').BgRGB(bg.R, bg.G, bg.B))
-
-	case "assistant":
-		content := strings.TrimSpace(msg.Content)
-		if content == "" {
-			return nil
-		}
-		// Hanging indent: ⏺ overlaid at (0,0), markdown indented 2 spaces
-		// so all lines (including wrapped) align to column 2 (like Claude Code)
-		return tui.ZStack(
-			tui.PaddingLTRB(2, 0, 0, 0, tui.Markdown(content, nil).Theme(diveMarkdownTheme())),
-			tui.Text("⏺"),
-		).Align(tui.AlignLeft)
-
-	case "reasoning":
-		content := strings.TrimSpace(msg.Content)
-		if content == "" {
-			return nil
-		}
-		reasoningStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 125, G: 125, B: 138})
-		return tui.Group(
-			tui.Text("◌ ").Style(reasoningStyle),
-			tui.Text("%s", content).Wrap().Style(reasoningStyle).Flex(1),
-		)
-
-	case "context":
-		dimStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
-		return tui.Group(
-			tui.Text("↩ ").Style(dimStyle),
-			tui.Text("%s", msg.Content).Wrap().Style(dimStyle),
-		)
-
-	case "system":
-		return tui.Text("%s", msg.Content).Wrap().Warning()
-
-	default:
-		return tui.Text("%s", msg.Content).Wrap()
-	}
-}
-
-func (a *App) toolCallViewStatic(msg Message) tui.View {
-	var statusView tui.View
-	if msg.ToolDone {
-		if msg.ToolError {
-			statusView = tui.Text("⏺").Error()
-		} else {
-			statusView = tui.Text("⏺").Success()
-		}
-	} else {
-		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
-	}
-
-	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
-	header := tui.Group(statusView, tui.Text(" %s", toolCall))
-
-	if len(msg.ToolResultLines) > 0 {
-		resultView := a.formatToolResultView(msg)
-		if resultView != nil {
-			return tui.Stack(header, resultView).Gap(0)
-		}
-	}
-
-	return header
-}
-
-func (a *App) todoListViewStatic() tui.View {
-	if len(a.todos) == 0 {
-		return nil
-	}
-
-	views := make([]tui.View, 0, len(a.todos))
-
-	for _, todo := range a.todos {
-		var todoView tui.View
-		switch todo.Status {
-		case TodoStatusCompleted:
-			mutedStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 100})
-			todoView = tui.Group(
-				tui.Text("  ⎿  ☒ ").Style(mutedStyle),
-				tui.Text("%s", todo.Content).Style(mutedStyle.WithStrikethrough()),
-			)
-		case TodoStatusInProgress:
-			style := tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220}).WithBold()
-			todoView = tui.Text("  ⎿  ☐ %s", todo.Content).Style(style)
-		default:
-			style := tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 140})
-			todoView = tui.Text("  ⎿  ☐ %s", todo.Content).Style(style)
-		}
-		views = append(views, todoView)
-	}
-
-	return tui.Stack(views...).Gap(0)
 }

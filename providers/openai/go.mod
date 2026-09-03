@@ -6,7 +6,7 @@ toolchain go1.26.8
 
 require (
 	github.com/deepnoodle-ai/dive v1.27.0
-	github.com/deepnoodle-ai/wonton v0.0.39
+	github.com/deepnoodle-ai/wonton v0.1.0
 	github.com/openai/openai-go/v3 v3.55.0
 	golang.org/x/image v0.45.0
 )

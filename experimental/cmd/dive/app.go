@@ -154,12 +154,44 @@ type Todo struct {
 	Status     TodoStatus // pending, in_progress, completed
 }
 
-// Message represents a chat message
+// Message represents a chat message.
+//
+// Messages are append-mostly. The five sites that mutate one in place — the two
+// stream flushes, the tool result, and the tool stream and progress updates —
+// all call a.touch(i), which bumps Rev. Rev is what a render cache keys on, so
+// anything caching a message's view can tell a mutation from an append without
+// diffing content.
 type Message struct {
-	Role    string // "user", "assistant", "reasoning", "system", "context", or "intro"
+	Role    string // see the message role constants
 	Content string // Text content
 	Time    time.Time
 	Type    MessageType
+
+	// View carries a pre-built view for roleReport messages (/usage, /help,
+	// /todos, /context). wonton views are inert until measured, so a stored
+	// view re-wraps at whatever width it is later rendered to.
+	View tui.View
+
+	// Marker prefixes a roleNotice line with an accented glyph (the "◇" of a
+	// context-demo row). Empty for a plain notice.
+	Marker string
+
+	// Rev counts in-place mutations of this message. Bumped by touch.
+	Rev uint32
+
+	// Expanded shows a tool call's result in full. Set by clicking the tool
+	// call's header row; only tool calls read it.
+	Expanded bool
+
+	// Collapsed hides a report's body, leaving CollapsedTitle in its place.
+	// The title is captured when the report is collapsed rather than rendered
+	// on demand, since a report is a pre-built view with no text to read.
+	Collapsed      bool
+	CollapsedTitle string
+
+	// emitted records that this message has already been written to inline
+	// scrollback. Unused by the managed screen, which renders a.messages.
+	emitted bool
 
 	// Tool call fields (when Type == MessageTypeToolCall)
 	ToolID          string
@@ -253,8 +285,60 @@ type App struct {
 	resumeSessionID string           // Session ID to resume (from --resume flag)
 	currentSession  *session.Session // Current active session
 
-	// InlineApp runner
-	runner *tui.InlineApp
+	// runner is the event sink for the active UI runner. Safe to call from any
+	// goroutine. scrollback is the inline runner's transcript sink; the managed
+	// screen leaves it nil and renders a.messages directly.
+	runner     uiRunner
+	scrollback scrollbackWriter
+
+	// Managed screen (the default; --inline / DIVE_INLINE=1 opts out). In this
+	// mode the transcript is application state rendered into the alternate
+	// screen rather than terminal scrollback; see screen.go.
+	screenMode   bool
+	frameMetrics bool // DIVE_DEBUG_FRAMES=1: show per-frame cost in the status line
+	viewport     tui.ViewportState
+	runtime      *tui.Runtime
+	terminal     *tui.Terminal
+	termWidth    int
+	termHeight   int
+	startTime    time.Time
+
+	// Selection and copy. mouseEnabled is what /mouse and DIVE_DISABLE_MOUSE
+	// toggle: with reporting off the terminal's own selection works again, at
+	// the cost of every gesture the app provides. copyOnSelect copies as soon
+	// as a drag ends, the way a terminal does; DIVE_COPY_ON_SELECT=0 turns it
+	// off, leaving the highlight for /copy or Ctrl+C to act on. clipboard is
+	// the injection seam — tests read what was copied without a real clipboard.
+	mouseEnabled bool
+	copyOnSelect bool
+	clipboard    clipboardCopier
+
+	// altScrollDisabled records that we turned the terminal's alternate-scroll
+	// mode off, which is the only thing that entitles us to turn it back on.
+	altScrollDisabled bool
+
+	// What the last turn cost, kept so the spinner's slot can report it once the
+	// turn is over rather than simply vanishing. Zero until a turn completes,
+	// and replaced by the spinner as soon as the next one starts.
+	lastTurnDuration time.Duration
+	lastTurnEndedAt  time.Time
+
+	// A flash is feedback that expires: it takes over the status line for a
+	// moment and then gives it back. Copying needs this rather than a transcript
+	// notice, because a notice is permanent and every drag would leave one —
+	// growing the list under the pointer and pushing the view the user is still
+	// looking at. The status line is always exactly one row, so nothing moves.
+	flashText  string
+	flashUntil time.Time
+
+	// fullRepaint redraws every cell each frame (DIVE_FULL_REPAINT=1), for
+	// hosts that leave fragments of the last frame on screen.
+	fullRepaint bool
+
+	// Frame cost, for DIVE_DEBUG_FRAMES=1.
+	viewTimeTotal time.Duration
+	viewTimeCount int64
+	viewTimeMax   time.Duration
 
 	// Input state
 	inputText    string
@@ -285,6 +369,12 @@ type App struct {
 	frame               uint64
 	processing          bool
 	processingStartTime time.Time
+
+	// Git branch shown in the status line. Cached because `git rev-parse` costs
+	// ~5 ms and the status line renders on every frame; refreshed on a timer and
+	// at turn boundaries, never from a view function.
+	gitBranch   string
+	gitBranchAt time.Time
 
 	// Todo list state
 	todos     []Todo
@@ -406,20 +496,22 @@ func (a *App) shutdown() {}
 
 // LiveView implements tui.InlineApplication - returns the live region view.
 // Called only from the main event loop goroutine - no locking needed.
+//
+// In inline mode this is the whole of what the CLI repaints: the transcript
+// above it belongs to the terminal's scrollback. The managed screen renders
+// View() instead, which puts the same footer under a scrollable transcript.
 func (a *App) LiveView() tui.View {
-	views := make([]tui.View, 0)
-
 	// Show tool dialog if active
 	if a.dialogState != nil && a.dialogState.Active {
-		views = append(views, tui.Text(""))
-		views = append(views, a.dialogView())
-		return tui.Stack(views...)
+		return tui.Stack(tui.Text(""), a.dialogView())
 	}
+
+	views := make([]tui.View, 0)
 
 	// Show streaming content during processing
 	if a.processing {
 		views = append(views, tui.Text(""))
-		liveContent := a.buildLiveView()
+		liveContent := a.buildLiveView(true)
 		if liveContent != nil {
 			views = append(views, liveContent)
 		}
@@ -428,11 +520,24 @@ func (a *App) LiveView() tui.View {
 	// Show todos if visible and not processing
 	if !a.processing && a.showTodos && len(a.todos) > 0 {
 		views = append(views, tui.Text(""))
-		views = append(views, a.todoListView())
+		views = append(views, a.todoListView(viewOpts{animate: true}))
 	}
 
 	// Always add spacing before divider (separates from scrollback or live content)
 	views = append(views, tui.Text(""))
+	views = append(views, a.inputAreaView()...)
+
+	if len(views) == 0 {
+		return tui.Text("")
+	}
+	return tui.Stack(views...).Gap(0)
+}
+
+// inputAreaView is the fixed bottom of the screen in both modes: the input box
+// with its dividers, then whichever of autocomplete, compaction stats, or the
+// exit hint applies, then the status line.
+func (a *App) inputAreaView() []tui.View {
+	views := make([]tui.View, 0, 8)
 
 	// Input area
 	views = append(views, tui.Divider())
@@ -443,16 +548,23 @@ func (a *App) LiveView() tui.View {
 		tui.InputField(&a.inputText).
 			ID("main-input").
 			Prompt(" ❯ ").
-			PromptStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})).
+			PromptStyle(tui.NewStyle().WithFgRGB(dimText)).
 			Placeholder("Type a message... (@filename, or drop a file to attach)").
 			Multiline(true).
 			MaxHeight(10).
+			// A pasted block shows as "[pasted N lines]" and is edited as one
+			// unit. The bound value stays the real text, so what gets sent —
+			// and what the dropped-file scan reads — is what was pasted. A
+			// file drop is a single line and so is never collapsed.
+			PastePlaceholder(true).
 			OnChange(func(value string) {
 				// A focused input consumes its own keystrokes (wonton
 				// >= v0.0.35), so capture dropped files and refresh
 				// autocomplete on edits here rather than from HandleEvent.
 				a.handleInputChange(value)
 				a.updateAutocomplete()
+				// Typing or pasting means the user is done reading back.
+				a.snapToBottom()
 			}).
 			OnKey(func(e tui.KeyEvent) bool {
 				// Claim the keys the input would otherwise consume so
@@ -465,6 +577,7 @@ func (a *App) LiveView() tui.View {
 				return false
 			}).
 			OnSubmit(func(value string) {
+				a.snapToBottom()
 				a.submitInput(value)
 			}),
 	)
@@ -488,7 +601,7 @@ func (a *App) LiveView() tui.View {
 			if i == a.autocompleteIndex {
 				footerViews = append(footerViews, tui.Text(" ❯ %s%s", prefix, match).Fg(tui.ColorCyan))
 			} else {
-				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Hint())
+				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Style(hintStyle()))
 			}
 		}
 		// Pad to 8 lines only when autocomplete is active (stable height during selection)
@@ -498,17 +611,20 @@ func (a *App) LiveView() tui.View {
 	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
 		footerViews = append(footerViews, tui.Group(
 			tui.Text(" ⚡").Fg(tui.ColorYellow),
-			tui.Text(" Context compacted:").Hint(),
+			tui.Text(" Context compacted:").Style(hintStyle()),
 			tui.Text(" %d → %d tokens", a.lastCompactionEvent.TokensBefore, a.lastCompactionEvent.TokensAfter),
-			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Hint(),
+			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Style(hintStyle()),
 		))
 	} else if a.showExitHint {
-		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Hint())
+		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Style(hintStyle()))
 	}
 
 	// Show status line when autocomplete is not active
 	if len(a.autocompleteMatches) == 0 {
 		views = append(views, a.statusLineView())
+		if metrics := a.frameMetricsView(); metrics != nil {
+			views = append(views, metrics)
+		}
 	}
 
 	// Minimum padding at bottom for visual breathing room
@@ -517,12 +633,7 @@ func (a *App) LiveView() tui.View {
 	}
 
 	views = append(views, footerViews...)
-
-	if len(views) == 0 {
-		return tui.Text("")
-	}
-
-	return tui.Stack(views...).Gap(0)
+	return views
 }
 
 // attachmentsView names the files attached to the draft message, rendered just
@@ -536,7 +647,7 @@ func (a *App) attachmentsView() tui.View {
 	for _, att := range a.attachments {
 		rows = append(rows, tui.Group(
 			tui.Text(" ⏺ ").Fg(tui.ColorCyan),
-			tui.Text("%s (%s)", att.Name, formatBytes(int(att.Size))).Hint(),
+			tui.Text("%s (%s)", att.Name, formatBytes(int(att.Size))).Style(hintStyle()),
 		))
 	}
 	return tui.Stack(rows...).Gap(0)
@@ -628,7 +739,7 @@ func (a *App) dialogView() tui.View {
 		)
 
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Esc to cancel").Hint())
+		views = append(views, tui.Text(" Esc to cancel").Style(hintStyle()))
 
 		return tui.Stack(views...)
 
@@ -639,12 +750,12 @@ func (a *App) dialogView() tui.View {
 			tui.Text(" %s", a.dialogState.Title).Bold(),
 		)
 		if a.dialogState.Message != "" {
-			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(tui.NewStyle().WithFgRGB(mutedText)))
 		}
 		if a.dialogState.ContentPreview != "" {
 			views = append(views, tui.Divider().Char('-'))
 			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
-				views = append(views, tui.Text(" %s", line).Hint())
+				views = append(views, tui.Text(" %s", line).Style(hintStyle()))
 			}
 		}
 		views = append(views, tui.Text(""))
@@ -689,7 +800,7 @@ func (a *App) dialogView() tui.View {
 		views = append(views, promptChoice)
 
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Use arrow keys to navigate, Enter to select, Esc to cancel").Hint())
+		views = append(views, tui.Text(" Use arrow keys to navigate, Enter to select, Esc to cancel").Style(hintStyle()))
 
 	case DialogTypeMultiSelect:
 		// Header
@@ -698,7 +809,7 @@ func (a *App) dialogView() tui.View {
 			tui.Text(" %s", a.dialogState.Title).Bold(),
 		)
 		if a.dialogState.Message != "" {
-			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(tui.NewStyle().WithFgRGB(mutedText)))
 		}
 		views = append(views, tui.Text(""))
 
@@ -718,7 +829,7 @@ func (a *App) dialogView() tui.View {
 		)
 
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Use arrow keys to navigate, Space to toggle, Enter to confirm, Esc to cancel").Hint())
+		views = append(views, tui.Text(" Use arrow keys to navigate, Space to toggle, Enter to confirm, Esc to cancel").Style(hintStyle()))
 
 	case DialogTypeInput:
 		// Header
@@ -727,7 +838,7 @@ func (a *App) dialogView() tui.View {
 			tui.Text(" %s", a.dialogState.Title).Bold(),
 		)
 		if a.dialogState.Message != "" {
-			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(tui.NewStyle().WithFgRGB(mutedText)))
 		}
 		views = append(views, tui.Text(""))
 		// Note: InputField handles its own Enter key via OnSubmit
@@ -749,7 +860,7 @@ func (a *App) dialogView() tui.View {
 					a.hideActiveDialog()
 				}),
 		)
-		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
+		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Style(hintStyle()))
 	}
 
 	return tui.Stack(views...)
@@ -777,10 +888,29 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		// Update autocomplete after key events (input may have changed)
 		a.updateAutocomplete()
 		return cmds
+	case tui.ResizeEvent:
+		a.handleResize(e)
+		return nil
+	case tui.MouseEvent:
+		a.handleScreenMouse(e)
+		return nil
 	case tui.TickEvent:
 		a.frame = e.Frame
+		// Some hosts — ConPTY among them — leave fragments of the previous
+		// frame behind, which a diffing flush has no reason to overwrite.
+		// Redrawing every cell costs bandwidth and fixes it, so it is a switch
+		// rather than the default.
+		if a.fullRepaint {
+			a.repaint()
+		}
+		// A pointer held still outside the viewport sends no further events, so
+		// a drag past an edge only keeps growing if something nudges it once a
+		// frame. No-op unless a drag is actually being held there.
+		a.viewport.DragAutoScroll()
 		// Flush any buffered streaming text (batches updates to 30 FPS max)
 		a.flushStreamBuffer()
+		// Keep the status line's branch fresh without forking git per frame.
+		a.refreshGitBranch()
 		// Clear exit hint after 2 seconds
 		if a.showExitHint && time.Since(a.lastCtrlC) >= 2*time.Second {
 			a.showExitHint = false
@@ -823,6 +953,10 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleNativeBgTasksReady(e)
 	case monitorNotificationEvent:
 		a.handleMonitorNotification(e)
+	case noticeEvent:
+		a.appendNotice("%s", e.text)
+	case flashEvent:
+		a.setFlash("%s", e.text)
 	case contextDemoNoticeEvent:
 		a.handleContextDemoNotice(e.notice)
 	case showDialogEvent:
@@ -1024,9 +1158,7 @@ func (a *App) captureDroppedFiles(inserted string) string {
 		if err != nil {
 			// The drop was deliberate, so say why nothing was attached and
 			// leave the path in the message as text.
-			if a.runner != nil {
-				a.runner.Printf("Did not attach %s: %s.", filepath.Base(path), err)
-			}
+			a.appendNotice("Did not attach %s: %s.", filepath.Base(path), err)
 			parts = append(parts, tokens[i].value)
 			continue
 		}
@@ -1125,7 +1257,19 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 
 	// Handle global keys
 	switch e.Key {
+	case tui.KeyCtrlL:
+		a.repaint()
+		return nil
 	case tui.KeyCtrlC:
+		// With copy-on-select off the highlight is left sitting there waiting
+		// to be copied, and Ctrl+C is the key every terminal has trained users
+		// to press for exactly that. Only when there is a selection: cancel and
+		// exit are what Ctrl+C means the rest of the time.
+		if !a.copyOnSelect && a.viewport.HasSelection() {
+			a.copySelection()
+			a.viewport.ClearSelection()
+			return nil
+		}
 		if a.processing {
 			a.cancel()
 		} else {
@@ -1140,8 +1284,15 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 		}
 		return nil
 	case tui.KeyEscape:
-		if a.processing {
+		// A highlight is the most recent thing Escape can undo, and dropping it
+		// also hands following back, so it comes before cancelling the turn.
+		if a.viewport.HasSelection() {
+			a.viewport.ClearSelection()
+		} else if a.processing {
 			a.cancel()
+		} else if a.screenMode && !a.viewport.AtBottom {
+			// Idle and scrolled away: Escape is the cheapest way back.
+			a.viewport.ScrollToBottom()
 		}
 		return nil
 	}
@@ -1176,6 +1327,12 @@ func (a *App) handleInputNavKey(e tui.KeyEvent) bool {
 			a.clearAutocomplete()
 			return true
 		}
+	}
+
+	// Scrolling the managed screen. The input owns Home/End when there is a
+	// draft in the box, so handleScreenKey decides; see screen.go.
+	if a.handleScreenKey(e) {
+		return true
 	}
 
 	// Command-history recall on Up/Down when the input is idle.
@@ -1231,6 +1388,10 @@ func (a *App) submitInput(value string) {
 		return
 	}
 
+	// Sending is a commitment to watching the reply: jump back to the bottom
+	// even if the user had scrolled away.
+	a.viewport.ScrollToBottom()
+
 	// Claim the attachments the submitted text still refers to; any whose
 	// placeholder the user deleted are dropped along with the draft.
 	attachments := a.takeAttachments(trimmed)
@@ -1258,11 +1419,11 @@ func (a *App) processMessageAsync(input string, attachments []attachment, includ
 	// Expand file references (uses only immutable workspaceDir)
 	expanded, extraContent, err := a.expandFileReferences(input)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	expanded, attachedContent, err := expandAttachments(expanded, attachments)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	extraContent = append(extraContent, attachedContent...)
 	if includeStartupAttachment {
@@ -1281,11 +1442,11 @@ func (a *App) processCommandAsync(displayText, expanded string, attachments []at
 	// Expand file references in the expanded text
 	expandedWithFiles, extraContent, err := a.expandFileReferences(expanded)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	expandedWithFiles, attachedContent, err := expandAttachments(expandedWithFiles, attachments)
 	if err != nil {
-		a.runner.Printf("Warning: %s", err.Error())
+		a.postNotice("Warning: %s", err.Error())
 	}
 	extraContent = append(extraContent, attachedContent...)
 	if includeStartupAttachment {
@@ -1468,7 +1629,7 @@ func (a *App) warnIfManyCompactions() {
 	if err != nil || len(records) < repeatedCompactionWarnThreshold {
 		return
 	}
-	a.runner.Printf("Note: this conversation has been compacted %d times. "+
+	a.postNotice("Note: this conversation has been compacted %d times. "+
 		"Repeated compactions lose detail and can reduce accuracy — consider starting a fresh session.",
 		len(records))
 }
@@ -1548,30 +1709,25 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 	a.resetContextDemoTrace()
 	userInput := strings.TrimSpace(e.userInput)
 
-	role := "user"
+	role := roleUser
 	if e.fromBackground {
-		role = "context"
+		role = roleContext
 	}
-	userMsg := Message{
+	// Show the user's turn immediately; the model's reply lands at turn end.
+	a.emit(a.appendMessage(Message{
 		Role:    role,
 		Content: userInput,
-		Time:    time.Now(),
 		Type:    MessageTypeText,
-	}
-	a.messages = append(a.messages, userMsg)
-
-	// Print user message to scrollback
-	a.runner.Print(tui.Stack(tui.Text(""), a.textMessageView(userMsg, len(a.messages)-1)))
+	}))
 
 	// Prepare for streaming response
 	a.currentMessage = &Message{
-		Role:    "assistant",
+		Role:    roleAssistant,
 		Content: "",
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	}
-	a.messages = append(a.messages, *a.currentMessage)
-	a.streamingMessageIndex = len(a.messages) - 1
+	a.streamingMessageIndex = a.appendMessage(*a.currentMessage)
 	a.thinkingMessageIndex = -1
 	a.needNewTextMessage = false
 
@@ -1612,17 +1768,15 @@ func (a *App) flushStreamBuffer() {
 		a.needNewTextMessage
 
 	if needNewMessage {
-		a.messages = append(a.messages, Message{
-			Role:    "assistant",
-			Content: "",
-			Time:    time.Now(),
-			Type:    MessageTypeText,
+		a.streamingMessageIndex = a.appendMessage(Message{
+			Role: roleAssistant,
+			Type: MessageTypeText,
 		})
-		a.streamingMessageIndex = len(a.messages) - 1
 		a.needNewTextMessage = false
 	}
 
 	a.messages[a.streamingMessageIndex].Content += a.streamBuffer
+	a.touch(a.streamingMessageIndex)
 	a.streamBuffer = ""
 }
 
@@ -1633,19 +1787,17 @@ func (a *App) flushThinkingStreamBuffer() {
 
 	needNewMessage := a.thinkingMessageIndex < 0 ||
 		a.thinkingMessageIndex >= len(a.messages) ||
-		a.messages[a.thinkingMessageIndex].Role != "reasoning"
+		a.messages[a.thinkingMessageIndex].Role != roleReasoning
 
 	if needNewMessage {
-		a.messages = append(a.messages, Message{
-			Role:    "reasoning",
-			Content: "",
-			Time:    time.Now(),
-			Type:    MessageTypeText,
+		a.thinkingMessageIndex = a.appendMessage(Message{
+			Role: roleReasoning,
+			Type: MessageTypeText,
 		})
-		a.thinkingMessageIndex = len(a.messages) - 1
 	}
 
 	a.messages[a.thinkingMessageIndex].Content += a.thinkingStreamBuffer
+	a.touch(a.thinkingMessageIndex)
 	a.thinkingStreamBuffer = ""
 }
 
@@ -1664,7 +1816,7 @@ func (a *App) handleToolCall(call *llm.ToolUseContent) {
 	}
 
 	msg := Message{
-		Role:      "assistant",
+		Role:      roleAssistant,
 		Time:      time.Now(),
 		Type:      MessageTypeToolCall,
 		ToolID:    call.ID,
@@ -1673,14 +1825,14 @@ func (a *App) handleToolCall(call *llm.ToolUseContent) {
 		ToolInput: string(call.Input),
 		ToolDone:  false,
 	}
-	a.messages = append(a.messages, msg)
-	a.toolCallIndex[call.ID] = len(a.messages) - 1
+	a.toolCallIndex[call.ID] = a.appendMessage(msg)
 	a.needNewTextMessage = true
 	a.thinkingMessageIndex = -1
 }
 
 func (a *App) handleToolResult(result *dive.ToolCallResult) {
 	if idx, ok := a.toolCallIndex[result.ID]; ok && idx < len(a.messages) {
+		defer a.touch(idx)
 		a.messages[idx].ToolDone = true
 		if result.Result != nil {
 			display := result.Result.Display
@@ -1739,7 +1891,7 @@ func (a *App) handleCompaction(event *compaction.CompactionEvent, midTurn bool) 
 		// Mid-turn compaction happens while the agent is still working, so
 		// surface it as a scrollback line rather than the transient footer
 		// stats used between turns.
-		a.runner.Printf(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
+		a.appendNotice(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
 			event.TokensBefore, event.TokensAfter, event.MessagesCompacted)
 		return
 	}
@@ -1760,13 +1912,18 @@ func (a *App) handleProcessingEnd(err error) {
 	a.flushStreamingBuffers()
 
 	if err != nil && err != context.Canceled {
-		errMsg := Message{
-			Role:    "system",
+		a.appendMessage(Message{
+			Role:    roleSystem,
 			Content: "Error: " + err.Error(),
-			Time:    time.Now(),
 			Type:    MessageTypeText,
-		}
-		a.messages = append(a.messages, errMsg)
+		})
+	}
+
+	// Record what the turn cost before clearing the state that measures it, so
+	// the spinner's slot can say how long it took instead of going blank.
+	if !a.processingStartTime.IsZero() {
+		a.lastTurnDuration = time.Since(a.processingStartTime)
+		a.lastTurnEndedAt = time.Now()
 	}
 
 	// Clear processing state BEFORE printing to scrollback.
@@ -1781,8 +1938,13 @@ func (a *App) handleProcessingEnd(err error) {
 	a.streamBuffer = ""
 	a.thinkingStreamBuffer = ""
 
-	// Now print to scrollback - the live view will be re-rendered with correct height
-	a.printRecentMessagesToScrollback()
+	// Now commit the turn to scrollback - the live view will be re-rendered
+	// with correct height.
+	a.emitPending()
+
+	// Turn boundaries are the natural moment to notice a branch switch.
+	a.gitBranchAt = time.Time{}
+	a.refreshGitBranch()
 
 	// Drain any native background results that arrived while processing.
 	if len(a.pendingNativeBgResults) > 0 {
@@ -1829,6 +1991,7 @@ func (a *App) handleToolStream(e toolStreamEvent) {
 			last = last[:77] + "..."
 		}
 		a.messages[idx].ToolResultLines = []string{last}
+		a.touch(idx)
 	}
 }
 
@@ -1846,6 +2009,7 @@ func (a *App) handleToolProgress(e toolProgressEvent) {
 		display = display[:77] + "..."
 	}
 	a.messages[idx].ToolProgress = display
+	a.touch(idx)
 }
 
 // startNativeBgTaskWatcher starts a goroutine that awaits all tasks and sends
@@ -1968,41 +2132,28 @@ func lastNonEmptyLine(text string) string {
 	return ""
 }
 
-// printRecentMessagesToScrollback prints the messages from current interaction to scrollback
-func (a *App) printRecentMessagesToScrollback() {
-	// Find start of current interaction
-	startIdx := 0
-	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == "user" || a.messages[i].Role == "context" {
-			startIdx = i + 1 // Start after user/context message (already printed)
-			break
-		}
+// Run starts the interactive UI: the managed screen, or with --inline the
+// renderer that writes finished messages to the terminal's own scrollback.
+func (a *App) Run() error {
+	if a.screenMode {
+		return a.runScreen()
 	}
-
-	// Collect all message views (add blank line before each)
-	messageViews := []tui.View{}
-	for i := startIdx; i < len(a.messages); i++ {
-		msg := a.messages[i]
-		view := a.messageViewStatic(msg)
-		if view != nil {
-			messageViews = append(messageViews, tui.Text(""), view)
-		}
-	}
-
-	// Print all messages as a single view
-	if len(messageViews) > 0 {
-		a.runner.Print(tui.Stack(messageViews...))
-	}
+	return a.runInline()
 }
 
-// Run starts the CLI application
-func (a *App) Run() error {
+// runInline renders live output into a bottom region and hands each finished
+// message to the terminal's own scrollback.
+func (a *App) runInline() error {
 	// Create InlineApp runner with 30 FPS for animations
-	a.runner = tui.NewInlineApp(
+	inline := tui.NewInlineApp(
 		tui.WithInlineFPS(30),
 		tui.WithInlineBracketedPaste(true),
 		tui.WithInlineKittyKeyboard(true),
 	)
+	a.runner = inline
+	a.scrollback = inline
+
+	a.refreshGitBranch()
 
 	// If resuming a session, print the conversation history instead of the intro
 	if a.resumeSessionID != "" {
@@ -2021,24 +2172,20 @@ func (a *App) Run() error {
 	}
 
 	// Run the inline app (blocks until quit)
-	return a.runner.Run(a)
+	return inline.Run(a)
 }
 
-// printIntroToScrollback prints the intro/splash screen to scrollback.
+// printIntroToScrollback prints the intro/splash screen before the event loop
+// starts, when the runner cannot print for us yet.
 func (a *App) printIntroToScrollback() {
-	view := a.buildIntroView()
-	tui.Print(view)
+	i := a.appendIntro()
+	a.messages[i].emitted = true
+	tui.Print(a.introView(a.messages[i]))
 	fmt.Println() // Newline so the live region doesn't overwrite the last line
 }
 
-// printIntroViaRunner prints the intro/splash screen using the runner's Print method.
-func (a *App) printIntroViaRunner() {
-	view := a.buildIntroView()
-	a.runner.Print(view)
-}
-
-// buildIntroView creates the intro view and adds it to messages.
-func (a *App) buildIntroView() tui.View {
+// appendIntro adds the intro/splash message to the transcript and returns its index.
+func (a *App) appendIntro() int {
 	wsDisplay := a.workspaceDir
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
 		wsDisplay = "~" + wsDisplay[len(home):]
@@ -2055,14 +2202,11 @@ func (a *App) buildIntroView() tui.View {
 		content += "\nResuming session: " + a.resumeSessionID
 	}
 
-	a.messages = append(a.messages, Message{
-		Role:    "intro",
+	return a.appendMessage(Message{
+		Role:    roleIntro,
 		Content: content,
-		Time:    time.Now(),
 		Type:    MessageTypeText,
 	})
-
-	return a.introView(a.messages[len(a.messages)-1])
 }
 
 // printSessionHistoryToScrollback prints the conversation history from a resumed session
@@ -2078,21 +2222,16 @@ func (a *App) printSessionHistoryToScrollback() {
 		return
 	}
 
-	// Build a map of tool use ID -> tool result for matching
-	toolResults := make(map[string]*llm.ToolResultContent)
-	for _, msg := range sessionMsgs {
-		for _, content := range msg.Content {
-			if result, ok := content.(*llm.ToolResultContent); ok {
-				toolResults[result.ToolUseID] = result
-			}
-		}
-	}
+	toolResults := toolResultsByID(sessionMsgs)
 
 	// Convert and print each message
 	messageViews := []tui.View{}
 	for _, msg := range sessionMsgs {
-		views := a.convertLLMMessageToViews(msg, toolResults)
-		messageViews = append(messageViews, views...)
+		for _, m := range a.convertLLMMessage(msg, toolResults) {
+			if view := a.messageView(m, viewOpts{}); view != nil {
+				messageViews = append(messageViews, tui.Text(""), view)
+			}
+		}
 	}
 
 	// Print all messages as a single view
@@ -2101,9 +2240,25 @@ func (a *App) printSessionHistoryToScrollback() {
 	}
 }
 
-// convertLLMMessageToViews converts an llm.Message to app Message views for display.
-func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]*llm.ToolResultContent) []tui.View {
-	var views []tui.View
+// toolResultsByID indexes a conversation's tool results by the tool-use ID
+// they answer, so a tool call can be rendered together with its outcome.
+func toolResultsByID(msgs []*llm.Message) map[string]*llm.ToolResultContent {
+	results := make(map[string]*llm.ToolResultContent)
+	for _, msg := range msgs {
+		for _, content := range msg.Content {
+			if result, ok := content.(*llm.ToolResultContent); ok {
+				results[result.ToolUseID] = result
+			}
+		}
+	}
+	return results
+}
+
+// convertLLMMessage turns a saved conversation message into the transcript
+// messages that represent it. A single LLM message can hold prose, thinking,
+// and several tool calls, each of which is its own row in the transcript.
+func (a *App) convertLLMMessage(msg *llm.Message, toolResults map[string]*llm.ToolResultContent) []Message {
+	var out []Message
 
 	for _, content := range msg.Content {
 		switch c := content.(type) {
@@ -2111,43 +2266,32 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 			if c.Text == "" {
 				continue
 			}
-			appMsg := Message{
+			out = append(out, Message{
 				Role:    string(msg.Role),
 				Content: c.Text,
 				Time:    time.Now(),
 				Type:    MessageTypeText,
-			}
-			view := a.textMessageViewStatic(appMsg)
-			if view != nil {
-				views = append(views, tui.Text(""), view)
-			}
+			})
 
 		case *llm.ThinkingContent:
 			if strings.TrimSpace(c.Thinking) == "" {
 				continue
 			}
-			appMsg := Message{
-				Role:    "reasoning",
+			out = append(out, Message{
+				Role:    roleReasoning,
 				Content: c.Thinking,
 				Time:    time.Now(),
 				Type:    MessageTypeText,
-			}
-			view := a.textMessageViewStatic(appMsg)
-			if view != nil {
-				views = append(views, tui.Text(""), view)
-			}
+			})
 
 		case *llm.ToolUseContent:
-			// Find the corresponding result if available
-			result := toolResults[c.ID]
-
 			toolTitle := a.toolTitles[c.Name]
 			if toolTitle == "" {
 				toolTitle = c.Name
 			}
-
+			result := toolResults[c.ID]
 			appMsg := Message{
-				Role:      "assistant",
+				Role:      roleAssistant,
 				Time:      time.Now(),
 				Type:      MessageTypeToolCall,
 				ToolID:    c.ID,
@@ -2156,42 +2300,36 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 				ToolInput: string(c.Input),
 				ToolDone:  result != nil,
 			}
-
-			// If we have a result, extract its content
 			if result != nil {
 				resultText := extractToolResultText(result)
 				appMsg.ToolError = shouldDisplayToolError(c.Name, result.IsError, resultText)
 				if resultText != "" {
 					appMsg.ToolResultLines = strings.Split(resultText, "\n")
-					if len(appMsg.ToolResultLines) > 0 {
-						appMsg.ToolResult = appMsg.ToolResultLines[0]
+					appMsg.ToolResult = appMsg.ToolResultLines[0]
+					// A Read that ran live collapses to "Read N lines" instead of
+					// the file's first line. A replayed one has to say the same,
+					// or resuming a session rewrites what it looked like.
+					if !appMsg.ToolError && strings.EqualFold(c.Name, "read") {
+						appMsg.ToolReadLines = strings.Count(resultText, "\n") + 1
 					}
 				}
 			}
-
-			view := a.toolCallViewStatic(appMsg)
-			if view != nil {
-				views = append(views, tui.Text(""), view)
-			}
+			out = append(out, appMsg)
 
 		case *llm.SummaryContent:
 			// Show compaction summaries as system messages
 			if c.Summary != "" {
-				appMsg := Message{
-					Role:    "system",
+				out = append(out, Message{
+					Role:    roleSystem,
 					Content: "[Context compacted]",
 					Time:    time.Now(),
 					Type:    MessageTypeText,
-				}
-				view := a.textMessageViewStatic(appMsg)
-				if view != nil {
-					views = append(views, tui.Text(""), view)
-				}
+				})
 			}
 		}
 	}
 
-	return views
+	return out
 }
 
 // extractToolResultText extracts text content from a tool result.
@@ -2247,28 +2385,15 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		return true
 
 	case "clear":
-		// Clear scrollback
-		a.runner.ClearScrollback()
-
-		// Reset conversation state by deleting the current session
-		if a.currentSession != nil && a.sessionStore != nil {
-			if err := a.sessionStore.Delete(a.ctx, a.currentSession.ID()); err != nil {
-				// Log error but continue
-				a.runner.Printf("Warning: failed to clear conversation: %v", err)
-			}
+		// Drop the transcript first, so anything the reset has to say about
+		// itself lands in the fresh one rather than the discarded one. nil,
+		// not [:0]: the old messages hold report views worth releasing.
+		a.messages = nil
+		a.viewport.InvalidateAll()
+		a.viewport.ScrollToBottom()
+		if a.scrollback != nil {
+			a.scrollback.ClearScrollback()
 		}
-
-		// Create a new session
-		newID := newSessionID()
-		newSess, err := a.sessionStore.Open(a.ctx, newID)
-		if err != nil {
-			a.runner.Printf("Warning: failed to create new session: %v", err)
-		} else {
-			a.currentSession = newSess
-		}
-
-		// Clear local message state
-		a.messages = make([]Message, 0)
 		a.todos = nil
 		a.toolCallIndex = make(map[string]int)
 		a.needNewTextMessage = false
@@ -2281,11 +2406,30 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.lastUsage = nil
 		a.sessionUsage = nil
 		a.interactionUsage = nil
+		// The turn it summarised is gone with the transcript.
+		a.lastTurnDuration, a.lastTurnEndedAt = 0, time.Time{}
 		a.resetContextDemoTrace()
 
-		// Show fresh intro using runner.Print (not tui.Print) since we're
-		// in the middle of the running InlineApp event loop
-		a.printIntroViaRunner()
+		// Reset conversation state by deleting the current session
+		if a.currentSession != nil && a.sessionStore != nil {
+			if err := a.sessionStore.Delete(a.ctx, a.currentSession.ID()); err != nil {
+				// Log error but continue
+				a.appendNotice("Warning: failed to clear conversation: %v", err)
+			}
+		}
+
+		// Create a new session
+		a.currentSession = nil
+		if a.sessionStore != nil {
+			newSess, err := a.sessionStore.Open(a.ctx, newSessionID())
+			if err != nil {
+				a.appendNotice("Warning: failed to create new session: %v", err)
+			} else {
+				a.currentSession = newSess
+			}
+		}
+
+		a.emit(a.appendIntro())
 		return true
 
 	case "compact":
@@ -2311,6 +2455,18 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		a.printUsageReport()
 		return true
 
+	case "copy":
+		a.handleCopyCommand(cmdArgs)
+		return true
+
+	case "mouse":
+		a.toggleMouse()
+		return true
+
+	case "scrollback":
+		a.handleScrollbackCommand(cmdArgs)
+		return true
+
 	case "context":
 		a.printContextDemoReport()
 		return true
@@ -2322,12 +2478,12 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 			// Expand argument placeholders (with shell expansion for local skills)
 			expanded, expandErr := cmd.Expand(context.Background(), cmdArgs, skill.WithShellExpansion(true))
 			if expandErr != nil {
-				a.runner.Printf("Warning: expansion error: %v", expandErr)
+				a.appendNotice("Warning: expansion error: %v", expandErr)
 			}
 
 			// Warn about unsupported model override (agent doesn't support per-request model changes)
 			if cmd.Config.Model != "" {
-				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Config.Model)
+				a.appendNotice("Note: Model override '%s' specified but not yet supported in CLI", cmd.Config.Model)
 			}
 
 			// Build display text with command name and args
@@ -2345,35 +2501,35 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 	}
 
 	// Unknown command - show error
-	a.runner.Printf("Unknown command: /%s (try /help)", cmdName)
+	a.appendNotice("Unknown command: /%s (try /help)", cmdName)
 	return true
 }
 
 // handleCompactCommand performs manual compaction of the conversation
 func (a *App) handleCompactCommand() {
 	if a.compactionConfig == nil {
-		a.runner.Printf("Compaction is disabled.")
+		a.appendNotice("Compaction is disabled.")
 		return
 	}
 
 	if a.currentSession == nil || a.sessionStore == nil {
-		a.runner.Printf("No conversation to compact.")
+		a.appendNotice("No conversation to compact.")
 		return
 	}
 
 	// Get current messages
 	msgs, err := a.currentSession.Messages(a.ctx)
 	if err != nil {
-		a.runner.Printf("No conversation to compact.")
+		a.appendNotice("No conversation to compact.")
 		return
 	}
 
 	if len(msgs) < 2 {
-		a.runner.Printf("Not enough messages to compact (need at least 2).")
+		a.appendNotice("Not enough messages to compact (need at least 2).")
 		return
 	}
 
-	a.runner.Printf("Compacting conversation...")
+	a.appendNotice("Compacting conversation...")
 
 	// Calculate tokens before compaction (estimate)
 	tokensBefore := 0
@@ -2405,20 +2561,19 @@ func (a *App) handleCompactCommand() {
 		return compactedMsgs, err
 	})
 	if err != nil {
-		a.runner.Printf("Compaction failed: %v", err)
+		a.appendNotice("Compaction failed: %v", err)
 		return
 	}
 
 	// Show stats
 	if event != nil {
-		a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
+		a.appendNotice("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
 	}
 	a.warnIfManyCompactions()
 }
 
 func (a *App) printHelp() {
 	views := []tui.View{
-		tui.Text(""),
 		tui.Text("Built-in Commands:").Bold(),
 		tui.Text("  /quit, /q      Exit"),
 		tui.Text("  /clear         Clear conversation and screen"),
@@ -2427,6 +2582,9 @@ func (a *App) printHelp() {
 		tui.Text("  /todos, /t     Toggle todo list"),
 		tui.Text("  /usage, /cost  Show token & cache usage breakdown"),
 		tui.Text("  /context       Inspect context-demo reminders from the latest turn"),
+		tui.Text("  /copy [N|all]  Copy the selection, or a code block from the last reply"),
+		tui.Text("  /mouse         Toggle mouse reporting"),
+		tui.Text("  /scrollback    Show the conversation in your terminal, for find and bulk copy"),
 		tui.Text("  /help, /?      Show this help"),
 	}
 
@@ -2443,7 +2601,7 @@ func (a *App) printHelp() {
 			}
 			views = append(views, tui.Text("%s", line))
 			if cmd.Description != "" {
-				views = append(views, tui.Text("      %s", cmd.Description).Hint())
+				views = append(views, tui.Text("      %s", cmd.Description).Style(hintStyle()))
 			}
 		}
 	}
@@ -2456,21 +2614,36 @@ func (a *App) printHelp() {
 		tui.Text("  Enter          Send message"),
 		tui.Text("  Shift+Enter    New line"),
 		tui.Text("  Ctrl+C twice   Exit"),
-		tui.Text(""),
 	)
 
-	a.runner.Print(tui.Stack(views...))
+	if a.screenMode {
+		views = append(views,
+			tui.Text(""),
+			tui.Text("Selecting:").Bold(),
+			tui.Text("  %-15s%s", "drag", "Select and copy"),
+			tui.Text("  %-15s%s", "double-click", "Select a word · triple-click selects the line"),
+			tui.Text("  %-15s%s", "click a tool", "Expand or collapse its output"),
+			tui.Text("  %-15s%s", nativeSelectionModifier()+"+drag", "Select with your terminal instead of the app"),
+			tui.Text("  %-15s%s", "/mouse", "Hand selection back to the terminal for good"),
+			tui.Text("  %-15s%s", "/scrollback", "Hand the whole conversation over, for find and bulk copy"),
+			tui.Text("  %-15s%s", "Ctrl+L", "Repaint the screen"),
+		)
+	}
+
+	views = append(views, tui.Text(""))
+
+	a.appendReport(tui.Stack(views...))
 }
 
-// printUsageReport prints the detailed token + cache usage breakdown to
-// scrollback, or a placeholder when nothing has been recorded yet.
+// printUsageReport adds the detailed token + cache usage breakdown to the
+// transcript, or a placeholder when nothing has been recorded yet.
 func (a *App) printUsageReport() {
 	view := a.usageReportView()
 	if view == nil {
-		a.runner.Printf("No token usage recorded yet.")
+		a.appendNotice("No token usage recorded yet.")
 		return
 	}
-	a.runner.Print(view)
+	a.appendReport(view)
 }
 
 // usageReportView builds a detailed token + cache usage breakdown (turn and,
@@ -2492,7 +2665,7 @@ func (a *App) usageReportView() tui.View {
 		sess = &llm.Usage{}
 	}
 
-	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 110, B: 120})
+	labelStyle := tui.NewStyle().WithFgRGB(dimText)
 	rowLabelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170})
 	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
 
@@ -2542,7 +2715,6 @@ func (a *App) usageReportView() tui.View {
 	}
 
 	views := []tui.View{
-		tui.Text(""),
 		tui.Text("Token usage").Bold(),
 		tui.Group(headerCells...),
 		tokRow("input", func(u *llm.Usage) int { return u.InputTokens }),
@@ -2597,20 +2769,20 @@ func (a *App) usageReportView() tui.View {
 
 func (a *App) printTodosToScrollback() {
 	if len(a.todos) == 0 {
-		a.runner.Printf("No todos.")
+		a.appendNotice("No todos.")
 		return
 	}
 
-	view := a.todoListViewStatic()
-	if view != nil {
-		a.runner.Print(view)
-	}
+	a.appendReport(a.todoListView(viewOpts{}))
 }
 
 // buildLiveView creates the view for live updates during streaming.
-// Shows a simple progress indicator to keep the live region height stable.
-// Full markdown is rendered to scrollback when the response completes.
-func (a *App) buildLiveView() tui.View {
+//
+// withActivity replays the turn's recent tool calls and thinking above the
+// progress line. Inline mode needs that, because the turn does not reach
+// scrollback until it ends; the managed screen does not, because the
+// transcript above the footer is already showing them.
+func (a *App) buildLiveView(withActivity bool) tui.View {
 	views := make([]tui.View, 0)
 
 	elapsed := time.Since(a.processingStartTime)
@@ -2619,19 +2791,19 @@ func (a *App) buildLiveView() tui.View {
 	// chronological order. This keeps streamed thinking visible before the turn
 	// is committed to scrollback.
 	var activityViews []tui.View
-	for i := len(a.messages) - 1; i >= 0; i-- {
+	for i := len(a.messages) - 1; withActivity && i >= 0; i-- {
 		msg := a.messages[i]
-		if msg.Role == "user" || msg.Role == "context" {
+		if msg.Role == roleUser || msg.Role == roleContext {
 			break
 		}
 		switch {
 		case msg.Type == MessageTypeToolCall:
-			view := a.toolCallView(msg)
+			view := a.toolCallView(msg, viewOpts{animate: true})
 			if view != nil {
 				activityViews = append([]tui.View{view}, activityViews...)
 			}
-		case msg.Role == "reasoning":
-			view := a.textMessageView(msg, i)
+		case msg.Role == roleReasoning:
+			view := a.textMessageView(msg)
 			if view != nil {
 				activityViews = append([]tui.View{view}, activityViews...)
 			}
@@ -2650,7 +2822,7 @@ func (a *App) buildLiveView() tui.View {
 			tui.Text(" %d → %d tokens, %d messages summarized",
 				a.lastCompactionEvent.TokensBefore,
 				a.lastCompactionEvent.TokensAfter,
-				a.lastCompactionEvent.MessagesCompacted).Hint(),
+				a.lastCompactionEvent.MessagesCompacted).Style(hintStyle()),
 		))
 	}
 
@@ -2659,15 +2831,15 @@ func (a *App) buildLiveView() tui.View {
 		views = append(views, tui.Group(
 			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
 			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
-			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
-			tui.Text("  ").Hint(),
-			tui.Text("esc to interrupt").Hint(),
+			tui.Text(" (%s)", formatDuration(elapsed)).Style(hintStyle()),
+			tui.Text("  ").Style(hintStyle()),
+			tui.Text("esc to interrupt").Style(hintStyle()),
 		))
 	}
 
 	// Show todos if active
 	if a.showTodos && len(a.todos) > 0 {
-		views = append(views, a.todoListView())
+		views = append(views, a.todoListView(viewOpts{animate: true}))
 	}
 
 	if len(views) == 0 {
@@ -2869,7 +3041,10 @@ func fuzzyMatch(pattern, text string) int {
 // getCommandMatches returns slash commands matching the prefix for autocomplete
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
-	builtins := []string{"clear", "compact", "context", "cost", "help", "model", "quit", "todos", "usage"}
+	builtins := []string{
+		"clear", "compact", "context", "copy", "cost", "help",
+		"model", "mouse", "quit", "scrollback", "todos", "usage",
+	}
 
 	var matches []string
 
@@ -2957,6 +3132,21 @@ func (a *App) getFileMatches(prefix string) []string {
 	return result
 }
 
+// gitBranchTTL is how stale the cached branch name may get. Branches change
+// between turns, not between frames.
+const gitBranchTTL = 5 * time.Second
+
+// refreshGitBranch re-reads the workspace's branch if the cached value has
+// aged out. Never call this from a view function: it forks `git`, and the
+// status line renders on every frame.
+func (a *App) refreshGitBranch() {
+	if !a.gitBranchAt.IsZero() && time.Since(a.gitBranchAt) < gitBranchTTL {
+		return
+	}
+	a.gitBranchAt = time.Now()
+	a.gitBranch = detectGitBranch(a.workspaceDir)
+}
+
 // detectGitBranch returns the current git branch name, or empty string if not in a repo.
 func detectGitBranch(dir string) string {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
@@ -2984,7 +3174,7 @@ func (a *App) handleModelCommand(args string) {
 	// Build choices
 	choices := availableModelChoices()
 	if len(choices) == 0 {
-		a.runner.Printf("No models available. Set an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)")
+		a.appendNotice("No models available. Set an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)")
 		return
 	}
 
@@ -3059,14 +3249,14 @@ func (a *App) switchModel(modelID string) {
 		return
 	}
 	if modelID == a.modelName {
-		a.runner.Printf("Already using %s", a.modelDisplayName())
+		a.appendNotice("Already using %s", a.modelDisplayName())
 		return
 	}
 
 	oldName := a.modelName
 	newModel := createModel(modelID, a.apiEndpoint)
 	if newModel == nil {
-		a.runner.Printf("Unknown model: %s", modelID)
+		a.appendNotice("Unknown model: %s", modelID)
 		return
 	}
 	a.agent.SetModel(newModel)
@@ -3087,5 +3277,5 @@ func (a *App) switchModel(modelID string) {
 		}
 	}
 
-	a.runner.Printf("Switched to %s", a.modelDisplayName())
+	a.appendNotice("Switched to %s", a.modelDisplayName())
 }

@@ -81,7 +81,7 @@ func TestFailedReadRendersTheErrorInsteadOfAFalseLineCount(t *testing.T) {
 	assert.True(t, msg.ToolError)
 	assert.Equal(t, 0, msg.ToolReadLines)
 	var output bytes.Buffer
-	tui.Fprint(&output, app.formatToolResultView(msg), tui.WithWidth(80))
+	tui.Fprint(&output, app.formatToolResultView(msg, viewOpts{}), tui.WithWidth(80))
 	assert.Contains(t, output.String(), "file does not exist")
 	assert.NotContains(t, output.String(), "Read 1 line")
 }
@@ -93,19 +93,14 @@ func TestSuccessfulReadUsesCorrectSingularLineCount(t *testing.T) {
 		Type:          MessageTypeToolCall,
 		ToolName:      "Read",
 		ToolReadLines: 1,
-	}), tui.WithWidth(80))
+	}, viewOpts{}), tui.WithWidth(80))
 	assert.Contains(t, output.String(), "Read 1 line")
 	assert.NotContains(t, output.String(), "Read 1 lines")
 }
 
 func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
-	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	app, fake := newFakeApp(t)
 	app.contextDemos = allContextDemos()
-	var output bytes.Buffer
-	app.runner = tui.NewInlineApp(
-		tui.WithInlineWidth(180),
-		tui.WithInlineOutput(&output),
-	)
 	reminder, err := dive.NewOperatorReminder("verification-debt", "Run the relevant checks before completion.")
 	assert.NoError(t, err)
 	app.handleContextDemoNotice(contextDemoNotice{
@@ -115,7 +110,7 @@ func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
 	})
 	app.printContextDemoReport()
 
-	rendered := output.String()
+	rendered := fake.scrollback(180)
 	assert.Contains(t, rendered, "verification-debt queued")
 	assert.Contains(t, rendered, "operator")
 	assert.Contains(t, rendered, "model-only")
@@ -125,12 +120,7 @@ func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
 }
 
 func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
-	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
-	var buf bytes.Buffer
-	app.runner = tui.NewInlineApp(
-		tui.WithInlineWidth(80),
-		tui.WithInlineOutput(&buf),
-	)
+	app, _ := newFakeApp(t)
 	app.handleProcessingStart(processingStartEvent{baseEvent: newBaseEvent(), userInput: "explain this"})
 
 	app.handleStreamThinking("I should compare the code paths.")
@@ -157,9 +147,9 @@ func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
 	assert.True(t, reasoningIdx < answerIdx, "reasoning should render before answer")
 }
 
-func TestConvertLLMMessageToViewsShowsThinkingContent(t *testing.T) {
-	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
-	views := app.convertLLMMessageToViews(&llm.Message{
+func TestConvertLLMMessageShowsThinkingContent(t *testing.T) {
+	app, _ := newFakeApp(t)
+	msgs := app.convertLLMMessage(&llm.Message{
 		Role: llm.Assistant,
 		Content: []llm.Content{
 			&llm.ThinkingContent{Thinking: "I considered the API contract."},
@@ -167,11 +157,59 @@ func TestConvertLLMMessageToViewsShowsThinkingContent(t *testing.T) {
 		},
 	}, nil)
 
+	assert.Equal(t, 2, len(msgs))
+	assert.Equal(t, roleReasoning, msgs[0].Role)
+	assert.Equal(t, roleAssistant, msgs[1].Role)
+
+	var views []tui.View
+	for _, m := range msgs {
+		views = append(views, app.messageView(m, viewOpts{}))
+	}
 	var buf bytes.Buffer
 	tui.Fprint(&buf, tui.Stack(views...), tui.WithWidth(80))
 	out := buf.String()
 	assert.Contains(t, out, "I considered the API contract.")
 	assert.Contains(t, out, "The final answer.")
+}
+
+// A resumed session has to look like the one it resumed. A Read renders as
+// "Read N lines" while it is live, so replay has to count the lines too rather
+// than falling back to dumping the file's first line.
+func TestReplayingAReadCollapsesItTheWayTheLiveOneDid(t *testing.T) {
+	app, _ := newFakeApp(t)
+	call := &llm.ToolUseContent{ID: "call-1", Name: "Read", Input: []byte(`{"file_path":"a.go"}`)}
+	results := map[string]*llm.ToolResultContent{
+		"call-1": {ToolUseID: "call-1", Content: "package main\n\nfunc main() {}"},
+	}
+
+	msgs := app.convertLLMMessage(&llm.Message{
+		Role: llm.Assistant, Content: []llm.Content{call},
+	}, results)
+
+	assert.Equal(t, len(msgs), 1)
+	assert.Equal(t, msgs[0].ToolReadLines, 3)
+
+	var buf bytes.Buffer
+	tui.Fprint(&buf, app.formatToolResultView(msgs[0], viewOpts{}), tui.WithWidth(80))
+	assert.Contains(t, buf.String(), "Read 3 lines")
+	assert.NotContains(t, buf.String(), "package main", "the file body is not the summary")
+}
+
+// An errored Read has something to say, so it keeps its message rather than
+// being collapsed into a line count of the error text.
+func TestReplayingAFailedReadKeepsTheError(t *testing.T) {
+	app, _ := newFakeApp(t)
+	call := &llm.ToolUseContent{ID: "call-1", Name: "Read", Input: []byte(`{"file_path":"nope.go"}`)}
+	results := map[string]*llm.ToolResultContent{
+		"call-1": {ToolUseID: "call-1", IsError: true, Content: "no such file: nope.go"},
+	}
+
+	msgs := app.convertLLMMessage(&llm.Message{
+		Role: llm.Assistant, Content: []llm.Content{call},
+	}, results)
+
+	assert.Equal(t, msgs[0].ToolReadLines, 0)
+	assert.Equal(t, msgs[0].ToolResult, "no such file: nope.go")
 }
 
 func TestMessageThinkingText(t *testing.T) {

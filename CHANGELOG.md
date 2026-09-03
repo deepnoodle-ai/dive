@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **The CLI renders the conversation in a managed, scrollable screen.** The
+  transcript reflows on resize and scrolls with the wheel, PgUp/PgDn,
+  Ctrl+Home/End, and Home/End.
+- **Selection and copy.** Drag to select, double-click a word, triple-click a
+  line. The clipboard ladder is a native tool, then `tmux load-buffer -w -`,
+  then OSC 52 for SSH; `DIVE_CLIPBOARD=osc52` forces it.
+- **`/copy`** copies the selection or lists the last reply's code blocks;
+  `/copy N` and `/copy all` copy their source. **`/mouse`** hands selection back
+  to the terminal (`DIVE_DISABLE_MOUSE=1` to start that way).
+- **Click targets**: a tool call expands its output, a report's title folds it
+  away, the "N new lines" indicator jumps to the bottom.
+- **The conversation prints to the terminal on exit**, after the alternate
+  screen is restored, capped at 2,000 lines and followed by the resume line.
+- **`/scrollback`** writes the conversation into the terminal's own scrollback
+  for find and bulk copy; `/scrollback raw` writes the source. **Ctrl+L**
+  repaints, and `DIVE_FULL_REPAINT=1` repaints every frame.
 - **Meta Model API provider (Muse Spark)** — new `providers/meta` module serving
   `muse-spark-1.3` and its 1.2/1.1 siblings (1M context, $1.25/$4.25 per MTok;
   a discounted `-contributor` tier trades a lower price for training on your
@@ -27,6 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **BREAKING: the managed screen is the CLI's default.** `--screen` and
+  `DIVE_SCREEN` are gone; `--inline` (or `DIVE_INLINE=1`) selects the old
+  renderer. `dive < file` and `dive | cat` are now refused, pointing at `--print`.
 - **The CLI compacts relative to the model's context window** — the default
   `--compaction-threshold` is now half the model's usable window instead of a
   flat 100000 tokens, which was a tenth of Muse Spark's 1M. Anthropic models are
@@ -35,6 +54,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **The `--resume` session picker is one line per session.** The workspace path
+  moves under the list, empty sessions are dropped, and long titles are cut on
+  whole characters rather than mid-rune.
+- **Dim text in the CLI is readable on a dark background.** Secondary greys and
+  hints sat near 2.9:1 contrast.
+- **`/clear` no longer panics without a session store.**
 - **Encrypted reasoning is requested whenever the model reasons** — the
   `reasoning.encrypted_content` include was sent only when the caller named a
   reasoning effort, so an agent that left it unset carried no reasoning across

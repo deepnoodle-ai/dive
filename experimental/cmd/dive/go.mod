@@ -10,8 +10,9 @@ require (
 	github.com/deepnoodle-ai/dive/providers/grok v1.27.0
 	github.com/deepnoodle-ai/dive/providers/meta v1.27.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.27.0
-	github.com/deepnoodle-ai/wonton v0.0.39
+	github.com/deepnoodle-ai/wonton v0.1.0
 	github.com/mattn/go-runewidth v0.0.29
+	golang.org/x/term v0.45.0
 	google.golang.org/genai v1.71.0
 )
 
@@ -49,7 +50,6 @@ require (
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/api v0.297.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
