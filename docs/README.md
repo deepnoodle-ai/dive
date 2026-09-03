@@ -34,6 +34,7 @@ These cover packages in `experimental/` with unstable APIs:
 - [CLI Direction: Phased Plan](design/cli-direction-plan.md) - Execution plan sequencing the managed-screen migration, the wonton additions, and the real-terminal harness
 - [CLI Managed Screen](design/cli-managed-screen.md) - Research on moving the CLI from inline scrollback rendering to a fully-managed alternate screen
 - [CLI Real-Terminal Testing](design/cli-real-terminal-testing.md) - Proposal for driving the CLI in a real iTerm2 window with OS-level input and screen capture
+- [Meta Model API (Muse Spark)](design/meta-model-api.md) - Prototype provider for Meta's Model API, and why it targets Responses rather than Chat Completions
 
 ## Project
 

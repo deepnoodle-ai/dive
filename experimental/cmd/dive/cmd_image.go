@@ -14,6 +14,7 @@ import (
 
 	// Register media providers
 	_ "github.com/deepnoodle-ai/dive/providers/google"
+	_ "github.com/deepnoodle-ai/dive/providers/meta"
 	_ "github.com/deepnoodle-ai/dive/providers/openai"
 )
 
@@ -28,7 +29,7 @@ func runImage(ctx *cli.Context) error {
 	if model == "" {
 		model = getDefaultImageModel()
 		if model == "" {
-			return fmt.Errorf("no image generation API key found (set OPENAI_API_KEY, GOOGLE_API_KEY, or XAI_API_KEY)")
+			return fmt.Errorf("no image generation API key found (set OPENAI_API_KEY, GOOGLE_API_KEY, XAI_API_KEY, MODEL_API_KEY, or META_API_KEY)")
 		}
 	}
 

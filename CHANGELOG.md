@@ -9,64 +9,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - **The CLI renders the conversation in a managed, scrollable screen.** The
-  transcript is application state in the alternate screen instead of terminal
-  scrollback, so it reflows on resize and scrolls with the wheel, PgUp/PgDn,
-  Ctrl+Home/End, and Home/End on an empty input. `DIVE_DEBUG_FRAMES=1` puts the
-  per-frame cost in the status line.
-- **Selection and copy.** Drag to select and copy, double-click for a word,
-  triple-click for a line; a drag held past an edge keeps selecting, and the
-  view stops following so a streamed reply cannot move the words under the
-  pointer. The clipboard ladder is a native tool (`pbcopy`, `wl-copy`, `xclip`,
-  `xsel`, `clip.exe`), then `tmux load-buffer -w -`, then OSC 52, which is the
-  rung that works over SSH; `DIVE_CLIPBOARD=osc52` forces it. An OSC 52 write
-  is reported as sent rather than copied, because the terminal sends no reply.
-- **`/copy`** copies the selection, or lists the last reply's code blocks;
-  `/copy N` and `/copy all` copy them as the model wrote them, not as they were
-  drawn. **`/mouse`** hands selection back to the terminal (`DIVE_DISABLE_MOUSE=1`
-  to start that way), and `/help` names the modifier that does it for one drag.
-- **Clicking a tool call expands its output**, clicking a report's title folds
-  it away, and clicking the "N new lines" indicator jumps to the bottom.
-- **The conversation is printed to the terminal on exit**, after the alternate
-  screen is restored, capped at the last 2,000 lines and followed by the resume
-  line. Without it a managed-screen session would leave nothing behind.
-- **`/scrollback`** leaves the alternate screen and writes the conversation into
-  the terminal's own, where find, selection and copy all work on it as they
-  always have; `/scrollback raw` writes the source instead, for pasting
-  elsewhere. **Ctrl+L** repaints, and `DIVE_FULL_REPAINT=1` repaints every
-  frame for hosts that leave fragments of the last one behind.
-
-### Fixed
-
-- **The `--resume` session picker is one line per session.** The second line
-  was the workspace path, identical on nearly every row; it now appears once,
-  under the list, for the selected session. Sessions with no turns are dropped,
-  attachment markers no longer eat the title, long titles are cut on whole
-  characters rather than mid-rune, and the turn count and age stay pinned right.
-- **Dim text in the CLI is readable on a dark background.** Secondary greys sat
-  near 2.9:1 contrast, and hints combined bright black with SGR 2 (faint) on top
-  of it. Greys now start at 152 and hints keep the italic without the dimming.
+  transcript reflows on resize and scrolls with the wheel, PgUp/PgDn,
+  Ctrl+Home/End, and Home/End.
+- **Selection and copy.** Drag to select, double-click a word, triple-click a
+  line. The clipboard ladder is a native tool, then `tmux load-buffer -w -`,
+  then OSC 52 for SSH; `DIVE_CLIPBOARD=osc52` forces it.
+- **`/copy`** copies the selection or lists the last reply's code blocks;
+  `/copy N` and `/copy all` copy their source. **`/mouse`** hands selection back
+  to the terminal (`DIVE_DISABLE_MOUSE=1` to start that way).
+- **Click targets**: a tool call expands its output, a report's title folds it
+  away, the "N new lines" indicator jumps to the bottom.
+- **The conversation prints to the terminal on exit**, after the alternate
+  screen is restored, capped at 2,000 lines and followed by the resume line.
+- **`/scrollback`** writes the conversation into the terminal's own scrollback
+  for find and bulk copy; `/scrollback raw` writes the source. **Ctrl+L**
+  repaints, and `DIVE_FULL_REPAINT=1` repaints every frame.
+- **Meta Model API provider (Muse Spark)** — new `providers/meta` module serving
+  `muse-spark-1.3` and its 1.2/1.1 siblings (1M context, $1.25/$4.25 per MTok;
+  a discounted `-contributor` tier trades a lower price for training on your
+  data). Targets Meta's Responses API, because Chat Completions redacts
+  reasoning for external keys and so cannot carry it across tool turns.
+  Verified against the live API, including encrypted-reasoning replay across a
+  tool turn; see `docs/design/meta-model-api.md`.
+- **Meta search grounding** — `meta.NewWebSearchTool` adds Meta's server-side
+  `web_search`. No domain allow/deny list, which Meta does not support;
+  `IncludeResults` returns the title, URL, and snippet of every hit.
+- **Muse Image** — `muse-image-1.0` generates and edits images through
+  `media.GenerateImage` / `media.EditImage` and `dive image` ($0.01 per image).
+- **Muse Voice Transcribe** — `muse-voice-transcribe-1.0` transcribes WAV audio
+  through `media.Transcribe` ($0.18 per hour). `meta.WithTranscriptionMode`
+  selects push-to-talk, endpointing, or diarization; diarization returns speaker
+  labels and turn timestamps in `TranscriptionResult.Metadata["turns"]`.
 
 ### Changed
 
 - **BREAKING: the managed screen is the CLI's default.** `--screen` and
   `DIVE_SCREEN` are gone; `--inline` (or `DIVE_INLINE=1`) selects the old
-  renderer that writes finished messages to the terminal's own scrollback. The
-  trade is scrollback and your terminal's find bar in exchange for scrolling,
-  reflow on resize, and streaming markdown. One consequence to know about:
-  `dive < file` and `dive | cat` are now refused with a pointer to `--print`,
-  rather than writing alternate-screen escapes into a pipe.
-- **The CLI transcript is one list with one renderer.** Every message the CLI
-  shows now lives in `a.messages` and renders through
-  `messageView(msg, viewOpts)`; the `*Static` renderers and the 36 `runner.Print`
-  calls are gone. New `notice` and `report` message roles carry warnings and
-  command output.
+  renderer. `dive < file` and `dive | cat` are now refused, pointing at `--print`.
+- **The CLI compacts relative to the model's context window** — the default
+  `--compaction-threshold` is now half the model's usable window instead of a
+  flat 100000 tokens, which was a tenth of Muse Spark's 1M. Anthropic models are
+  capped at their ungated 200K and are unchanged; an explicit
+  `--compaction-threshold` or `DIVE_COMPACTION_THRESHOLD` still wins.
 
 ### Fixed
 
-- **The CLI status line no longer forks `git` on every frame.** The branch is
-  cached and refreshed on a 5 s tick and at turn boundaries, removing ~5 ms from
-  a 33 ms frame budget.
+- **The `--resume` session picker is one line per session.** The workspace path
+  moves under the list, empty sessions are dropped, and long titles are cut on
+  whole characters rather than mid-rune.
+- **Dim text in the CLI is readable on a dark background.** Secondary greys and
+  hints sat near 2.9:1 contrast.
 - **`/clear` no longer panics without a session store.**
+- **Encrypted reasoning is requested whenever the model reasons** — the
+  `reasoning.encrypted_content` include was sent only when the caller named a
+  reasoning effort, so an agent that left it unset carried no reasoning across
+  tool turns on any Responses provider.
+- **A `web_search_call` keeps what it did and found** — the query, the page
+  opened, and the retrieved hits now reach
+  `llm.ServerToolUseContent.Input` instead of being decoded away to a bare ID,
+  and the query is replayed into later turns rather than sent empty.
 
 ## [1.27.0] - 2026-09-02
 

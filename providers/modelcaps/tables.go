@@ -50,6 +50,14 @@ var (
 		llm.ReasoningEffortXHigh,
 	}
 	grokThroughMax = append(append([]llm.ReasoningEffort{}, grokBelowMax...), llm.ReasoningEffortMax)
+	// Muse Spark: everything except none (a 400) and max (not offered).
+	museMinimalToXHigh = []llm.ReasoningEffort{
+		llm.ReasoningEffortMinimal,
+		llm.ReasoningEffortLow,
+		llm.ReasoningEffortMedium,
+		llm.ReasoningEffortHigh,
+		llm.ReasoningEffortXHigh,
+	}
 )
 
 // openAITable maps OpenAI model-id prefixes to capabilities. It is declared in
@@ -165,7 +173,22 @@ var grokTable = Table{
 	}},
 }
 
+// museTable maps Meta Model API model-id prefixes to capabilities, unexported
+// for the same reason as openAITable. The Muse Spark ladder is unusual at both
+// ends: "none" is rejected with HTTP 400 rather than ignored — Meta documents
+// Muse Spark as a reasoning model that cannot be asked to stop reasoning — and
+// "max" is not offered at all, so the ladder runs minimal through xhigh.
+// Omitting the parameter is still legal and lets the model pick its own depth.
+var museTable = Table{
+	{Prefix: "muse-spark-1.1", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
+	{Prefix: "muse-spark-1.2", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
+	{Prefix: "muse-spark-1.2-contributor", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
+	{Prefix: "muse-spark-1.3", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
+	{Prefix: "muse-spark-1.3-contributor", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
+}
+
 var (
 	sortedOpenAI = sortByPrefixLength(openAITable)
 	sortedGrok   = sortByPrefixLength(grokTable)
+	sortedMuse   = sortByPrefixLength(museTable)
 )

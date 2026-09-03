@@ -8,6 +8,7 @@ import (
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/providers/google"
 	"github.com/deepnoodle-ai/dive/providers/grok"
+	"github.com/deepnoodle-ai/dive/providers/meta"
 	"github.com/deepnoodle-ai/dive/providers/mistral"
 	"github.com/deepnoodle-ai/dive/providers/modelcatalog"
 	"github.com/deepnoodle-ai/dive/providers/ollama"
@@ -28,6 +29,7 @@ var embeddedProviderCatalogs = []modelcatalog.Catalog{
 	openai.Catalog(),
 	grok.Catalog(),
 	mistral.Catalog(),
+	meta.Catalog(),
 	openrouter.Catalog(),
 	ollama.Catalog(),
 }
@@ -126,6 +128,7 @@ var providerCatalog = []providerInfo{
 	providerInfoFromCatalog("OpenAI", []string{"OPENAI_API_KEY"}, openai.Catalog()),
 	providerInfoFromCatalog("Grok", []string{"XAI_API_KEY", "GROK_API_KEY"}, grok.Catalog()),
 	providerInfoFromCatalog("Mistral", []string{"MISTRAL_API_KEY"}, mistral.Catalog()),
+	providerInfoFromCatalog("Meta", []string{"MODEL_API_KEY", "META_API_KEY"}, meta.Catalog()),
 }
 
 // availableModelChoices returns model choices that the user can actually use,

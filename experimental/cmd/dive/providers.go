@@ -7,12 +7,14 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/dive/providers/grok"
+	"github.com/deepnoodle-ai/dive/providers/meta"
 	"github.com/deepnoodle-ai/dive/providers/mistral"
 
 	// Import providers to trigger their init() registration
 	_ "github.com/deepnoodle-ai/dive/providers/anthropic"
 	_ "github.com/deepnoodle-ai/dive/providers/google"
 	_ "github.com/deepnoodle-ai/dive/providers/grok"
+	_ "github.com/deepnoodle-ai/dive/providers/meta"
 	_ "github.com/deepnoodle-ai/dive/providers/mistral"
 	_ "github.com/deepnoodle-ai/dive/providers/ollama"
 	_ "github.com/deepnoodle-ai/dive/providers/openai"
@@ -25,6 +27,9 @@ var defaultGrokModel = grok.DefaultModel
 
 // defaultMistralModel is the default model used when a Mistral API key is detected.
 var defaultMistralModel = mistral.DefaultModel
+
+// defaultMetaModel is the default model used when a Meta Model API key is detected.
+var defaultMetaModel = meta.DefaultModel
 
 // createModel creates an LLM provider using the global registry.
 // Providers are registered via init() when imported above.
