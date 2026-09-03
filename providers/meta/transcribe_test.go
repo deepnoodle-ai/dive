@@ -34,6 +34,34 @@ func wavHeader(format, channels uint16, sampleRate uint32, bitsPerSample uint16)
 	return buf.Bytes()
 }
 
+// wavExtensibleHeader builds a WAVE_FORMAT_EXTENSIBLE header whose subformat
+// GUID names the given format code. ffmpeg emits this shape for some inputs, so
+// a valid extensible-PCM file has to pass and an extensible float file has to
+// be caught here rather than at the API.
+func wavExtensibleHeader(subFormat uint16, channels uint16, sampleRate uint32, bitsPerSample uint16) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("RIFF")
+	binary.Write(&buf, binary.LittleEndian, uint32(60))
+	buf.WriteString("WAVE")
+	buf.WriteString("fmt ")
+	binary.Write(&buf, binary.LittleEndian, uint32(40))
+	binary.Write(&buf, binary.LittleEndian, uint16(0xFFFE))
+	binary.Write(&buf, binary.LittleEndian, channels)
+	binary.Write(&buf, binary.LittleEndian, sampleRate)
+	binary.Write(&buf, binary.LittleEndian, sampleRate*uint32(channels)*uint32(bitsPerSample)/8)
+	binary.Write(&buf, binary.LittleEndian, channels*bitsPerSample/8)
+	binary.Write(&buf, binary.LittleEndian, bitsPerSample)
+	binary.Write(&buf, binary.LittleEndian, uint16(22)) // cbSize
+	binary.Write(&buf, binary.LittleEndian, bitsPerSample)
+	binary.Write(&buf, binary.LittleEndian, uint32(0x4)) // channel mask
+	binary.Write(&buf, binary.LittleEndian, subFormat)
+	buf.Write([]byte{0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00,
+		0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}) // KSDATAFORMAT GUID suffix
+	buf.WriteString("data")
+	binary.Write(&buf, binary.LittleEndian, uint32(0))
+	return buf.Bytes()
+}
+
 // Meta answers every unsupported input with a bare 400, so these checks are
 // the only place the caller learns which part of the format was wrong.
 func TestValidateTranscriptionWAV(t *testing.T) {
@@ -44,7 +72,9 @@ func TestValidateTranscriptionWAV(t *testing.T) {
 	}{
 		{"24kHz mono PCM", wavHeader(1, 1, 24000, 16), ""},
 		{"16kHz mono PCM", wavHeader(1, 1, 16000, 16), ""},
-		{"extensible PCM", wavHeader(0xFFFE, 1, 24000, 16), ""},
+		{"extensible PCM", wavExtensibleHeader(1, 1, 24000, 16), ""},
+		{"extensible float", wavExtensibleHeader(3, 1, 24000, 16), "subformat 3"},
+		{"extensible without its extension", wavHeader(0xFFFE, 1, 24000, 16), "too short to hold the subformat"},
 		{"stereo", wavHeader(1, 2, 24000, 16), "2 channels"},
 		{"44.1kHz", wavHeader(1, 1, 44100, 16), "44100 Hz"},
 		{"24-bit", wavHeader(1, 1, 24000, 24), "24-bit"},

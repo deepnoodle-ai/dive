@@ -139,9 +139,11 @@ server ignores, so the option set is limited to what Meta documents —
 `SearchContextSize`, `UserLocation`, and `IncludeResults`.
 
 `IncludeResults` asks for `include: ["web_search_call.results"]`, which returns
-the title, URL, and snippet of every hit the model saw. Meta's own docs
-recommend checking those when an answer matters, because coverage is incomplete;
-the `url_citation` annotations are only the subset the model actually cited.
+every hit the model saw rather than only the `url_citation` annotations, which
+are the subset it actually cited. Titles and URLs come back populated; the
+snippet can be empty, as it was at `search_context_size: "low"` in the live run
+below, so `IncludeResults` is a way to see which pages were consulted and not a
+guarantee of their retrieved text.
 
 Muse Spark narrates before it searches — a first message saying "I'll search
 for …", then the search, then the answer in a second message. Two consequences
@@ -283,7 +285,7 @@ build tag and skips when no key is set:
 | `generate_provider_catalogs.py --check` | clean |
 | `sync_module_versions.py --check v1.27.0` | clean |
 | CLI lists Meta and `muse-spark-1.3` | pass |
-| `GET /v1/models` returns all five catalogued ids | pass |
+| `GET /v1/models` returns all seven catalogued ids | pass |
 | Generation | pass |
 | Streaming | pass |
 | Usage reporting (`input`/`output` tokens) | pass |

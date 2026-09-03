@@ -154,9 +154,12 @@ func TestIntegration_ToolCallAndReasoningReplay(t *testing.T) {
 
 	prompt := "What is the weather in Paris? Use the tool, then answer in one sentence."
 
+	// The tool call is forced rather than hoped for: replay is the whole point
+	// of this test, and a turn that answers directly has nothing to replay.
 	first, err := provider.Generate(ctx,
 		llm.WithUserTextMessage(prompt),
 		llm.WithTools(weather),
+		llm.WithToolChoice(llm.ToolChoiceAny),
 		llm.WithReasoningEffort(llm.ReasoningEffortLow),
 	)
 	assert.NoError(t, err)
@@ -184,7 +187,7 @@ func TestIntegration_ToolCallAndReasoningReplay(t *testing.T) {
 		}
 	}
 	if len(toolResults) == 0 {
-		t.Skip("model answered without calling the tool; nothing to replay")
+		t.Fatal("model answered without calling the required tool; the replay assertions below never ran")
 	}
 
 	// The reason this provider is on Responses rather than Chat Completions.
@@ -237,6 +240,7 @@ func TestIntegration_ReasoningReplayWithoutExplicitEffort(t *testing.T) {
 	first, err := provider.Generate(ctx,
 		llm.WithUserTextMessage(prompt),
 		llm.WithTools(weather),
+		llm.WithToolChoice(llm.ToolChoiceAny),
 	)
 	assert.NoError(t, err)
 
@@ -261,7 +265,7 @@ func TestIntegration_ReasoningReplayWithoutExplicitEffort(t *testing.T) {
 		}
 	}
 	if len(toolResults) == 0 {
-		t.Skip("model answered without calling the tool; nothing to replay")
+		t.Fatal("model answered without calling the required tool; the replay assertions below never ran")
 	}
 
 	assert.True(t, signatures > 0,

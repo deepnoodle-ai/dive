@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"slices"
 	"strings"
 	"time"
 
@@ -118,7 +119,10 @@ func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *me
 		AudioEncoding: "WAV",
 		Mode:          string(p.transcriptionMode),
 		Keywords:      p.transcriptionKeywords,
-		LanguageBias:  p.languageBias,
+		// Cloned because the per-request language is appended below: a
+		// configured slice with spare capacity would otherwise be written
+		// through by concurrent Transcribe calls sharing this provider.
+		LanguageBias: slices.Clone(p.languageBias),
 	}
 	if config.Language != "" {
 		request.LanguageBias = append(request.LanguageBias, museLanguageName(config.Language))
@@ -127,6 +131,13 @@ func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *me
 	body, contentType, err := buildTranscribeBody(request, audio)
 	if err != nil {
 		return nil, err
+	}
+	// The audio check above is a cheap early out; this is the one that matches
+	// what Meta measures, since the multipart envelope and the keyword and
+	// language-bias fields all count against the same cap.
+	if len(body) > maxTranscribeBytes {
+		return nil, fmt.Errorf("request body is %d bytes; Meta rejects a transcribe body over %d bytes, so split the recording into shorter clips",
+			len(body), maxTranscribeBytes)
 	}
 
 	var response transcribeResponse
@@ -152,9 +163,9 @@ func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *me
 	return result, nil
 }
 
-// maxTranscribeBytes is the request body cap Meta answers with a 413. The
-// multipart envelope adds a few hundred bytes on top of the audio, so checking
-// the audio alone stays just inside it.
+// maxTranscribeBytes is the request body cap Meta answers with a 413. It
+// applies to the whole multipart body, not the audio alone, so the audio is
+// checked early and the assembled body is checked again before the POST.
 const maxTranscribeBytes = 32 << 20
 
 func buildTranscribeBody(request transcribeRequest, audio []byte) ([]byte, string, error) {
@@ -209,14 +220,30 @@ func validateTranscriptionWAV(audio []byte) error {
 		return fmt.Errorf("audio is not a RIFF/WAVE file; Muse Voice Transcribe reads WAV only, so %s", convertHint)
 	}
 
-	format, channels, sampleRate, bitsPerSample, err := wavFormat(audio)
+	chunk, err := wavFormat(audio)
 	if err != nil {
 		return err
 	}
-	// 1 is WAVE_FORMAT_PCM. 0xFFFE is WAVE_FORMAT_EXTENSIBLE, which carries its
-	// real format in the chunk's extension; ffmpeg writes it for some inputs
-	// and the samples are still PCM, so it is allowed through.
-	if format != 1 && format != 0xFFFE {
+	format := binary.LittleEndian.Uint16(chunk[0:2])
+	channels := binary.LittleEndian.Uint16(chunk[2:4])
+	sampleRate := binary.LittleEndian.Uint32(chunk[4:8])
+	bitsPerSample := binary.LittleEndian.Uint16(chunk[14:16])
+
+	// 1 is WAVE_FORMAT_PCM. 0xFFFE is WAVE_FORMAT_EXTENSIBLE, which ffmpeg
+	// writes for some inputs; the tag alone says nothing about the samples, so
+	// the extension's subformat GUID is what decides whether they are PCM. An
+	// extensible IEEE-float file otherwise passes every field check here and
+	// earns the bare 400 this validator exists to replace.
+	switch format {
+	case 1:
+	case 0xFFFE:
+		if len(chunk) < extensibleFmtSize {
+			return fmt.Errorf("WAV is extensible but its fmt chunk is %d bytes, too short to hold the subformat; %s", len(chunk), convertHint)
+		}
+		if subFormat := binary.LittleEndian.Uint16(chunk[24:26]); subFormat != 1 {
+			return fmt.Errorf("WAV is extensible with subformat %d, not integer PCM; %s", subFormat, convertHint)
+		}
+	default:
 		return fmt.Errorf("WAV holds format %d, not integer PCM; %s", format, convertHint)
 	}
 	if channels != 1 {
@@ -231,9 +258,14 @@ func validateTranscriptionWAV(audio []byte) error {
 	return nil
 }
 
-// wavFormat reads the fmt chunk. Chunks are walked rather than read at a fixed
-// offset because a WAV may carry LIST or JUNK chunks before fmt.
-func wavFormat(audio []byte) (format, channels uint16, sampleRate uint32, bitsPerSample uint16, err error) {
+// extensibleFmtSize is the length of a WAVE_FORMAT_EXTENSIBLE fmt chunk: the
+// 16-byte common header, a 2-byte cbSize, and the 22-byte extension whose last
+// 16 bytes are the subformat GUID.
+const extensibleFmtSize = 40
+
+// wavFormat returns the fmt chunk. Chunks are walked rather than read at a
+// fixed offset because a WAV may carry LIST or JUNK chunks before fmt.
+func wavFormat(audio []byte) ([]byte, error) {
 	for offset := 12; offset+8 <= len(audio); {
 		id := audio[offset : offset+4]
 		size := int(binary.LittleEndian.Uint32(audio[offset+4 : offset+8]))
@@ -243,19 +275,14 @@ func wavFormat(audio []byte) (format, channels uint16, sampleRate uint32, bitsPe
 		}
 		if string(id) == "fmt " {
 			if size < 16 {
-				return 0, 0, 0, 0, fmt.Errorf("WAV fmt chunk is %d bytes, too short to read; %s", size, convertHint)
+				return nil, fmt.Errorf("WAV fmt chunk is %d bytes, too short to read; %s", size, convertHint)
 			}
-			chunk := audio[payload : payload+size]
-			return binary.LittleEndian.Uint16(chunk[0:2]),
-				binary.LittleEndian.Uint16(chunk[2:4]),
-				binary.LittleEndian.Uint32(chunk[4:8]),
-				binary.LittleEndian.Uint16(chunk[14:16]),
-				nil
+			return audio[payload : payload+size], nil
 		}
 		// Chunks are word-aligned: an odd size is followed by a pad byte.
 		offset = payload + size + size%2
 	}
-	return 0, 0, 0, 0, fmt.Errorf("WAV has no fmt chunk; %s", convertHint)
+	return nil, fmt.Errorf("WAV has no fmt chunk; %s", convertHint)
 }
 
 // museLanguages maps ISO 639-1 codes to the language names Meta's languageBias

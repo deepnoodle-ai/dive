@@ -144,3 +144,37 @@ func TestEncodeWebSearchCallWithoutQuery(t *testing.T) {
 	})
 	assert.NoError(t, err)
 }
+
+// A multi-query search reports itself in the plural field and leaves the
+// deprecated singular one empty, so replaying only "query" would send a later
+// turn a search call with nothing in it.
+func TestEncodeWebSearchCallReplaysQueries(t *testing.T) {
+	decoded, err := decodeWebSearchCallContent(unmarshalWebSearchCall(t, `{
+		"id": "ws_1",
+		"type": "web_search_call",
+		"status": "completed",
+		"action": {"type": "search", "queries": ["muse spark pricing", "muse spark context window"]}
+	}`))
+	assert.NoError(t, err)
+
+	use, ok := decoded[0].(*llm.ServerToolUseContent)
+	assert.True(t, ok)
+
+	// Survive the JSON round trip a stored session would put it through.
+	stored, err := json.Marshal(use.Input)
+	assert.NoError(t, err)
+	var reloaded map[string]any
+	assert.NoError(t, json.Unmarshal(stored, &reloaded))
+
+	item, err := encodeAssistantServerToolUseContent(&llm.ServerToolUseContent{
+		ID:    use.ID,
+		Name:  use.Name,
+		Input: reloaded,
+	})
+	assert.NoError(t, err)
+
+	encoded, err := json.Marshal(item)
+	assert.NoError(t, err)
+	assert.Contains(t, string(encoded), "muse spark pricing")
+	assert.Contains(t, string(encoded), "muse spark context window")
+}

@@ -445,21 +445,45 @@ func joinToolResultBlockText(blocks []*dive.ToolResultContent) string {
 func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses.ResponseInputItemUnionParam, error) {
 	switch c.Name {
 	case "web_search_call":
-		// Replay the query the search actually ran when decoding kept it. It
-		// used to always go back empty, which told a later turn that a search
-		// happened but not what was asked.
-		query, _ := c.Input["query"].(string)
+		// Replay the queries the search actually ran when decoding kept them.
+		// They used to always go back empty, which told a later turn that a
+		// search happened but not what was asked. A multi-query search reports
+		// itself in the plural field and leaves the deprecated singular one
+		// empty, so both are carried across.
+		action := responses.ResponseFunctionWebSearchActionSearchParam{Type: "search"}
+		if query, ok := c.Input["query"].(string); ok && query != "" {
+			action.Query = openai.String(query)
+		}
+		if queries := stringSlice(c.Input["queries"]); len(queries) > 0 {
+			action.Queries = queries
+		}
 		return responses.ResponseInputItemParamOfWebSearchCall(
-			responses.ResponseFunctionWebSearchActionSearchParam{
-				Query: openai.String(query),
-				Type:  "search",
-			},
+			action,
 			c.ID,
 			responses.ResponseFunctionWebSearchStatusCompleted,
 		), nil
 	}
 	return responses.ResponseInputItemUnionParam{},
 		fmt.Errorf("unsupported server tool use name: %s", c.Name)
+}
+
+// stringSlice reads a list of strings that may have come straight from the
+// decoder ([]string) or back out of a stored session, where a JSON round trip
+// turns it into []any.
+func stringSlice(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 func encodeAssistantCodeInterpreterCallContent(c *CodeInterpreterCallContent) (responses.ResponseInputItemUnionParam, error) {
