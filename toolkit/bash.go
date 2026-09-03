@@ -25,9 +25,46 @@ const (
 	DefaultBashTimeout = 2 * time.Minute
 	// MaxBashTimeout is the maximum allowed timeout (10 minutes)
 	MaxBashTimeout = 10 * time.Minute
-	// DefaultMaxOutputLength is the default maximum output length in characters
+	// DefaultMaxOutputLength is the default maximum retained output in bytes.
 	DefaultMaxOutputLength = 30000
+	outputTruncationMarker = "\n... (output truncated)"
 )
+
+type boundedOutput struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+// Write retains at most limit bytes while reporting the full chunk consumed so
+// callers can continue draining the process pipe after the result is bounded.
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	consumed := len(p)
+	if b.limit <= 0 {
+		_, _ = b.buf.Write(p)
+		return consumed, nil
+	}
+
+	remaining := b.limit - b.buf.Len()
+	if remaining > 0 {
+		if remaining > len(p) {
+			remaining = len(p)
+		}
+		_, _ = b.buf.Write(p[:remaining])
+	}
+	if remaining < len(p) {
+		b.truncated = true
+	}
+	return consumed, nil
+}
+
+func (b *boundedOutput) String() string {
+	output := b.buf.String()
+	if b.truncated {
+		return output + outputTruncationMarker
+	}
+	return output
+}
 
 // BashInput represents the input parameters for the Bash tool.
 type BashInput struct {
@@ -61,7 +98,7 @@ type BashToolOptions struct {
 	// instead of creating one from WorkspaceDir.
 	Validator *PathValidator
 
-	// MaxOutputLength limits the combined stdout/stderr output size in characters.
+	// MaxOutputLength limits the retained combined stdout/stderr size in bytes.
 	// Output exceeding this limit is truncated with a warning.
 	// Defaults to [DefaultMaxOutputLength] (30000 characters).
 	MaxOutputLength int
@@ -266,6 +303,7 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 	shellArgs = append(shellArgs, command)
 
 	cmd := exec.CommandContext(ctx, shell, shellArgs...)
+	configureBashCommandCancellation(cmd)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
@@ -289,8 +327,20 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 	// The parent must close its copy so the reader observes EOF after the child
 	// closes both descriptors.
 	_ = mergedWriter.Close()
+	// A descendant can inherit the writer after the shell exits. Closing the
+	// reader when the context ends prevents that inherited descriptor from
+	// holding this call open after cancellation has terminated the process tree.
+	readFinished := make(chan struct{})
+	defer close(readFinished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = mergedReader.Close()
+		case <-readFinished:
+		}
+	}()
 
-	var merged bytes.Buffer
+	merged := boundedOutput{limit: t.maxOutputLen}
 	chunk := make([]byte, 32*1024)
 	var captureErr error
 	for {
@@ -301,7 +351,7 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 			dive.StreamOutput(ctx, string(part))
 		}
 		if readErr != nil {
-			if readErr != io.EOF {
+			if readErr != io.EOF && ctx.Err() == nil {
 				captureErr = readErr
 			}
 			break
@@ -324,7 +374,7 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 		return "", -1, fmt.Errorf("error reading command output: %s", captureErr.Error())
 	}
 
-	return truncateOutput(merged.String(), t.maxOutputLen), exitCode, nil
+	return merged.String(), exitCode, nil
 }
 
 func formatBashFailure(exitCode int, output string) string {
@@ -345,7 +395,7 @@ func truncateOutput(output string, maxLen int) string {
 	if maxLen <= 0 || len(output) <= maxLen {
 		return output
 	}
-	return output[:maxLen] + "\n... (output truncated)"
+	return output[:maxLen] + outputTruncationMarker
 }
 
 // truncateCommand truncates a command string for display, replacing newlines with spaces

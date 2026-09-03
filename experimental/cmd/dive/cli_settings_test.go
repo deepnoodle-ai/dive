@@ -17,6 +17,14 @@ func testStrPtr(s string) *string { return &s }
 
 func testBoolPtr(b bool) *bool { return &b }
 
+func useTestUserSettingsRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	restore := settings.SetUserSettingsRootForTesting(root)
+	t.Cleanup(restore)
+	return root
+}
+
 // unsetTestEnv removes a variable for the test's duration, restoring it after.
 // t.Setenv(key, "") is not equivalent: a present-but-empty variable still
 // counts as set for bool flags (and for some string flags) in the CLI parser.
@@ -237,7 +245,7 @@ func TestCurrentSubagentDefaultsUseLiveParentState(t *testing.T) {
 }
 
 func TestModelSwitchRefreshesAutomaticCompactionConfiguration(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTestUserSettingsRoot(t)
 	app, _ := newFakeApp(t)
 	app.modelName = "mistral-small-latest"
 	app.compactionConfig = &compaction.CompactionConfig{
@@ -252,7 +260,7 @@ func TestModelSwitchRefreshesAutomaticCompactionConfiguration(t *testing.T) {
 }
 
 func TestModelSwitchPreservesExplicitCompactionThreshold(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTestUserSettingsRoot(t)
 	app, _ := newFakeApp(t)
 	app.modelName = "mistral-small-latest"
 	app.compactionThresholdExplicit = true
@@ -268,7 +276,7 @@ func TestModelSwitchPreservesExplicitCompactionThreshold(t *testing.T) {
 }
 
 func TestSelectingActiveModelStillPersistsIt(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTestUserSettingsRoot(t)
 	app, _ := newFakeApp(t)
 	app.modelName = "gpt-5.6-sol"
 	app.modelSource = "autodetect"
@@ -283,7 +291,7 @@ func TestSelectingActiveModelStillPersistsIt(t *testing.T) {
 }
 
 func TestEffortCommandPersistsToSandboxedHome(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTestUserSettingsRoot(t)
 	app, _ := newFakeApp(t)
 	app.modelSettings = &dive.ModelSettings{}
 
@@ -299,7 +307,7 @@ func TestEffortCommandPersistsToSandboxedHome(t *testing.T) {
 }
 
 func TestThinkingCommandPersistsToSandboxedHome(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTestUserSettingsRoot(t)
 	app, _ := newFakeApp(t)
 	app.modelSettings = &dive.ModelSettings{}
 
@@ -315,7 +323,7 @@ func TestThinkingCommandPersistsToSandboxedHome(t *testing.T) {
 }
 
 func TestUsageCommandTogglesDetailedPanel(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTestUserSettingsRoot(t)
 	app, _ := newFakeApp(t)
 
 	app.handleUsageCommand("full")

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -282,6 +283,52 @@ func TestBashTool_Call_TruncatesCombinedOutputOnce(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
 	assert.Equal(t, "12345678\n... (output truncated)", result.Content[0].Text)
+}
+
+func TestBashTool_Call_DrainsOutputAfterCaptureLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	tool := NewBashTool(BashToolOptions{MaxOutputLength: 64})
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "for ((i=0; i<20000; i++)); do printf x; done",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Equal(t, 64+len(outputTruncationMarker), len(result.Content[0].Text))
+	assert.Equal(t, 1, strings.Count(result.Content[0].Text, outputTruncationMarker))
+}
+
+func TestBashTool_Call_TimeoutTerminatesDescendantsHoldingOutputPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix process-group behavior")
+	}
+
+	tool := NewBashTool()
+	started := time.Now()
+	result, err := tool.Call(context.Background(), &BashInput{
+		Command: "sleep 30 &",
+		Timeout: 100,
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Less(t, time.Since(started), 2*time.Second,
+		"an inherited output pipe must not delay timeout handling")
+}
+
+func TestBoundedOutputRetainsOnlyConfiguredLimit(t *testing.T) {
+	output := boundedOutput{limit: 8}
+
+	n, err := output.Write([]byte("12345"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n)
+	n, err = output.Write([]byte("67890"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n, "discarded bytes are still consumed from the pipe")
+	assert.Equal(t, 8, output.buf.Len())
+	assert.Equal(t, "12345678"+outputTruncationMarker, output.String())
+	assert.Equal(t, 1, strings.Count(output.String(), outputTruncationMarker))
 }
 
 func TestBashTool_Call_Timeout(t *testing.T) {

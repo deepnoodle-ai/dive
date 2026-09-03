@@ -11,6 +11,8 @@ import (
 	"github.com/deepnoodle-ai/dive/permission"
 )
 
+var userSettingsRoot = os.UserHomeDir
+
 // Settings represents Dive settings.
 //
 // Three tiers merge into one effective value, later tiers winning per key:
@@ -146,11 +148,22 @@ func filterUserSettings(user map[string]any) map[string]any {
 
 // UserSettingsPath returns the global user settings path (~/.dive/settings.json).
 func UserSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := userSettingsRoot()
 	if err != nil {
 		return "", fmt.Errorf("settings: find home directory: %w", err)
 	}
 	return filepath.Join(home, ".dive", "settings.json"), nil
+}
+
+// SetUserSettingsRootForTesting overrides the root used by UserSettingsPath
+// and returns a function that restores the previous resolver. It exists so
+// tests in importing packages can isolate settings writes without depending on
+// whether the host platform uses HOME, USERPROFILE, or another home variable.
+// Tests using this process-wide hook must not run in parallel.
+func SetUserSettingsRootForTesting(root string) func() {
+	previous := userSettingsRoot
+	userSettingsRoot = func() (string, error) { return root, nil }
+	return func() { userSettingsRoot = previous }
 }
 
 // SaveUserSettings persists user-tier defaults (model, thinking_effort,

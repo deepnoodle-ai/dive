@@ -3,11 +3,20 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
+
+func useTestUserSettingsRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	restore := SetUserSettingsRootForTesting(root)
+	t.Cleanup(restore)
+	return root
+}
 
 func TestLoadSettings(t *testing.T) {
 	t.Run("returns empty settings when file doesn't exist", func(t *testing.T) {
@@ -287,7 +296,7 @@ func TestMatchPath(t *testing.T) {
 }
 
 func TestSaveUserSettingsRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	root := useTestUserSettingsRoot(t)
 
 	assert.NoError(t, SaveUserSettings(&Settings{
 		Model:             strPtr("claude-opus-4-6"),
@@ -309,19 +318,20 @@ func TestSaveUserSettingsRoundTrip(t *testing.T) {
 
 	path, err := UserSettingsPath()
 	assert.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, ".dive", "settings.json"), path)
 	info, err := os.Stat(path)
 	assert.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 func TestSaveUserSettingsRejectsNilUpdate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	assert.Error(t, SaveUserSettings(nil))
 }
 
 func TestSaveUserSettingsPreservesUnrelatedKeys(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	useTestUserSettingsRoot(t)
 
 	path, err := UserSettingsPath()
 	assert.NoError(t, err)
@@ -342,8 +352,7 @@ func TestSaveUserSettingsPreservesUnrelatedKeys(t *testing.T) {
 }
 
 func TestLoadEffectiveSettingsProjectOverridesUser(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	useTestUserSettingsRoot(t)
 	assert.NoError(t, SaveUserSettings(&Settings{
 		Model:          strPtr("user-model"),
 		ThinkingEffort: strPtr("low"),
@@ -363,8 +372,7 @@ func TestLoadEffectiveSettingsProjectOverridesUser(t *testing.T) {
 }
 
 func TestLoadEffectiveSettingsKeepsSecurityConfigurationProjectScoped(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	useTestUserSettingsRoot(t)
 	userPath, err := UserSettingsPath()
 	assert.NoError(t, err)
 	assert.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o700))
