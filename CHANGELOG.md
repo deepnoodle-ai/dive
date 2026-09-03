@@ -10,82 +10,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **The CLI remembers model, thinking effort, thinking display, and usage detail in `~/.dive/settings.json`.** Resolution is flag > env > settings file > default; `/model`, `/effort`, `/thinking`, and `/usage full|brief` switch mid-session and persist, `/status` shows the effective configuration, and the status line always shows model and effort.
-- **The CLI status line is one row by default.** Model, effort, directory, branch, context %, and session total cost share a line; the token breakdown table only renders inline with `show_detailed_usage` (`--show-detailed-usage` / `/usage full`), while `/usage` still shows the full report on demand.
-- **The CLI renders the conversation in a managed, scrollable screen.** The
-  transcript reflows on resize and scrolls with the wheel, PgUp/PgDn,
-  Ctrl+Home/End, and Home/End.
-- **Selection and copy.** Drag to select, double-click a word, triple-click a
-  line. The clipboard ladder is a native tool, then `tmux load-buffer -w -`,
-  then OSC 52 for SSH; `DIVE_CLIPBOARD=osc52` forces it.
-- **`/copy`** copies the selection or lists the last reply's code blocks;
-  `/copy N` and `/copy all` copy their source. **`/mouse`** hands selection back
-  to the terminal (`DIVE_DISABLE_MOUSE=1` to start that way).
-- **Click targets**: a tool call expands its output, a report's title folds it
-  away, the "N new lines" indicator jumps to the bottom.
-- **The conversation prints to the terminal on exit**, after the alternate
-  screen is restored, capped at 2,000 lines and followed by the resume line.
-- **`/scrollback`** writes the conversation into the terminal's own scrollback
-  for find and bulk copy; `/scrollback raw` writes the source. **Ctrl+L**
-  repaints, and `DIVE_FULL_REPAINT=1` repaints every frame.
-- **Meta Model API provider (Muse Spark)** — new `providers/meta` module serving
-  `muse-spark-1.3` and its 1.2/1.1 siblings (1M context, $1.25/$4.25 per MTok;
-  a discounted `-contributor` tier trades a lower price for training on your
-  data). Targets Meta's Responses API, because Chat Completions redacts
-  reasoning for external keys and so cannot carry it across tool turns.
-  Verified against the live API, including encrypted-reasoning replay across a
-  tool turn; see `docs/design/meta-model-api.md`.
-- **Meta search grounding** — `meta.NewWebSearchTool` adds Meta's server-side
-  `web_search`. No domain allow/deny list, which Meta does not support;
-  `IncludeResults` returns the title, URL, and snippet of every hit.
-- **Muse Image** — `muse-image-1.0` generates and edits images through
-  `media.GenerateImage` / `media.EditImage` and `dive image` ($0.01 per image).
-- **Muse Voice Transcribe** — `muse-voice-transcribe-1.0` transcribes WAV audio
-  through `media.Transcribe` ($0.18 per hour). `meta.WithTranscriptionMode`
-  selects push-to-talk, endpointing, or diarization; diarization returns speaker
-  labels and turn timestamps in `TranscriptionResult.Metadata["turns"]`.
+- **Expanded experimental CLI.** Added persistent input history and preferences,
+  managed scrolling and selection, transcript and code copying, and commands
+  such as `/model`, `/status`, and `/copy`.
+- **Meta Model API provider.** Added Muse Spark reasoning, grounded search,
+  image generation and editing, and voice transcription. Discounted contributor
+  models permit Meta to train on prompts and completions.
 
 ### Changed
 
-- **The CLI now uses one cohesive terminal color system.** Markdown, dialogs, inputs, tools, todos, usage reports, and progress states share brighter ocean-cyan accents and cool slate neutrals; periwinkle marks literals, while amber, green, and red are reserved for warning, success, and failure. Wonton v0.2.1 supplies explicit input-text styling.
-- **The CLI startup display is now compact three-line text.** Version, model with thinking effort, and workspace replace the bordered field list; exceptional scope, context, and resume details remain beneath it.
-- **The Bash tool now returns one plain-text stdout/stderr stream in emission order.** Successful output is unwrapped (including an empty string); nonzero exits use `<error>Exit code N\n…</error>`, and combined-output truncation always carries a marker. Each call remains a fresh shell: cwd, environment, options, and exit status reset, while filesystem changes persist.
-- **BREAKING: the managed screen is the CLI's default.** `--screen` and
-  `DIVE_SCREEN` are gone; `--inline` (or `DIVE_INLINE=1`) selects the old
-  renderer. `dive < file` and `dive | cat` are now refused, pointing at `--print`.
-- **The CLI compacts relative to the model's context window** — the default
-  `--compaction-threshold` is now half the model's usable window instead of a
-  flat 100000 tokens, which was a tenth of Muse Spark's 1M. Anthropic models are
-  capped at their ungated 200K and are unchanged; an explicit
-  `--compaction-threshold` or `DIVE_COMPACTION_THRESHOLD` still wins.
+- **The managed screen is now the CLI default.** Use `--inline` or
+  `DIVE_INLINE=1` for the previous renderer and `--print` for non-interactive
+  use.
+- **Simpler CLI presentation.** Startup, status, usage, and color styling are
+  more compact and consistent.
+- **Simpler Bash tool results.** Successful calls return the merged output
+  directly; failed calls include the exit code and output in an `<error>` tag.
+- **Model-aware compaction.** The automatic threshold now scales with the
+  selected model's usable context window.
 
 ### Fixed
 
-- **OpenAI-compatible providers now honor `llm.WithParallelToolCalls`.** The
-  Chat Completions adapter previously dropped the option, so callers could not
-  disable parallel tool calls; `false` is now serialized as
-  `parallel_tool_calls: false`.
-- **CLI history navigation no longer gets trapped by recalled slash commands.** Command and file autocomplete stay closed while browsing history, edits return the recalled entry to normal completion behavior, and all autocomplete matches remain reachable through an eight-row sliding window.
-- **CLI model switches now update downstream work, not just the status label.** Newly spawned subagents inherit the current model, effort, and thinking settings; compaction uses the switched model and recalculates automatic thresholds while preserving explicit thresholds.
-- **The CLI footer keeps one explicit blank row below the status line instead of two.** Multiline user messages also trim pasted trailing spaces and tabs for display without changing the content sent to the model.
-- **The `--resume` session picker is one line per session.** The workspace path
-  moves under the list, empty sessions are dropped, and long titles are cut on
-  whole characters rather than mid-rune.
-- **Dim text in the CLI is readable on a dark background.** Secondary greys and
-  hints sat near 2.9:1 contrast.
-- **`/compact` no longer freezes the UI.** The summarizer runs in the background
-  with a compacting spinner; input for new turns is held until it finishes. The
-  result shows as a scrollback notice and in the turn-summary slot, replacing
-  the footer stats.
-- **`/clear` no longer panics without a session store.**
-- **Encrypted reasoning is requested whenever the model reasons** — the
-  `reasoning.encrypted_content` include was sent only when the caller named a
-  reasoning effort, so an agent that left it unset carried no reasoning across
-  tool turns on any Responses provider.
-- **A `web_search_call` keeps what it did and found** — the query, the page
-  opened, and the retrieved hits now reach
-  `llm.ServerToolUseContent.Input` instead of being decoded away to a bare ID,
-  and the query is replayed into later turns rather than sent empty.
+- **CLI reliability and polish.** Fixed navigation, model propagation,
+  compaction responsiveness, and several session and rendering edge cases.
+- **Responses provider replay.** Encrypted reasoning and web-search details now
+  survive tool turns.
+- **OpenAI-compatible parallel tool control.** `llm.WithParallelToolCalls` is
+  now included in Chat Completions requests.
 
 ## [1.27.0] - 2026-09-02
 
