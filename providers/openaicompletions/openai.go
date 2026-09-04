@@ -16,7 +16,6 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/dive/providers/modelcaps"
-	"github.com/deepnoodle-ai/wonton/retry"
 )
 
 // SystemPromptBehavior describes how the system prompt should be handled for a
@@ -151,7 +150,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	var result Response
-	err = retry.DoSimple(ctx, func() error {
+	sendRequest := func() error {
 		req, err := p.createRequest(ctx, body, config, false)
 		if err != nil {
 			return err
@@ -170,13 +169,19 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 						"status", resp.StatusCode, "body", string(body))
 				}
 			}
-			return providers.NewError(resp.StatusCode, string(body))
+			return providers.NewError(resp.StatusCode, string(body),
+				providers.WithErrorHeader(resp.Header))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
+	}
+
+	err = providers.RetryPolicy{
+		MaxAttempts: p.maxRetries + 1,
+		BaseWait:    p.retryBaseWait,
+	}.Do(ctx, sendRequest)
 
 	if err != nil {
 		return nil, err
@@ -308,7 +313,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			return nil, providers.NewError(resp.StatusCode, string(body))
+			return nil, providers.NewError(resp.StatusCode, string(body),
+				providers.WithErrorHeader(resp.Header))
 		}
 		return &StreamIterator{
 			body:                 resp.Body,

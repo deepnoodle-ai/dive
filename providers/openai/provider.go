@@ -10,7 +10,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
-	"github.com/deepnoodle-ai/wonton/retry"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
@@ -112,7 +111,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	var resp *responses.Response
-	err = retry.DoSimple(ctx, func() error {
+	sendRequest := func() error {
 		reqOpts := append([]option.RequestOption{
 			option.WithRequestTimeout(5 * time.Minute),
 		}, p.extraRequestOptions...)
@@ -125,7 +124,12 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return normalizeOpenAIError(err)
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
+	}
+
+	err = providers.RetryPolicy{
+		MaxAttempts: p.maxRetries + 1,
+		BaseWait:    p.retryBaseWait,
+	}.Do(ctx, sendRequest)
 
 	if err != nil {
 		return nil, err

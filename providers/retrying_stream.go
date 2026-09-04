@@ -78,7 +78,7 @@ func (s *retryingStreamIterator) Next() bool {
 	}
 
 	var hasEvent bool
-	err := retry.DoSimple(s.ctx, func() error {
+	openStream := func() error {
 		if s.factory == nil {
 			return retry.MarkPermanent(fmt.Errorf("providers: stream factory is nil"))
 		}
@@ -119,19 +119,22 @@ func (s *retryingStreamIterator) Next() bool {
 			return errors.Join(normalizedStreamErr, closeErr)
 		}
 		return normalizedStreamErr
-	},
-		retry.WithMaxAttempts(s.config.MaxRetries+1),
-		retry.WithBackoff(s.config.RetryBaseWait, maxStreamRetryBackoff),
-		retry.WithRetryIf(func(err error) bool {
+	}
+
+	err := RetryPolicy{
+		MaxAttempts: s.config.MaxRetries + 1,
+		BaseWait:    s.config.RetryBaseWait,
+		MaxWait:     maxStreamRetryBackoff,
+		RetryIf: func(err error) bool {
 			if s.ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return false
 			}
 			return !retry.IsPermanent(err)
-		}),
-		retry.WithOnRetry(func(attempt int, err error, delay time.Duration) {
+		},
+		OnRetry: func(attempt int, err error, delay time.Duration) {
 			s.logRetry(attempt+1, s.config.MaxRetries+1, err, delay)
-		}),
-	)
+		},
+	}.Do(s.ctx, openStream)
 	if err != nil {
 		s.err = err
 		s.ended = true

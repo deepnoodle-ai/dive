@@ -16,6 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Long-context pricing for OpenAI.** `gpt-6-astra` bills input and cache reads
   at 2x and output at 1.5x above 272K input tokens. Long-context cache writes
   have no `llm.PricingInfo` field and are still costed at the standard rate.
+- **`Retry-After` is honored.** When a provider says how long to wait, that
+  delay replaces the exponential backoff for the next attempt, capped at the
+  policy's `MaxWait`. OpenAI now sends it with `429 slow_down` and
+  `503 server_is_overloaded`.
+- **`providers.RetryPolicy`** replaces the retry options each provider assembled
+  by hand. `providers.NewError` takes `WithErrorCode` and `WithErrorHeader`
+  options, and `ProviderError` exposes `Code()` and `RetryAfter()`.
 
 ### Changed
 
@@ -25,6 +32,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Terminal rate-limit errors are no longer retried.** An exhausted balance or
+  a spend limit arrives as a `429`, the same status as an ordinary rate limit;
+  the error code now separates them, so an out-of-credit account fails at once
+  instead of burning the attempt budget.
+- **`gpt-6-astra` is no longer exported by the Chat Completions adapter.** The
+  model does not support function calling on `v1/chat/completions`, so it is
+  Responses-only.
 - **Provider watch no longer reports documentation filenames as models.** A
   model linked as `<id>.md` in an upstream index filed a second phantom gap
   beside the real one.

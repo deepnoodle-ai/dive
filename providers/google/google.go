@@ -13,7 +13,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
-	"github.com/deepnoodle-ai/wonton/retry"
 	"google.golang.org/genai"
 )
 
@@ -149,7 +148,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	var result *llm.Response
-	err = retry.DoSimple(ctx, func() error {
+	sendRequest := func() error {
 		// Use Models.GenerateContent directly
 		resp, err := p.client.Models.GenerateContent(ctx, request.Model, contents, genConfig)
 		if err != nil {
@@ -163,7 +162,12 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		}
 		populateGoogleCost(result.Model, resp.UsageMetadata, &result.Usage, p.pricingContext(request.ServiceTier))
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
+	}
+
+	err = providers.RetryPolicy{
+		MaxAttempts: p.maxRetries + 1,
+		BaseWait:    p.retryBaseWait,
+	}.Do(ctx, sendRequest)
 
 	if err != nil {
 		return nil, err

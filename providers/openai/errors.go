@@ -16,7 +16,18 @@ import (
 func normalizeOpenAIError(err error) error {
 	var apiErr *openaisdk.Error
 	if errors.As(err, &apiErr) {
-		return providers.NewError(apiErr.StatusCode, apiErrorMessage(apiErr))
+		// The SDK has already parsed the code out of the envelope, and the body
+		// handed to NewError below is only the message, so pass the code
+		// explicitly rather than leaving it to be re-parsed. It separates a 429
+		// worth retrying ("slow_down") from one that never will be
+		// ("insufficient_quota" and the spend limits).
+		var header http.Header
+		if apiErr.Response != nil {
+			header = apiErr.Response.Header
+		}
+		return providers.NewError(apiErr.StatusCode, apiErrorMessage(apiErr),
+			providers.WithErrorCode(apiErr.Code),
+			providers.WithErrorHeader(header))
 	}
 	return err
 }
