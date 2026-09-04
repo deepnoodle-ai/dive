@@ -92,6 +92,11 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	exclusions := map[string]string{
 		ModelGPT52Pro: "the official GPT-5.2 Pro model page publishes input and output prices but no cached-input price",
 	}
+	// Models the Chat Completions adapter deliberately does not carry, so the
+	// generated view is expected to omit them.
+	responsesOnly := map[string]string{
+		ModelGPT6Astra: "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",
+	}
 
 	for model := range TextModelPricing {
 		_, covered := expected[model]
@@ -115,6 +120,10 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 			assert.True(t, cost.CacheRead > 0)
 
 			completionsPricing, ok := openaicompletions.TextModelPricing[model]
+			if reason, only := responsesOnly[model]; only {
+				assert.False(t, ok, "OpenAI Completions generated view must omit "+model+": "+reason)
+				return
+			}
 			assert.True(t, ok, "OpenAI Completions generated view must include "+model)
 			assert.Equal(t, wantPrice, completionsPricing.CacheReadPrice)
 		})

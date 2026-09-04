@@ -32,9 +32,6 @@
       "go_name": "ModelGPT6Astra",
       "go_type": "openaisdk.ChatModel",
       "id": "gpt-6-astra",
-      "adapters": [
-        "openaicompletions"
-      ],
       "kind": "text",
       "context_window": 1050000,
       "display_name": "GPT-6 Astra",

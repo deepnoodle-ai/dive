@@ -3,7 +3,6 @@
 package openaicompletions
 
 const (
-	ModelGPT6Astra          = "gpt-6-astra"
 	ModelGPT56              = "gpt-5.6"
 	ModelGPT56Sol           = "gpt-5.6-sol"
 	ModelGPT56Terra         = "gpt-5.6-terra"
