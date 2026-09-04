@@ -11,7 +11,6 @@ require (
 	github.com/deepnoodle-ai/dive/providers/meta v1.28.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.28.0
 	github.com/deepnoodle-ai/wonton v0.2.1
-	github.com/mattn/go-runewidth v0.0.29
 	golang.org/x/term v0.45.0
 	google.golang.org/genai v1.71.0
 )
@@ -22,7 +21,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.7.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
@@ -35,7 +33,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.24.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/openai/openai-go/v3 v3.55.0 // indirect
+	github.com/openai/openai-go/v3 v3.56.0 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
