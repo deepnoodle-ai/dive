@@ -115,13 +115,14 @@ var openAITable = Table{
 	{Prefix: "gpt-5.6-terra", Caps: Capabilities{Efforts: effortsNoneToMax}},
 	{Prefix: "gpt-5.6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
 
-	// Documented rather than probed: gpt-6-astra is gated to the Trusted Access
-	// Program and answers "does not exist" for accounts outside it, so this
-	// entry comes from OpenAI's release notes, not a 200/400 from the endpoint.
-	// It is recorded rather than left Unverified because the two exclusions are
-	// stated outright -- no "none" effort, and no custom temperature, top_p, or
-	// logprobs -- and passing those through would send a request already known
-	// to fail. Re-probe once the model is reachable.
+	// Documented rather than probed: this entry comes from OpenAI's release
+	// notes and model page, not from a 200/400 the endpoint returned. It is
+	// recorded rather than left Unverified because both exclusions are stated
+	// outright -- "GPT-6 Astra does not support none reasoning effort", and no
+	// custom temperature, top_p, or logprobs -- and passing either through
+	// would send a request already known to fail. The published ladder (low
+	// through max) is what the entry carries; confirm it against the live
+	// endpoint the next time the tables are re-probed.
 	{Prefix: "gpt-6-astra", Caps: Capabilities{Efforts: effortsLowToMax}},
 
 	{Prefix: "o3", Caps: Capabilities{Efforts: effortsLowToHigh}},

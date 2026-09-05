@@ -235,6 +235,7 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                     "long_context_input_price_per_1m_tokens",
                     "long_context_cache_read_price_per_1m_tokens",
                     "long_context_output_price_per_1m_tokens",
+                    "long_context_cache_write_price_per_1m_tokens",
                     "cache_read_price_per_1m_tokens",
                     "cache_read_price_above_threshold_per_1m_tokens",
                     "cache_write_price_per_1m_tokens",
@@ -304,12 +305,21 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                         "long_context_output_price_per_1m_tokens",
                     )
                 )
-                if bool(long_threshold) != any(long_prices) or (
+                long_cache_write = entry.get(
+                    "long_context_cache_write_price_per_1m_tokens"
+                )
+                if bool(long_threshold) != (any(long_prices) or bool(long_cache_write)) or (
                     long_threshold is not None
                     and (not isinstance(long_threshold, int) or long_threshold <= 0)
                 ) or (long_threshold and not all(long_prices)):
                     raise CatalogError(
                         f"{path}: {table_name}/{model_id} has incomplete long-context pricing"
+                    )
+                # Optional: a model that never surcharges cache writes has no
+                # standard rate for the long-context tier to raise.
+                if long_cache_write and not entry.get("cache_write_price_per_1m_tokens"):
+                    raise CatalogError(
+                        f"{path}: {table_name}/{model_id} has a long-context cache-write price without a standard one"
                     )
                 multiplier = entry.get("non_global_price_multiplier")
                 if multiplier not in (None, "") and float(multiplier) <= 0:
@@ -568,6 +578,10 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                         "cache_read_price_above_threshold_per_1m_tokens",
                     ),
                     ("CacheWritePrice", "cache_write_price_per_1m_tokens"),
+                    (
+                        "LongContextCacheWritePrice",
+                        "long_context_cache_write_price_per_1m_tokens",
+                    ),
                     ("NonGlobalPriceMultiplier", "non_global_price_multiplier"),
                 )
             elif table.kind == "image":

@@ -73,6 +73,35 @@ func TestPricingInfoCostOf_LongContextBoundary(t *testing.T) {
 	assert.Equal(t, 0.6/1_000_000, long.CacheRead)
 }
 
+// Cache writes follow the tier the input size selects, but only for a model
+// that publishes a long-context write rate. Without one the standard rate
+// carries past the threshold rather than falling to zero.
+func TestPricingInfoCostOf_LongContextCacheWrite(t *testing.T) {
+	p := PricingInfo{
+		InputPrice:                 2,
+		OutputPrice:                6,
+		CacheReadPrice:             0.3,
+		CacheWritePrice:            2.5,
+		LongContextThreshold:       200_000,
+		LongContextInputPrice:      4,
+		LongContextCacheReadPrice:  0.6,
+		LongContextOutputPrice:     12,
+		LongContextCacheWritePrice: 5,
+	}
+
+	// Cache-creation tokens count toward the input size that selects the tier,
+	// so both cases size the whole request, not just the prompt.
+	standard := &Usage{InputTokens: 100_000, CacheCreationInputTokens: 50_000}
+	assert.Equal(t, 50_000*2.5/1_000_000, p.CostOf(standard).CacheWrite)
+
+	long := &Usage{InputTokens: 300_000, CacheCreationInputTokens: 50_000}
+	assert.Equal(t, 50_000*5.0/1_000_000, p.CostOf(long).CacheWrite)
+
+	flat := p
+	flat.LongContextCacheWritePrice = 0
+	assert.Equal(t, 50_000*2.5/1_000_000, flat.CostOf(long).CacheWrite)
+}
+
 func TestPricingInfoCostOf_ModalityOverrides(t *testing.T) {
 	p := PricingInfo{
 		InputPrice:     1,
@@ -117,12 +146,14 @@ func TestPricingInfoScaledDeepCopiesPrices(t *testing.T) {
 		LongContextOutputPrice:       6,
 		CacheReadPriceAboveThreshold: 0.3,
 		CacheWritePrice:              1.25,
+		LongContextCacheWritePrice:   2.5,
 	}
 
 	factor := 1.1
 	scaled := p.Scaled(factor)
 	assert.Equal(t, p.InputPrice*factor, scaled.InputPrice)
 	assert.Equal(t, p.LongContextInputPrice*factor, scaled.LongContextInputPrice)
+	assert.Equal(t, p.LongContextCacheWritePrice*factor, scaled.LongContextCacheWritePrice)
 	assert.Equal(t, p.InputPriceByModality["audio"]*factor, scaled.InputPriceByModality["audio"])
 	assert.Equal(t, p.CacheReadPriceByModality["audio"]*factor, scaled.CacheReadPriceByModality["audio"])
 	assert.Equal(t, p.OutputPriceByModality["audio"]*factor, scaled.OutputPriceByModality["audio"])

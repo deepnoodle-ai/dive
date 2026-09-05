@@ -462,16 +462,31 @@ func isNativeOpenAIEndpoint(providerName, endpoint string) bool {
 	return providerName == ProviderName && strings.TrimRight(endpoint, "/") == DefaultEndpoint
 }
 
+// explicitPromptCachingModels lists the model families that accept developer-
+// placed cache breakpoints. OpenAI's prompt-caching guide draws the line at
+// "GPT-5.6 and later": earlier models take implicit breakpoints only, and
+// sending an explicit one to them fails the request. The cohort is enumerated
+// rather than expressed as "5.6 or newer" because a version comparison would
+// opt in every future model id on faith, and the gpt-5.2-pro and gpt-5.3-chat
+// entries in providers/modelcaps show that a family name does not reliably
+// predict what a variant accepts.
+var explicitPromptCachingModels = []string{
+	"gpt-5.6",
+	"gpt-6-astra",
+}
+
 // supportsExplicitPromptCaching reports whether to mark cache breakpoints in the
 // request rather than leaving caching implicit.
-//
-// gpt-6-astra is a likely candidate -- it documents prompt_caching support and
-// publishes a separate cache-write rate, the same pair of signals that gates
-// gpt-5.6 -- but it stays off the list until the breakpoints have been sent to
-// the live endpoint. Guessing wrong here fails every request for the model,
-// whereas leaving it off only forgoes explicit breakpoints.
 func supportsExplicitPromptCaching(providerName, endpoint, model string) bool {
-	return isNativeOpenAIEndpoint(providerName, endpoint) && strings.HasPrefix(model, "gpt-5.6")
+	if !isNativeOpenAIEndpoint(providerName, endpoint) {
+		return false
+	}
+	for _, prefix := range explicitPromptCachingModels {
+		if strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyResponseFormat handles setting up response format options

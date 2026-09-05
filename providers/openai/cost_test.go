@@ -52,6 +52,7 @@ func TestGPT6AstraLongContextPricing(t *testing.T) {
 	assert.Equal(t, p.LongContextThreshold, 272_001)
 	assert.Equal(t, p.LongContextInputPrice, p.InputPrice*2)
 	assert.Equal(t, p.LongContextCacheReadPrice, p.CacheReadPrice*2)
+	assert.Equal(t, p.LongContextCacheWritePrice, p.CacheWritePrice*2)
 	assert.Equal(t, p.LongContextOutputPrice, p.OutputPrice*1.5)
 
 	// Output is billed at the tier the *input* size selects, so a short prompt
@@ -64,10 +65,14 @@ func TestGPT6AstraLongContextPricing(t *testing.T) {
 	assert.Equal(t, long.Input, 6.0)
 	assert.Equal(t, long.Output, 7.5)
 
-	// The published long-context cache-write rate is $25.00/1M. PricingInfo has
-	// no field for it, so a cache write on a long request is understated here.
-	longWrite := p.CostOf(&llm.Usage{InputTokens: 300_000, CacheCreationInputTokens: 1_000_000})
-	assert.Equal(t, longWrite.CacheWrite, 12.50)
+	// Cache writes move to the long-context rate with everything else. The
+	// full input size selects the tier -- cache-creation tokens included -- so
+	// the same write costs half as much on a request that stays under it.
+	longWrite := p.CostOf(&llm.Usage{InputTokens: 300_000, CacheCreationInputTokens: 100_000})
+	assert.Equal(t, longWrite.CacheWrite, 2.50)
+
+	shortWrite := p.CostOf(&llm.Usage{InputTokens: 100_000, CacheCreationInputTokens: 100_000})
+	assert.Equal(t, shortWrite.CacheWrite, 1.25)
 }
 
 func TestOpenAICacheReadPricingCoverage(t *testing.T) {
