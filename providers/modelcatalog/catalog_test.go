@@ -134,6 +134,17 @@ func TestParseRejectsIncompleteLongContextPriceTier(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestParseRejectsLongContextCacheWriteWithoutStandardRate(t *testing.T) {
+	invalid := strings.Replace(
+		validCatalog,
+		`"output_price_per_1m_tokens": "5.00"`,
+		`"output_price_per_1m_tokens": "5.00", "long_context_threshold_tokens": 200000, "long_context_input_price_per_1m_tokens": "2.50", "long_context_cache_read_price_per_1m_tokens": "0.25", "long_context_output_price_per_1m_tokens": "10.00", "long_context_cache_write_price_per_1m_tokens": "3.00"`,
+		1,
+	)
+	_, err := Parse("test", []byte(invalid))
+	assert.Error(t, err)
+}
+
 func TestParseRejectsNonFinitePrices(t *testing.T) {
 	for _, value := range []string{"NaN", "Inf"} {
 		t.Run(value, func(t *testing.T) {

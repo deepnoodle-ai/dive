@@ -89,6 +89,28 @@ func TestResolveEffortKeepsSupportedLevels(t *testing.T) {
 	assert.Equal(t, llm.ReasoningEffortNone, effort)
 }
 
+func TestGPT6AstraDropsNoneAndKeepsMax(t *testing.T) {
+	// Astra narrows the gpt-5.6 ladder at the bottom and keeps it at the top:
+	// OpenAI's release notes state it does not accept "none", and does not take
+	// a custom temperature. Neither has been probed against the endpoint yet --
+	// see the entry comment in tables.go.
+	effort, send := ResolveEffort("openai", "gpt-6-astra", llm.ReasoningEffortNone, nil)
+	assert.True(t, send)
+	assert.Equal(t, llm.ReasoningEffortLow, effort)
+
+	effort, send = ResolveEffort("openai", "gpt-6-astra", llm.ReasoningEffortMax, nil)
+	assert.True(t, send)
+	assert.Equal(t, llm.ReasoningEffortMax, effort)
+
+	assert.True(t, SupportsReasoning("openai", "gpt-6-astra"))
+	assert.False(t, AcceptsTemperature("openai", "gpt-6-astra"))
+
+	// A bare "gpt-6" is a different model that has not shipped. It must not
+	// inherit Astra's ladder on the strength of a shared prefix.
+	_, known := Lookup("openai", "gpt-6")
+	assert.False(t, known)
+}
+
 func TestResolveEffortPassesThroughUnknownModels(t *testing.T) {
 	// A gateway or fine-tune: Dive cannot know what it accepts.
 	effort, send := ResolveEffort("openrouter", "deepseek/deepseek-r1", llm.ReasoningEffortMax, nil)

@@ -19,13 +19,18 @@ type PricingInfo struct {
 	InputPriceByModality     map[string]float64 `json:"input_price_per_1m_tokens_by_modality,omitempty"`
 	OutputPriceByModality    map[string]float64 `json:"output_price_per_1m_tokens_by_modality,omitempty"`
 	CacheReadPriceByModality map[string]float64 `json:"cache_read_price_per_1m_tokens_by_modality,omitempty"`
-	// LongContextThreshold selects the long-context input, cache-read, and
-	// output prices when the request's full input size is at least this many
-	// tokens. Zero means the model has no unified long-context pricing tier.
+	// LongContextThreshold selects the long-context input, cache-read,
+	// cache-write, and output prices when the request's full input size is at
+	// least this many tokens. Zero means the model has no unified long-context
+	// pricing tier.
 	LongContextThreshold      int     `json:"long_context_threshold_tokens,omitempty"`
 	LongContextInputPrice     float64 `json:"long_context_input_price_per_1m_tokens,omitempty"`
 	LongContextCacheReadPrice float64 `json:"long_context_cache_read_price_per_1m_tokens,omitempty"`
 	LongContextOutputPrice    float64 `json:"long_context_output_price_per_1m_tokens,omitempty"`
+	// LongContextCacheWritePrice replaces CacheWritePrice past the threshold.
+	// Zero leaves cache writes at the standard rate, which is correct for a
+	// model that surcharges writes without varying them by request size.
+	LongContextCacheWritePrice float64 `json:"long_context_cache_write_price_per_1m_tokens,omitempty"`
 	// CacheReadPrice is the price per 1M tokens read from the prompt cache (a
 	// cache hit). Zero means the provider does not bill cache reads separately.
 	CacheReadPrice float64 `json:"cache_read_price_per_1m_tokens,omitempty"`
@@ -99,11 +104,15 @@ func (p PricingInfo) CostOf(u *Usage) Cost {
 	inputPrice := p.InputPrice
 	outputPrice := p.OutputPrice
 	cacheReadPrice := p.CacheReadPrice
+	cacheWritePrice := p.CacheWritePrice
 	totalInput := u.TotalInputTokens()
 	if p.LongContextThreshold > 0 && totalInput >= p.LongContextThreshold {
 		inputPrice = p.LongContextInputPrice
 		outputPrice = p.LongContextOutputPrice
 		cacheReadPrice = p.LongContextCacheReadPrice
+		if p.LongContextCacheWritePrice > 0 {
+			cacheWritePrice = p.LongContextCacheWritePrice
+		}
 	} else if p.CacheReadPriceThreshold > 0 && totalInput > p.CacheReadPriceThreshold {
 		cacheReadPrice = p.CacheReadPriceAboveThreshold
 	}
@@ -111,7 +120,7 @@ func (p PricingInfo) CostOf(u *Usage) Cost {
 		Input:      float64(u.InputTokens) * inputPrice / perMillion,
 		Output:     float64(u.OutputTokens) * outputPrice / perMillion,
 		CacheRead:  float64(u.CacheReadInputTokens) * cacheReadPrice / perMillion,
-		CacheWrite: float64(u.CacheCreationInputTokens) * p.CacheWritePrice / perMillion,
+		CacheWrite: float64(u.CacheCreationInputTokens) * cacheWritePrice / perMillion,
 		Currency:   p.Currency,
 		Model:      p.Model,
 		Source:     CostSourceListPriceEstimate,
@@ -140,6 +149,7 @@ func (p PricingInfo) Scaled(factor float64) PricingInfo {
 	p.LongContextInputPrice *= factor
 	p.LongContextCacheReadPrice *= factor
 	p.LongContextOutputPrice *= factor
+	p.LongContextCacheWritePrice *= factor
 	p.CacheReadPrice *= factor
 	p.CacheReadPriceAboveThreshold *= factor
 	p.CacheWritePrice *= factor

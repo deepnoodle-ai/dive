@@ -10,7 +10,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
-	"github.com/deepnoodle-ai/wonton/retry"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
@@ -112,7 +111,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	var resp *responses.Response
-	err = retry.DoSimple(ctx, func() error {
+	sendRequest := func() error {
 		reqOpts := append([]option.RequestOption{
 			option.WithRequestTimeout(5 * time.Minute),
 		}, p.extraRequestOptions...)
@@ -125,7 +124,12 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return normalizeOpenAIError(err)
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
+	}
+
+	err = providers.RetryPolicy{
+		MaxAttempts: p.maxRetries + 1,
+		BaseWait:    p.retryBaseWait,
+	}.Do(ctx, sendRequest)
 
 	if err != nil {
 		return nil, err
@@ -458,8 +462,31 @@ func isNativeOpenAIEndpoint(providerName, endpoint string) bool {
 	return providerName == ProviderName && strings.TrimRight(endpoint, "/") == DefaultEndpoint
 }
 
+// explicitPromptCachingModels lists the model families that accept developer-
+// placed cache breakpoints. OpenAI's prompt-caching guide draws the line at
+// "GPT-5.6 and later": earlier models take implicit breakpoints only, and
+// sending an explicit one to them fails the request. The cohort is enumerated
+// rather than expressed as "5.6 or newer" because a version comparison would
+// opt in every future model id on faith, and the gpt-5.2-pro and gpt-5.3-chat
+// entries in providers/modelcaps show that a family name does not reliably
+// predict what a variant accepts.
+var explicitPromptCachingModels = []string{
+	"gpt-5.6",
+	"gpt-6-astra",
+}
+
+// supportsExplicitPromptCaching reports whether to mark cache breakpoints in the
+// request rather than leaving caching implicit.
 func supportsExplicitPromptCaching(providerName, endpoint, model string) bool {
-	return isNativeOpenAIEndpoint(providerName, endpoint) && strings.HasPrefix(model, "gpt-5.6")
+	if !isNativeOpenAIEndpoint(providerName, endpoint) {
+		return false
+	}
+	for _, prefix := range explicitPromptCachingModels {
+		if strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyResponseFormat handles setting up response format options

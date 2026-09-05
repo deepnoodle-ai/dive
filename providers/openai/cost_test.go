@@ -37,8 +37,47 @@ func TestOpenAIPopulateCost(t *testing.T) {
 	assert.True(t, u.Cost.Total > 0, "priced model should yield positive cost")
 }
 
+// GPT-6 Astra is the first OpenAI model in the catalog to carry a long-context
+// tier. OpenAI publishes it as a rule rather than a table -- above 272K input
+// tokens, input and cache rates double and output is billed at 1.5x -- so the
+// arithmetic is pinned here alongside the rates.
+func TestGPT6AstraLongContextPricing(t *testing.T) {
+	p, ok := TextModelPricing[ModelGPT6Astra]
+	assert.True(t, ok, "pricing should exist for "+ModelGPT6Astra)
+	assert.Equal(t, p.InputPrice, 10.0)
+	assert.Equal(t, p.CacheReadPrice, 1.0)
+	assert.Equal(t, p.CacheWritePrice, 12.50)
+	assert.Equal(t, p.OutputPrice, 50.0)
+
+	assert.Equal(t, p.LongContextThreshold, 272_001)
+	assert.Equal(t, p.LongContextInputPrice, p.InputPrice*2)
+	assert.Equal(t, p.LongContextCacheReadPrice, p.CacheReadPrice*2)
+	assert.Equal(t, p.LongContextCacheWritePrice, p.CacheWritePrice*2)
+	assert.Equal(t, p.LongContextOutputPrice, p.OutputPrice*1.5)
+
+	// Output is billed at the tier the *input* size selects, so a short prompt
+	// with a long completion stays on standard rates.
+	short := p.CostOf(&llm.Usage{InputTokens: 200_000, OutputTokens: 100_000})
+	assert.Equal(t, short.Input, 2.0)
+	assert.Equal(t, short.Output, 5.0)
+
+	long := p.CostOf(&llm.Usage{InputTokens: 300_000, OutputTokens: 100_000})
+	assert.Equal(t, long.Input, 6.0)
+	assert.Equal(t, long.Output, 7.5)
+
+	// Cache writes move to the long-context rate with everything else. The
+	// full input size selects the tier -- cache-creation tokens included -- so
+	// the same write costs half as much on a request that stays under it.
+	longWrite := p.CostOf(&llm.Usage{InputTokens: 300_000, CacheCreationInputTokens: 100_000})
+	assert.Equal(t, longWrite.CacheWrite, 2.50)
+
+	shortWrite := p.CostOf(&llm.Usage{InputTokens: 100_000, CacheCreationInputTokens: 100_000})
+	assert.Equal(t, shortWrite.CacheWrite, 1.25)
+}
+
 func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	expected := map[string]float64{
+		ModelGPT6Astra:  1.00,
 		ModelGPT56:      0.50,
 		ModelGPT56Sol:   0.50,
 		ModelGPT56Terra: 0.25,
@@ -57,6 +96,11 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	}
 	exclusions := map[string]string{
 		ModelGPT52Pro: "the official GPT-5.2 Pro model page publishes input and output prices but no cached-input price",
+	}
+	// Models the Chat Completions adapter deliberately does not carry, so the
+	// generated view is expected to omit them.
+	responsesOnly := map[string]string{
+		ModelGPT6Astra: "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",
 	}
 
 	for model := range TextModelPricing {
@@ -81,6 +125,10 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 			assert.True(t, cost.CacheRead > 0)
 
 			completionsPricing, ok := openaicompletions.TextModelPricing[model]
+			if reason, only := responsesOnly[model]; only {
+				assert.False(t, ok, "OpenAI Completions generated view must omit "+model+": "+reason)
+				return
+			}
 			assert.True(t, ok, "OpenAI Completions generated view must include "+model)
 			assert.Equal(t, wantPrice, completionsPricing.CacheReadPrice)
 		})

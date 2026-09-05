@@ -90,6 +90,7 @@ type TextPrice struct {
 	LongContextInputPrice        string            `json:"long_context_input_price_per_1m_tokens,omitempty"`
 	LongContextCacheReadPrice    string            `json:"long_context_cache_read_price_per_1m_tokens,omitempty"`
 	LongContextOutputPrice       string            `json:"long_context_output_price_per_1m_tokens,omitempty"`
+	LongContextCacheWritePrice   string            `json:"long_context_cache_write_price_per_1m_tokens,omitempty"`
 	CacheReadPrice               string            `json:"cache_read_price_per_1m_tokens,omitempty"`
 	CacheReadPriceAboveThreshold string            `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
 	CacheReadPriceThreshold      int               `json:"cache_read_price_threshold_tokens,omitempty"`
@@ -329,6 +330,7 @@ func validateTextPrices(name string, prices []TextPrice) error {
 			"long_context_input_price_per_1m_tokens":         price.LongContextInputPrice,
 			"long_context_cache_read_price_per_1m_tokens":    price.LongContextCacheReadPrice,
 			"long_context_output_price_per_1m_tokens":        price.LongContextOutputPrice,
+			"long_context_cache_write_price_per_1m_tokens":   price.LongContextCacheWritePrice,
 			"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
 			"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
 			"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
@@ -364,12 +366,17 @@ func validateTextPrices(name string, prices []TextPrice) error {
 			return fmt.Errorf("%s pricing for %s requires a positive cache-read threshold and above-threshold price together", name, price.Model)
 		}
 		hasLongThreshold := price.LongContextThreshold != 0
-		hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != ""
+		hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != "" || price.LongContextCacheWritePrice != ""
 		if hasLongThreshold != hasLongPrices || price.LongContextThreshold < 0 {
 			return fmt.Errorf("%s pricing for %s requires a positive long-context threshold and long-context prices together", name, price.Model)
 		}
 		if hasLongThreshold && (price.LongContextInputPrice == "" || price.LongContextCacheReadPrice == "" || price.LongContextOutputPrice == "") {
 			return fmt.Errorf("%s pricing for %s requires input, cache-read, and output long-context prices", name, price.Model)
+		}
+		// The long-context cache-write rate is optional: a model that does not
+		// surcharge writes at all has no rate to raise past the threshold.
+		if price.LongContextCacheWritePrice != "" && price.CacheWritePrice == "" {
+			return fmt.Errorf("%s pricing for %s has a long-context cache-write price without a standard one", name, price.Model)
 		}
 	}
 	return nil

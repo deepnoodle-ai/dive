@@ -724,16 +724,17 @@ class CatalogGapTests(unittest.TestCase):
         listed: list[str],
         api_status: str = "skipped",
         api_models: dict[str, object] | None = None,
+        provider: str = "anthropic",
     ) -> dict[str, object]:
         providers = {
-            "anthropic": {
+            provider: {
                 "api": {"status": api_status, "models": api_models or {}},
                 "documents": {
                     "pricing": {"status": "ok", "model_tokens": model_tokens}
                 },
             }
         }
-        repo = {"providers": {"anthropic": {"models": listed}}}
+        repo = {"providers": {provider: {"models": listed}}}
         return {
             "schema_version": provider_watch.SCHEMA_VERSION,
             "generated_at": "2026-08-08T00:00:00+00:00",
@@ -767,6 +768,18 @@ class CatalogGapTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot["gaps"], {"anthropic": ["claude-opus-5"]})
+
+    def test_documentation_links_do_not_file_a_second_phantom_gap(self) -> None:
+        # OpenAI's model index links each model as "<id>.md", so the real id and
+        # its documentation filename both reach gap detection. Reporting both
+        # doubles every release's findings and asks a reviewer to catalog a page.
+        snapshot = self.gap_snapshot(
+            model_tokens=["gpt-6-astra", "gpt-6-astra.md"],
+            listed=["gpt-5.6-sol"],
+            provider="openai",
+        )
+
+        self.assertEqual(snapshot["gaps"], {"openai": ["gpt-6-astra"]})
 
     def test_dated_variants_of_listed_models_are_not_gaps(self) -> None:
         snapshot = self.gap_snapshot(

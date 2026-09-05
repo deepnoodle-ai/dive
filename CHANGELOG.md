@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **OpenAI GPT-6 Astra.** Added `openai.ModelGPT6Astra` (`gpt-6-astra`), a 1.05M
+  context model with reasoning effort `low` through `max` and no temperature
+  parameter. It leads the OpenAI model list in the CLI and is Responses-only,
+  since Chat Completions cannot call tools with it.
+- **Long-context pricing for OpenAI.** Above 272K input tokens `gpt-6-astra`
+  bills input, cache reads, and cache writes at 2x and output at 1.5x. Cache
+  writes use the new `llm.PricingInfo.LongContextCacheWritePrice`; models
+  without that rate keep their standard one past the threshold.
+- **Explicit prompt-cache breakpoints for `gpt-6-astra`.** OpenAI documents them
+  for GPT-5.6 and later, so Astra now marks breakpoints instead of relying on
+  implicit caching.
+- **`Retry-After` is honored.** When a provider says how long to wait, that
+  delay replaces the exponential backoff for the next attempt, capped at the
+  policy's `MaxWait`. OpenAI now sends it with `429 slow_down` and
+  `503 server_is_overloaded`.
+- **`providers.RetryPolicy`** replaces the retry options each provider assembled
+  by hand. `providers.NewError` takes `WithErrorCode` and `WithErrorHeader`
+  options, and `ProviderError` exposes `Code()` and `RetryAfter()`.
+
+### Changed
+
+- **openai-go upgraded to v3.56.0**, the release that adds `gpt-6-astra` and its
+  API surface: async tool calling, `configuration_update` items, mid-turn
+  steering, and misalignment errors. Dive does not use those types yet.
+
+### Fixed
+
+- **Terminal rate-limit errors are no longer retried.** An exhausted balance or
+  a spend limit arrives as a `429`, the same status as an ordinary rate limit;
+  the error code now separates them, so an out-of-credit account fails at once
+  instead of burning the attempt budget.
+- **`gpt-6-astra` is no longer exported by the Chat Completions adapter.** The
+  model does not support function calling on `v1/chat/completions`, so it is
+  Responses-only.
+- **Provider watch no longer reports documentation filenames as models.** A
+  model linked as `<id>.md` in an upstream index filed a second phantom gap
+  beside the real one.
+
 ## [1.28.0] - 2026-09-03
 
 ### Added

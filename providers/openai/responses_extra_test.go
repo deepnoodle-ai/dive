@@ -154,6 +154,31 @@ func TestBuildRequestParams_GPT56PromptCaching(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
 }
 
+func TestBuildRequestParams_AstraPromptCaching(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithModel("gpt-6-astra"),
+		llm.WithPromptCacheKey("stable-session-key"),
+		llm.WithMessages(
+			llm.NewUserTextMessage("one"),
+			llm.NewAssistantTextMessage("answer one"),
+			llm.NewUserTextMessage("two"),
+			llm.NewAssistantTextMessage("answer two"),
+			llm.NewUserTextMessage("three"),
+			llm.NewAssistantTextMessage("answer three"),
+			llm.NewUserTextMessage("four"),
+		),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	body, err := json.Marshal(params)
+	assert.NoError(t, err)
+	assert.True(t, strings.Contains(string(body), `"prompt_cache_key":"stable-session-key"`))
+	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
+}
+
 func TestBuildRequestParams_OlderModelOmitsExplicitPromptCaching(t *testing.T) {
 	provider := New(WithAPIKey("test"))
 	config := &llm.Config{}

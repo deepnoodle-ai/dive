@@ -164,6 +164,11 @@ MODEL_TOKEN_RE = re.compile(
 # — a model this drops is a silent miss, while one it wrongly admits costs a
 # single line in one weekly report before the accepted baseline absorbs it.
 MODEL_CANDIDATE_RE = re.compile(r"^(?:[a-z0-9-]+/)?[a-z][a-z0-9]*(?:[.\-:][a-z0-9]+)+$")
+# Links to a documentation page carry that page's file extension into the token
+# stream: "/api/docs/models/gpt-6-astra.md" tokenizes as "gpt-6-astra.md", which
+# satisfies MODEL_CANDIDATE_RE and files a phantom gap alongside the real one.
+# No published model id ends in a documentation extension, so drop it.
+DOC_EXTENSION_RE = re.compile(r"\.(?:md|html?|json|txt)$", re.IGNORECASE)
 # Change kinds that lead the report; everything else keeps its natural order. An
 # id Dive ships that upstream does not serve is broken right now, so it outranks
 # a model Dive merely lacks.
@@ -1169,6 +1174,7 @@ def classify_model_change(fields: Sequence[Mapping[str, Any]]) -> str:
 
 def normalize_upstream_id(provider: str, model_id: str) -> str:
     """Reduce an upstream id to the form Dive's catalogs use."""
+    model_id = DOC_EXTENSION_RE.sub("", model_id)
     if provider == "xai" and ":" in model_id:
         return model_id.split(":", 1)[1]
     return model_id

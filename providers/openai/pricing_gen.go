@@ -6,6 +6,22 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	// Standard tier. Above 272K input tokens, input, cache read, and
+	// cache write rates double and output is 1.5x.
+	ModelGPT6Astra: {
+		Model:                      ModelGPT6Astra,
+		InputPrice:                 10.00,
+		OutputPrice:                50.00,
+		LongContextInputPrice:      20.00,
+		LongContextCacheReadPrice:  2.00,
+		LongContextOutputPrice:     75.00,
+		CacheReadPrice:             1.00,
+		CacheWritePrice:            12.50,
+		LongContextCacheWritePrice: 25.00,
+		LongContextThreshold:       272001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-09-05",
+	},
 	ModelGPT56: {
 		Model:           ModelGPT56,
 		InputPrice:      5.00,
