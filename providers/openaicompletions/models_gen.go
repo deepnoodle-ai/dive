@@ -18,6 +18,8 @@ const (
 	ModelGPT5Mini           = "gpt-5-mini"
 	ModelGPT5Nano           = "gpt-5-nano"
 	ModelGPT41              = "gpt-4.1"
+	ModelGPT41Mini          = "gpt-4.1-mini"
+	ModelGPT41Nano          = "gpt-4.1-nano"
 	ModelGPT4o              = "gpt-4o"
 	ModelO3DeepResearch     = "o3-deep-research"
 	ModelO4MiniDeepResearch = "o4-mini-deep-research"

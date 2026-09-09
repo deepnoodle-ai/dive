@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"math"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -77,30 +78,40 @@ func TestGPT6AstraLongContextPricing(t *testing.T) {
 
 func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	expected := map[string]float64{
-		ModelGPT6Astra:  1.00,
-		ModelGPT56:      0.50,
-		ModelGPT56Sol:   0.50,
-		ModelGPT56Terra: 0.25,
-		ModelGPT56Luna:  0.10,
-		ModelGPT55:      0.50,
-		ModelGPT54:      0.25,
-		ModelGPT54Mini:  0.075,
-		ModelGPT54Nano:  0.02,
-		ModelGPT52:      0.175,
-		ModelGPT51:      0.125,
-		ModelGPT5:       0.125,
-		ModelGPT5Mini:   0.025,
-		ModelGPT5Nano:   0.005,
-		ModelGPT41:      0.50,
-		ModelGPT4o:      1.25,
+		ModelGPT6Astra:          1.00,
+		ModelGPT56:              0.40,
+		ModelGPT56Sol:           0.40,
+		ModelGPT56Terra:         0.20,
+		ModelGPT56Luna:          0.02,
+		ModelGPT56Cyber:         1.25,
+		ModelDaybreakBlueLatest: 0.40,
+		ModelDaybreakRedLatest:  1.25,
+		ModelGPT55:              0.50,
+		ModelGPT54:              0.25,
+		ModelGPT54Mini:          0.075,
+		ModelGPT54Nano:          0.02,
+		ModelGPT52:              0.175,
+		ModelGPT51:              0.125,
+		ModelGPT5:               0.125,
+		ModelGPT5Mini:           0.025,
+		ModelGPT5Nano:           0.005,
+		ModelGPT41:              0.50,
+		ModelGPT41Mini:          0.10,
+		ModelGPT41Nano:          0.025,
+		ModelGPT4o:              1.25,
 	}
 	exclusions := map[string]string{
 		ModelGPT52Pro: "the official GPT-5.2 Pro model page publishes input and output prices but no cached-input price",
+		ModelGPT54Pro: "OpenAI's pricing table leaves the cached-input column empty for the pro models",
+		ModelGPT55Pro: "OpenAI's pricing table leaves the cached-input column empty for the pro models",
 	}
 	// Models the Chat Completions adapter deliberately does not carry, so the
 	// generated view is expected to omit them.
 	responsesOnly := map[string]string{
-		ModelGPT6Astra: "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",
+		ModelGPT6Astra:          "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",
+		ModelGPT56Cyber:         "the Daybreak cybersecurity models are documented on v1/responses only",
+		ModelDaybreakBlueLatest: "the Daybreak cybersecurity models are documented on v1/responses only",
+		ModelDaybreakRedLatest:  "the Daybreak cybersecurity models are documented on v1/responses only",
 	}
 
 	for model := range TextModelPricing {
@@ -148,8 +159,43 @@ func TestOpenAIPricingUsesDisjointCachedTokens(t *testing.T) {
 	assert.NoError(t, err)
 	pricing := TextModelPricing[ModelGPT56Sol]
 	cost := pricing.CostOf(&decoded.Usage)
-	assert.Equal(t, 0.5, cost.Input)
-	assert.Equal(t, 0.35, cost.CacheRead)
-	assert.Equal(t, 1.25, cost.CacheWrite)
-	assert.Equal(t, 2.1, cost.Total)
+	// InputTokens is the full 1M, so cached and cache-write tokens must not be
+	// billed twice: only the 100K that were neither is charged at the input
+	// rate. 1M also puts the request past the 272K long-context threshold, so
+	// every rate here is the long-context one.
+	assert.Equal(t, 0.8, cost.Input)
+	assert.Equal(t, 0.56, cost.CacheRead)
+	assert.Equal(t, 2.0, cost.CacheWrite)
+	assert.Equal(t, cost.Input+cost.CacheRead+cost.CacheWrite, cost.Total)
+}
+
+// assertClose compares prices that only differ by float representation: 1.20 *
+// 1.5 is not exactly 1.80 in binary floating point.
+func assertClose(t *testing.T, got, want float64) {
+	t.Helper()
+	assert.True(t, math.Abs(got-want) < 1e-9, "want %v, got %v", want, got)
+}
+
+// The GPT-5.6 family carries the same long-context rule as GPT-6 Astra: above
+// 272K input tokens, input and both cache rates double and output is billed at
+// 1.5x. Sol is the default model, so pricing it on the standard tier for a
+// long-input request undercharged by half.
+func TestGPT56LongContextPricing(t *testing.T) {
+	for _, model := range []string{ModelGPT56Sol, ModelGPT56Terra, ModelGPT56Luna} {
+		t.Run(model, func(t *testing.T) {
+			p, ok := TextModelPricing[model]
+			assert.True(t, ok, "pricing should exist for "+model)
+
+			assert.Equal(t, p.LongContextThreshold, 272_001)
+			assert.Equal(t, p.LongContextInputPrice, p.InputPrice*2)
+			assert.Equal(t, p.LongContextCacheReadPrice, p.CacheReadPrice*2)
+			assert.Equal(t, p.LongContextCacheWritePrice, p.CacheWritePrice*2)
+			assertClose(t, p.LongContextOutputPrice, p.OutputPrice*1.5)
+
+			short := p.CostOf(&llm.Usage{InputTokens: 272_000, OutputTokens: 1_000_000})
+			long := p.CostOf(&llm.Usage{InputTokens: 272_001, OutputTokens: 1_000_000})
+			assert.True(t, long.Total > short.Total,
+				"crossing the threshold must raise the bill for "+model)
+		})
+	}
 }
