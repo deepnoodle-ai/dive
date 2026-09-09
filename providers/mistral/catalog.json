@@ -34,23 +34,53 @@
       "id": "mistral-medium-latest",
       "default": true,
       "kind": "text",
-      "context_window": 256000,
+      "context_window": 262144,
       "display_name": "Mistral Medium",
       "recommended": true,
       "cli_order": 1,
       "description": "Flagship merged model for long-horizon agentic tasks and coding"
     },
     {
+      "go_name": "ModelMagistralMedium",
+      "id": "magistral-medium-latest",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Magistral Medium"
+    },
+    {
+      "go_name": "ModelMistralSmall",
+      "id": "mistral-small-latest",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Mistral Small",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Fast and efficient"
+    },
+    {
+      "go_name": "ModelMagistralSmall",
+      "id": "magistral-small-latest",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Magistral Small"
+    },
+    {
+      "go_name": "ModelMistralSmall2603",
+      "id": "mistral-small-2603",
+      "kind": "text",
+      "context_window": 262144
+    },
+    {
       "go_name": "ModelMistralLarge3",
       "id": "mistral-large-2512",
       "kind": "text",
-      "context_window": 128000
+      "context_window": 262144
     },
     {
       "go_name": "ModelMistralLarge",
       "id": "mistral-large-latest",
       "kind": "text",
-      "context_window": 128000,
+      "context_window": 262144,
       "display_name": "Mistral Large"
     },
     {
@@ -60,29 +90,58 @@
       "context_window": 128000
     },
     {
-      "go_name": "ModelMistralSmall",
-      "id": "mistral-small-latest",
+      "go_name": "ModelGLM52",
+      "id": "glm-5-2",
       "kind": "text",
-      "context_window": 128000,
-      "display_name": "Mistral Small",
-      "recommended": true,
-      "cli_order": 2,
-      "description": "Fast and efficient"
+      "context_window": 1048576,
+      "display_name": "GLM 5.2",
+      "description": "Third-party long-context model for agentic workflows and coding"
+    },
+    {
+      "go_name": "ModelGLM52ZAI",
+      "id": "zai-glm-5-2",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "GLM 5.2"
+    },
+    {
+      "go_name": "ModelMinistral3_14BLatest",
+      "id": "ministral-14b-latest",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Ministral 3 14B"
     },
     {
       "go_name": "ModelMinistral3_14B",
       "id": "ministral-14b-2512",
-      "kind": "text"
+      "kind": "text",
+      "context_window": 262144
+    },
+    {
+      "go_name": "ModelMinistral3_8BLatest",
+      "id": "ministral-8b-latest",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Ministral 3 8B"
     },
     {
       "go_name": "ModelMinistral3_8B",
       "id": "ministral-8b-2512",
-      "kind": "text"
+      "kind": "text",
+      "context_window": 262144
+    },
+    {
+      "go_name": "ModelMinistral3_3BLatest",
+      "id": "ministral-3b-latest",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Ministral 3 3B"
     },
     {
       "go_name": "ModelMinistral3_3B",
       "id": "ministral-3b-2512",
-      "kind": "text"
+      "kind": "text",
+      "context_window": 131072
     },
     {
       "go_name": "ModelDevstral2",
@@ -110,7 +169,7 @@
       "go_name": "ModelCodestralLatest",
       "id": "codestral-latest",
       "kind": "text",
-      "context_window": 128000,
+      "context_window": 256000,
       "display_name": "Codestral",
       "recommended": true,
       "cli_order": 3,
@@ -120,7 +179,7 @@
       "go_name": "ModelCodestral2508",
       "id": "codestral-2508",
       "kind": "text",
-      "context_window": 128000,
+      "context_window": 256000,
       "display_name": "Codestral 25.08"
     },
     {
@@ -179,6 +238,88 @@
         "output_price_per_1m_tokens": "0.6",
         "currency": "USD",
         "updated_at": "2026-08-15"
+      },
+      {
+        "model": "glm-5-2",
+        "input_price_per_1m_tokens": "1.4",
+        "output_price_per_1m_tokens": "4.4",
+        "cache_read_price_per_1m_tokens": "0.14",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "zai-glm-5-2",
+        "input_price_per_1m_tokens": "1.4",
+        "output_price_per_1m_tokens": "4.4",
+        "cache_read_price_per_1m_tokens": "0.14",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Alias of glm-5-2; Mistral's pricing page lists this id."
+      },
+      {
+        "model": "magistral-medium-latest",
+        "input_price_per_1m_tokens": "1.5",
+        "output_price_per_1m_tokens": "7.5",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Alias of mistral-medium-latest."
+      },
+      {
+        "model": "magistral-small-latest",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.6",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Alias of mistral-small-latest."
+      },
+      {
+        "model": "mistral-small-2603",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.6",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "ministral-14b-latest",
+        "input_price_per_1m_tokens": "0.2",
+        "output_price_per_1m_tokens": "0.2",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "ministral-14b-2512",
+        "input_price_per_1m_tokens": "0.2",
+        "output_price_per_1m_tokens": "0.2",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "ministral-8b-latest",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.15",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "ministral-8b-2512",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.15",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "ministral-3b-latest",
+        "input_price_per_1m_tokens": "0.1",
+        "output_price_per_1m_tokens": "0.1",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "ministral-3b-2512",
+        "input_price_per_1m_tokens": "0.1",
+        "output_price_per_1m_tokens": "0.1",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
       },
       {
         "model": "codestral-latest",

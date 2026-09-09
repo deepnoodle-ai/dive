@@ -40,6 +40,12 @@ var (
 		llm.ReasoningEffortXHigh,
 		llm.ReasoningEffortMax,
 	}
+	// The pro variants (gpt-5.2-pro, gpt-5.4-pro, gpt-5.5-pro): no none, no low.
+	effortsMediumToXHigh = []llm.ReasoningEffort{
+		llm.ReasoningEffortMedium,
+		llm.ReasoningEffortHigh,
+		llm.ReasoningEffortXHigh,
+	}
 	// gpt-6-astra: none is rejected, so the ladder starts at low and runs to max.
 	effortsLowToMax = []llm.ReasoningEffort{
 		llm.ReasoningEffortLow,
@@ -90,13 +96,7 @@ var openAITable = Table{
 
 	{Prefix: "gpt-5.2", Caps: Capabilities{Efforts: effortsNoneToXHigh, Temperature: true}},
 	// The pro variant narrows the range rather than widening it: no none, no low.
-	{Prefix: "gpt-5.2-pro", Caps: Capabilities{
-		Efforts: []llm.ReasoningEffort{
-			llm.ReasoningEffortMedium,
-			llm.ReasoningEffortHigh,
-			llm.ReasoningEffortXHigh,
-		},
-	}},
+	{Prefix: "gpt-5.2-pro", Caps: Capabilities{Efforts: effortsMediumToXHigh}},
 
 	// The chat-tuned model accepts medium and nothing else.
 	{Prefix: "gpt-5.3-chat", Caps: Capabilities{
@@ -107,13 +107,36 @@ var openAITable = Table{
 	{Prefix: "gpt-5.4", Caps: Capabilities{Efforts: effortsNoneToXHigh, Temperature: true}},
 	{Prefix: "gpt-5.4-mini", Caps: Capabilities{Efforts: effortsNoneToXHigh, Temperature: true}},
 	{Prefix: "gpt-5.4-nano", Caps: Capabilities{Efforts: effortsNoneToXHigh, Temperature: true}},
+	// Every pro variant so far narrows its family's ladder to medium/high/xhigh
+	// and drops temperature entirely, so a pro model must never inherit the
+	// base entry by prefix: gpt-5.4 and gpt-5.5 both accept none, low, and
+	// temperature, and passing any of the three to the pro variant is a 400.
+	{Prefix: "gpt-5.4-pro", Caps: Capabilities{Efforts: effortsMediumToXHigh}},
 
 	{Prefix: "gpt-5.5", Caps: Capabilities{Efforts: effortsNoneToXHigh}},
+	{Prefix: "gpt-5.5-pro", Caps: Capabilities{Efforts: effortsMediumToXHigh}},
 
 	{Prefix: "gpt-5.6", Caps: Capabilities{Efforts: effortsNoneToMax}},
 	{Prefix: "gpt-5.6-sol", Caps: Capabilities{Efforts: effortsNoneToMax}},
 	{Prefix: "gpt-5.6-terra", Caps: Capabilities{Efforts: effortsNoneToMax}},
 	{Prefix: "gpt-5.6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
+
+	// The Daybreak cybersecurity models need program approval, so every request
+	// here answers 404 -- except an invalid effort, which the parameter
+	// validator rejects first and in doing so names the model's whole ladder.
+	// The efforts below are that message verbatim; the 400 on temperature is
+	// likewise a direct answer from the endpoint, not an inference from
+	// gpt-5.6. Blue and Red alias gpt-5.6-sol and gpt-5.6-cyber today and are
+	// documented to re-point as the program ships new models, so re-probe them
+	// rather than assuming these carry over.
+	{Prefix: "gpt-5.6-cyber", Caps: Capabilities{Efforts: effortsNoneToMax}},
+	{Prefix: "gpt-daybreak-blue", Caps: Capabilities{Efforts: effortsNoneToMax}},
+	{Prefix: "gpt-daybreak-red", Caps: Capabilities{Efforts: effortsNoneToMax}},
+
+	// Listed by /v1/models but 404s on Responses for a standard API key, so its
+	// ladder could not be read. Unverified keeps its parameters untouched
+	// rather than borrowing gpt-5.1's by prefix.
+	{Prefix: "gpt-5.1-codex-mini", Unverified: true},
 
 	// Documented rather than probed: this entry comes from OpenAI's release
 	// notes and model page, not from a 200/400 the endpoint returned. It is

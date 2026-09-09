@@ -3,14 +3,22 @@
 package mistral
 
 const (
-	ModelMistralMedium    = "mistral-medium-latest"
-	ModelMistralLarge3    = "mistral-large-2512"
-	ModelMistralLarge     = "mistral-large-latest"
-	ModelMistralLarge2411 = "mistral-large-2411"
-	ModelMistralSmall     = "mistral-small-latest"
-	ModelMinistral3_14B   = "ministral-14b-2512"
-	ModelMinistral3_8B    = "ministral-8b-2512"
-	ModelMinistral3_3B    = "ministral-3b-2512"
+	ModelMistralMedium        = "mistral-medium-latest"
+	ModelMagistralMedium      = "magistral-medium-latest"
+	ModelMistralSmall         = "mistral-small-latest"
+	ModelMagistralSmall       = "magistral-small-latest"
+	ModelMistralSmall2603     = "mistral-small-2603"
+	ModelMistralLarge3        = "mistral-large-2512"
+	ModelMistralLarge         = "mistral-large-latest"
+	ModelMistralLarge2411     = "mistral-large-2411"
+	ModelGLM52                = "glm-5-2"
+	ModelGLM52ZAI             = "zai-glm-5-2"
+	ModelMinistral3_14BLatest = "ministral-14b-latest"
+	ModelMinistral3_14B       = "ministral-14b-2512"
+	ModelMinistral3_8BLatest  = "ministral-8b-latest"
+	ModelMinistral3_8B        = "ministral-8b-2512"
+	ModelMinistral3_3BLatest  = "ministral-3b-latest"
+	ModelMinistral3_3B        = "ministral-3b-2512"
 	// Deprecated: Mistral has retired the Devstral family; use ModelCodestralLatest for coding.
 	ModelDevstral2 = "devstral-2512"
 	// Deprecated: Mistral has retired the Devstral family; use ModelCodestralLatest for coding.

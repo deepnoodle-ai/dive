@@ -93,6 +93,27 @@
       "description": "GPT-5.6 model for efficient high-volume workloads"
     },
     {
+      "go_name": "ModelGPT56Cyber",
+      "id": "gpt-5.6-cyber",
+      "kind": "text",
+      "context_window": 400000,
+      "display_name": "GPT-5.6 Cyber"
+    },
+    {
+      "go_name": "ModelDaybreakBlueLatest",
+      "id": "gpt-daybreak-blue-latest",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "Daybreak Blue"
+    },
+    {
+      "go_name": "ModelDaybreakRedLatest",
+      "id": "gpt-daybreak-red-latest",
+      "kind": "text",
+      "context_window": 400000,
+      "display_name": "Daybreak Red"
+    },
+    {
       "go_name": "ModelGPT55",
       "id": "gpt-5.5",
       "adapters": [
@@ -103,6 +124,13 @@
       "display_name": "GPT-5.5"
     },
     {
+      "go_name": "ModelGPT55Pro",
+      "id": "gpt-5.5-pro",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.5 Pro"
+    },
+    {
       "go_name": "ModelGPT54",
       "id": "gpt-5.4",
       "adapters": [
@@ -111,6 +139,13 @@
       "kind": "text",
       "context_window": 1050000,
       "display_name": "GPT-5.4"
+    },
+    {
+      "go_name": "ModelGPT54Pro",
+      "id": "gpt-5.4-pro",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.4 Pro"
     },
     {
       "go_name": "ModelGPT54Mini",
@@ -219,7 +254,27 @@
         "openaicompletions"
       ],
       "kind": "text",
-      "context_window": 128000
+      "context_window": 1047576
+    },
+    {
+      "go_name": "ModelGPT41Mini",
+      "id": "gpt-4.1-mini",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1047576,
+      "display_name": "GPT-4.1 Mini"
+    },
+    {
+      "go_name": "ModelGPT41Nano",
+      "id": "gpt-4.1-nano",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1047576,
+      "display_name": "GPT-4.1 Nano"
     },
     {
       "go_name": "ModelGPT4o",
@@ -380,6 +435,13 @@
       "display_name": "GPT-5.1 Codex"
     },
     {
+      "go_name": "ModelGPT51CodexMini",
+      "id": "gpt-5.1-codex-mini",
+      "kind": "text",
+      "context_window": 400000,
+      "display_name": "GPT-5.1 Codex Mini"
+    },
+    {
       "go_name": "ModelGPT5Codex",
       "id": "gpt-5-codex",
       "kind": "text",
@@ -431,55 +493,136 @@
       },
       {
         "model": "gpt-5.6",
-        "input_price_per_1m_tokens": "5.00",
-        "output_price_per_1m_tokens": "30.00",
-        "cache_read_price_per_1m_tokens": "0.50",
-        "cache_write_price_per_1m_tokens": "6.25",
+        "input_price_per_1m_tokens": "4.00",
+        "output_price_per_1m_tokens": "20.00",
+        "cache_read_price_per_1m_tokens": "0.40",
+        "cache_write_price_per_1m_tokens": "5.00",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "8.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.80",
+        "long_context_output_price_per_1m_tokens": "30.00",
+        "long_context_cache_write_price_per_1m_tokens": "10.00",
         "currency": "USD",
-        "updated_at": "2026-07-09"
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input, cache read, and\ncache write rates double and output is 1.5x."
       },
       {
         "model": "gpt-5.6-sol",
-        "input_price_per_1m_tokens": "5.00",
-        "output_price_per_1m_tokens": "30.00",
-        "cache_read_price_per_1m_tokens": "0.50",
-        "cache_write_price_per_1m_tokens": "6.25",
+        "input_price_per_1m_tokens": "4.00",
+        "output_price_per_1m_tokens": "20.00",
+        "cache_read_price_per_1m_tokens": "0.40",
+        "cache_write_price_per_1m_tokens": "5.00",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "8.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.80",
+        "long_context_output_price_per_1m_tokens": "30.00",
+        "long_context_cache_write_price_per_1m_tokens": "10.00",
         "currency": "USD",
-        "updated_at": "2026-07-09"
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input, cache read, and\ncache write rates double and output is 1.5x."
       },
       {
         "model": "gpt-5.6-terra",
-        "input_price_per_1m_tokens": "2.50",
-        "output_price_per_1m_tokens": "15.00",
-        "cache_read_price_per_1m_tokens": "0.25",
-        "cache_write_price_per_1m_tokens": "3.125",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "12.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "cache_write_price_per_1m_tokens": "2.50",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "4.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.40",
+        "long_context_output_price_per_1m_tokens": "18.00",
+        "long_context_cache_write_price_per_1m_tokens": "5.00",
         "currency": "USD",
-        "updated_at": "2026-07-09"
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input, cache read, and\ncache write rates double and output is 1.5x."
       },
       {
         "model": "gpt-5.6-luna",
-        "input_price_per_1m_tokens": "1.00",
-        "output_price_per_1m_tokens": "6.00",
-        "cache_read_price_per_1m_tokens": "0.10",
-        "cache_write_price_per_1m_tokens": "1.25",
+        "input_price_per_1m_tokens": "0.20",
+        "output_price_per_1m_tokens": "1.20",
+        "cache_read_price_per_1m_tokens": "0.02",
+        "cache_write_price_per_1m_tokens": "0.25",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "0.40",
+        "long_context_cache_read_price_per_1m_tokens": "0.04",
+        "long_context_output_price_per_1m_tokens": "1.80",
+        "long_context_cache_write_price_per_1m_tokens": "0.50",
         "currency": "USD",
-        "updated_at": "2026-07-09"
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input, cache read, and\ncache write rates double and output is 1.5x."
+      },
+      {
+        "model": "gpt-5.6-cyber",
+        "input_price_per_1m_tokens": "12.50",
+        "output_price_per_1m_tokens": "75.00",
+        "cache_read_price_per_1m_tokens": "1.25",
+        "cache_write_price_per_1m_tokens": "15.625",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Requires Daybreak program approval. gpt-daybreak-red-latest\naliases this model and is priced to match."
+      },
+      {
+        "model": "gpt-daybreak-blue-latest",
+        "input_price_per_1m_tokens": "4.00",
+        "output_price_per_1m_tokens": "20.00",
+        "cache_read_price_per_1m_tokens": "0.40",
+        "cache_write_price_per_1m_tokens": "5.00",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "8.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.80",
+        "long_context_output_price_per_1m_tokens": "30.00",
+        "long_context_cache_write_price_per_1m_tokens": "10.00",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Alias currently pointing at gpt-5.6-sol; OpenAI reprices the\nalias to match whichever model it points at."
+      },
+      {
+        "model": "gpt-daybreak-red-latest",
+        "input_price_per_1m_tokens": "12.50",
+        "output_price_per_1m_tokens": "75.00",
+        "cache_read_price_per_1m_tokens": "1.25",
+        "cache_write_price_per_1m_tokens": "15.625",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Alias currently pointing at gpt-5.6-cyber; OpenAI reprices the\nalias to match whichever model it points at."
       },
       {
         "model": "gpt-5.5",
         "input_price_per_1m_tokens": "5.00",
         "output_price_per_1m_tokens": "30.00",
         "cache_read_price_per_1m_tokens": "0.50",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "10.00",
+        "long_context_cache_read_price_per_1m_tokens": "1.00",
+        "long_context_output_price_per_1m_tokens": "45.00",
         "currency": "USD",
-        "updated_at": "2026-08-10"
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input and cache read\ndouble and output is 1.5x."
+      },
+      {
+        "model": "gpt-5.5-pro",
+        "input_price_per_1m_tokens": "30.00",
+        "output_price_per_1m_tokens": "180.00",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "60.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.00",
+        "long_context_output_price_per_1m_tokens": "270.00",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input doubles and\noutput is 1.5x. OpenAI publishes no cached-input rate for the\npro models, so cache reads are zero in both tiers."
       },
       {
         "model": "gpt-5.4",
         "input_price_per_1m_tokens": "2.50",
         "output_price_per_1m_tokens": "15.00",
         "cache_read_price_per_1m_tokens": "0.25",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "5.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.50",
+        "long_context_output_price_per_1m_tokens": "22.50",
         "currency": "USD",
-        "updated_at": "2026-08-10"
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input and cache read\ndouble and output is 1.5x."
       },
       {
         "model": "gpt-5.4-mini",
@@ -496,6 +639,18 @@
         "cache_read_price_per_1m_tokens": "0.02",
         "currency": "USD",
         "updated_at": "2026-08-10"
+      },
+      {
+        "model": "gpt-5.4-pro",
+        "input_price_per_1m_tokens": "30.00",
+        "output_price_per_1m_tokens": "180.00",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "60.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.00",
+        "long_context_output_price_per_1m_tokens": "270.00",
+        "currency": "USD",
+        "updated_at": "2026-09-09",
+        "note": "Standard tier. Above 272K input tokens, input doubles and\noutput is 1.5x. OpenAI publishes no cached-input rate for the\npro models, so cache reads are zero in both tiers."
       },
       {
         "model": "gpt-5.2",
@@ -551,6 +706,22 @@
         "cache_read_price_per_1m_tokens": "0.50",
         "currency": "USD",
         "updated_at": "2026-08-10"
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "input_price_per_1m_tokens": "0.40",
+        "output_price_per_1m_tokens": "1.60",
+        "cache_read_price_per_1m_tokens": "0.10",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
+      },
+      {
+        "model": "gpt-4.1-nano",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.40",
+        "cache_read_price_per_1m_tokens": "0.025",
+        "currency": "USD",
+        "updated_at": "2026-09-09"
       },
       {
         "model": "gpt-4o",

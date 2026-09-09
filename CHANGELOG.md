@@ -26,6 +26,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`providers.RetryPolicy`** replaces the retry options each provider assembled
   by hand. `providers.NewError` takes `WithErrorCode` and `WithErrorHeader`
   options, and `ProviderError` exposes `Code()` and `RetryAfter()`.
+- **OpenAI Daybreak and pro models.** Added `ModelGPT56Cyber`,
+  `ModelDaybreakBlueLatest`, `ModelDaybreakRedLatest`, `ModelGPT55Pro`,
+  `ModelGPT54Pro`, `ModelGPT51CodexMini`, `ModelGPT41Mini`, and
+  `ModelGPT41Nano`, with pricing and probed reasoning-effort ladders.
+- **Mistral GLM 5.2, Magistral, and the Ministral 3 aliases.** Added `glm-5-2`,
+  `zai-glm-5-2`, `magistral-medium-latest`, `magistral-small-latest`,
+  `mistral-small-2603`, and the three `ministral-*-latest` ids, and priced the
+  Ministral 3 family for the first time.
 
 ### Changed
 
@@ -35,6 +43,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **OpenAI repriced the GPT-5.6 family and Dive was overcharging.** Standard
+  rates are now $4/$20 for `gpt-5.6-sol` (the default model), $2/$12 for
+  `gpt-5.6-terra`, and $0.20/$1.20 for `gpt-5.6-luna`, which Dive billed at 5x.
+  All three also gained the 272K long-context tier, so a long prompt no longer
+  bills at half the real rate.
+- **Pro models no longer inherit their family's reasoning ladder.**
+  `gpt-5.4-pro` and `gpt-5.5-pro` accept only `medium`, `high`, and `xhigh` and
+  reject `temperature`, so matching `gpt-5.4`/`gpt-5.5` by prefix sent
+  parameters the API rejects.
+- **`gpt-4.1` context window** corrected from 128K to its documented 1,047,576.
+  Mistral's context windows were likewise refreshed from the live models API.
 - **Terminal rate-limit errors are no longer retried.** An exhausted balance or
   a spend limit arrives as a `429`, the same status as an ordinary rate limit;
   the error code now separates them, so an out-of-credit account fails at once
