@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-09-09
+
 ### Added
 
 - **OpenAI GPT-6 Astra.** Added `openai.ModelGPT6Astra` (`gpt-6-astra`), a 1.05M
@@ -58,6 +60,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   a spend limit arrives as a `429`, the same status as an ordinary rate limit;
   the error code now separates them, so an out-of-credit account fails at once
   instead of burning the attempt budget.
+- **Gemini rejected the last iteration of any long tool loop.** A message that
+  mixed tool results with trailing text (the loop's "respond with a final
+  answer" nudge, or a hook's `AdditionalContext`) read as a model turn and
+  returned `400 Requests ending with a model turn are not supported`. Tool
+  results and the text now go out as separate contents, matching the OpenAI
+  encoders.
 - **`gpt-6-astra` is no longer exported by the Chat Completions adapter.** The
   model does not support function calling on `v1/chat/completions`, so it is
   Responses-only.
