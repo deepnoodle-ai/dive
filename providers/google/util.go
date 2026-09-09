@@ -544,13 +544,41 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 		if len(content.Parts) == 0 {
 			continue
 		}
-		contents = append(contents, content)
+		contents = append(contents, splitFunctionResponseContent(content)...)
 	}
 	if len(contents) == 0 {
 		return nil, fmt.Errorf("no messages remain after filtering unsupported content")
 	}
 
 	return contents, nil
+}
+
+// splitFunctionResponseContent separates function responses from any other
+// parts in the same content. Gemini rejects a request whose final content mixes
+// functionResponse parts with trailing text — it reports "Requests ending with a
+// model turn are not supported", because it reads the trailing text as a model
+// turn rather than as part of the tool-result turn. Dive produces exactly that
+// shape when auxiliary text rides along with a tool_result message (the
+// last-iteration "respond with a final answer now" instruction, a tool's
+// additional context, a reminder delivered with the results), so the parts are
+// emitted as two contents of the same role instead: the function responses
+// first, then the rest. Contents without that mix are returned unchanged.
+func splitFunctionResponseContent(content *genai.Content) []*genai.Content {
+	var responses, others []*genai.Part
+	for _, part := range content.Parts {
+		if part != nil && part.FunctionResponse != nil {
+			responses = append(responses, part)
+			continue
+		}
+		others = append(others, part)
+	}
+	if len(responses) == 0 || len(others) == 0 {
+		return []*genai.Content{content}
+	}
+	return []*genai.Content{
+		{Role: content.Role, Parts: responses},
+		{Role: content.Role, Parts: others},
+	}
 }
 
 // convertAnySchemaToGenAI converts any schema to Google GenAI schema format

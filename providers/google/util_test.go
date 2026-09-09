@@ -440,3 +440,37 @@ func TestGoogleRequestPathsRejectMessagesFilteredToEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestToolResultMessageWithAuxiliaryTextSplitsIntoTwoContents(t *testing.T) {
+	// Gemini 400s ("Requests ending with a model turn are not supported") when
+	// a content mixes functionResponse parts with trailing text — the shape the
+	// agent loop produces on its last iteration, when it appends the
+	// "respond with a final answer now" instruction to the tool_result message.
+	id := generateToolCallID("bash")
+	toolResult := llm.NewToolResultMessage(&llm.ToolResultContent{
+		ToolUseID: id,
+		Content:   "ok",
+	})
+	toolResult.Content = append(toolResult.Content, &llm.TextContent{Text: "Your tool calls are complete."})
+
+	contents, err := messagesToContents([]*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.ToolUseContent{ID: id, Name: "bash", Input: []byte(`{"command":"ls"}`)},
+			},
+		},
+		toolResult,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 3)
+
+	assert.Equal(t, "user", contents[1].Role)
+	assert.Len(t, contents[1].Parts, 1)
+	assert.NotNil(t, contents[1].Parts[0].FunctionResponse)
+
+	assert.Equal(t, "user", contents[2].Role)
+	assert.Len(t, contents[2].Parts, 1)
+	assert.Nil(t, contents[2].Parts[0].FunctionResponse)
+	assert.Equal(t, "Your tool calls are complete.", contents[2].Parts[0].Text)
+}
