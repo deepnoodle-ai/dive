@@ -89,13 +89,41 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:                 "USD",
 		UpdatedAt:                "2026-07-21",
 	},
-	// text input text output
+	// Live API rates, shared by all three live models. Base is text; audio input is $3.00
+	// and image/video $1.00, audio output $12.00. Google also quotes the audio rates per
+	// minute ($0.005 in, $0.018 out), which the token tables cannot express.
+	ModelGemini38Live: {
+		Model:                 ModelGemini38Live,
+		InputPrice:            0.75,
+		OutputPrice:           4.50,
+		InputPriceByModality:  map[string]float64{"audio": 3.00, "image": 1.00, "video": 1.00},
+		OutputPriceByModality: map[string]float64{"audio": 12.00},
+		Currency:              "USD",
+		UpdatedAt:             "2026-09-17",
+	},
+	// Live API rates, shared by all three live models. Base is text; audio input is $3.00
+	// and image/video $1.00, audio output $12.00. Google also quotes the audio rates per
+	// minute ($0.005 in, $0.018 out), which the token tables cannot express.
+	ModelGemini38LiveExtendedThinking: {
+		Model:                 ModelGemini38LiveExtendedThinking,
+		InputPrice:            0.75,
+		OutputPrice:           4.50,
+		InputPriceByModality:  map[string]float64{"audio": 3.00, "image": 1.00, "video": 1.00},
+		OutputPriceByModality: map[string]float64{"audio": 12.00},
+		Currency:              "USD",
+		UpdatedAt:             "2026-09-17",
+	},
+	// Live API rates, shared by all three live models. Base is text; audio input is $3.00
+	// and image/video $1.00, audio output $12.00. Google also quotes the audio rates per
+	// minute ($0.005 in, $0.018 out), which the token tables cannot express.
 	ModelGemini31FlashLivePreview: {
-		Model:       ModelGemini31FlashLivePreview,
-		InputPrice:  0.75,
-		OutputPrice: 4.50,
-		Currency:    "USD",
-		UpdatedAt:   "2026-05-28",
+		Model:                 ModelGemini31FlashLivePreview,
+		InputPrice:            0.75,
+		OutputPrice:           4.50,
+		InputPriceByModality:  map[string]float64{"audio": 3.00, "image": 1.00, "video": 1.00},
+		OutputPriceByModality: map[string]float64{"audio": 12.00},
+		Currency:              "USD",
+		UpdatedAt:             "2026-09-17",
 	},
 	ModelGemini31FlashLitePreview: {
 		Model:       ModelGemini31FlashLitePreview,
@@ -182,37 +210,67 @@ var TextModelPricing = map[string]llm.PricingInfo{
 
 // ImageModelPricing is generated from catalog.json.
 var ImageModelPricing = map[string]llm.ImagePricingInfo{
-	// $30 per 1M tokens, 1290 tokens per 1024x1024 image
+	// Text input and output match Gemini 2.5 Flash. Generated images bill as output
+	// tokens at $30.00/1M; a 1024x1024 image is 1290 tokens, about $0.039. Deprecated,
+	// shutting down 2026-10-02.
 	ModelGemini25FlashImage: {
-		Model:     ModelGemini25FlashImage,
-		Price:     0.039,
-		MaxSize:   "1024x1024",
+		Model: ModelGemini25FlashImage,
+		TokenPricing: &llm.PricingInfo{
+			Model:                 ModelGemini25FlashImage,
+			InputPrice:            0.30,
+			OutputPrice:           2.50,
+			OutputPriceByModality: map[string]float64{"image": 30.00},
+			Currency:              "USD",
+			UpdatedAt:             "2026-09-17",
+		},
 		Currency:  "USD",
-		UpdatedAt: "2026-06-30",
+		UpdatedAt: "2026-09-17",
 	},
-	// $30 per 1M output tokens; 1120 tokens per 1K image
+	// Input covers text, image, and video. Generated images bill as output tokens
+	// at $30.00/1M, about $0.0336 for a 1K-resolution image.
 	ModelGemini31FlashLiteImage: {
-		Model:     ModelGemini31FlashLiteImage,
-		Price:     0.0336,
-		MaxSize:   "1024x1024",
+		Model: ModelGemini31FlashLiteImage,
+		TokenPricing: &llm.PricingInfo{
+			Model:                 ModelGemini31FlashLiteImage,
+			InputPrice:            0.25,
+			OutputPrice:           1.50,
+			OutputPriceByModality: map[string]float64{"image": 30.00},
+			Currency:              "USD",
+			UpdatedAt:             "2026-09-17",
+		},
 		Currency:  "USD",
-		UpdatedAt: "2026-06-30",
+		UpdatedAt: "2026-09-17",
 	},
-	// $60 per 1M output tokens; ~$0.067 per 1K-resolution image
+	// Generated images bill as output tokens at $60.00/1M: about $0.045 at 0.5K,
+	// $0.067 at 1K, $0.101 at 2K, and $0.151 at 4K.
 	ModelGemini31FlashImage: {
-		Model:     ModelGemini31FlashImage,
-		Price:     0.067,
-		MaxSize:   "4096x4096",
+		Model: ModelGemini31FlashImage,
+		TokenPricing: &llm.PricingInfo{
+			Model:                 ModelGemini31FlashImage,
+			InputPrice:            0.50,
+			OutputPrice:           3.00,
+			OutputPriceByModality: map[string]float64{"image": 60.00},
+			Currency:              "USD",
+			UpdatedAt:             "2026-09-17",
+		},
 		Currency:  "USD",
-		UpdatedAt: "2026-06-30",
+		UpdatedAt: "2026-09-17",
 	},
-	// $120 per 1M output tokens; ~$0.134 per 1K/2K image ($0.24 at 4K)
+	// Text input and output match Gemini 3.1 Pro; generated images bill as output
+	// tokens at $120.00/1M -- about $0.134 for a 1K or 2K image and $0.24 at 4K. The
+	// rate is recorded rather than a per-image constant, which is only right at one size.
 	ModelGemini3ProImage: {
-		Model:     ModelGemini3ProImage,
-		Price:     0.134,
-		MaxSize:   "4096x4096",
+		Model: ModelGemini3ProImage,
+		TokenPricing: &llm.PricingInfo{
+			Model:                 ModelGemini3ProImage,
+			InputPrice:            2.00,
+			OutputPrice:           12.00,
+			OutputPriceByModality: map[string]float64{"image": 120.00},
+			Currency:              "USD",
+			UpdatedAt:             "2026-09-17",
+		},
 		Currency:  "USD",
-		UpdatedAt: "2026-06-30",
+		UpdatedAt: "2026-09-17",
 	},
 }
 

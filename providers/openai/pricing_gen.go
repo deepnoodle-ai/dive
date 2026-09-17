@@ -279,6 +279,42 @@ var TextModelPricing = map[string]llm.PricingInfo{
 
 // ImageModelPricing is generated from catalog.json.
 var ImageModelPricing = map[string]llm.ImagePricingInfo{
+	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
+	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
+	// at $30.00/1M. The model emits no text, so no text output rate applies.
+	ModelGPTImage25Sunburst: {
+		Model: ModelGPTImage25Sunburst,
+		TokenPricing: &llm.PricingInfo{
+			Model:                    ModelGPTImage25Sunburst,
+			InputPrice:               5.00,
+			OutputPrice:              30.00,
+			CacheReadPrice:           1.25,
+			InputPriceByModality:     map[string]float64{"image": 8.00},
+			CacheReadPriceByModality: map[string]float64{"image": 2.00},
+			Currency:                 "USD",
+			UpdatedAt:                "2026-09-17",
+		},
+		Currency:  "USD",
+		UpdatedAt: "2026-09-17",
+	},
+	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
+	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
+	// at $30.00/1M. The model emits no text, so no text output rate applies.
+	ModelGPTImage25Flare: {
+		Model: ModelGPTImage25Flare,
+		TokenPricing: &llm.PricingInfo{
+			Model:                    ModelGPTImage25Flare,
+			InputPrice:               5.00,
+			OutputPrice:              30.00,
+			CacheReadPrice:           1.25,
+			InputPriceByModality:     map[string]float64{"image": 8.00},
+			CacheReadPriceByModality: map[string]float64{"image": 2.00},
+			Currency:                 "USD",
+			UpdatedAt:                "2026-09-17",
+		},
+		Currency:  "USD",
+		UpdatedAt: "2026-09-17",
+	},
 	"dall-e-3": {
 		Model:     "dall-e-3",
 		Price:     0.040,

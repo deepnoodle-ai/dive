@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Token pricing for image models.** `llm.ImagePricingInfo.TokenPricing` carries
+  per-token rates for image models their provider bills by token, with `CostOf`
+  and `CostOfImages` picking the right one. Catalog key: `token_pricing`.
+- **Token-billed image models resolve through the pricing registry**, so
+  `llm.PopulateCost` can price an image request. Per-image models stay out.
+- **OpenAI GPT-Image-2.5.** `ModelGPTImage25Sunburst` and `ModelGPTImage25Flare`
+  plus their `2026-09-08` snapshots, at $5 text in, $8 image in, $30 image out
+  per 1M.
+- **OpenAI GPT-Live 1.** `ModelGPTLive1`. Catalogued only: no Live API client,
+  and the $0.05/minute session rate has no per-token pricing field.
+- **Gemini 3.8 Live.** `ModelGemini38Live` and
+  `ModelGemini38LiveExtendedThinking`, with the Live API's per-modality rates.
+- **OpenRouter DeepSeek V4.1 Flash.** `ModelDeepSeekV41Flash`, 1.05M context, at
+  the off-peak $0.15/$0.60 ($0.003 cache read).
+
+### Fixed
+
+- **Nano Banana was priced at one resolution.** All four Gemini image models are
+  billed per token; the catalog held a per-image constant derived at 1K, which
+  understated `gemini-3-pro-image` by 44% at 4K. They now carry the real rates.
+- **Gemini live audio was priced as text.** `gemini-3.1-flash-live-preview` now
+  bills audio at $3.00/$12.00 per 1M instead of the text rates $0.75/$4.50.
+
+### Changed
+
+- **`modelcatalog.TextPrice` embeds the new `TokenPrice`** so image rows can
+  reuse the rate fields. JSON and field access are unchanged; only unkeyed
+  struct literals would need updating.
+
 ## [1.29.0] - 2026-09-09
 
 ### Added

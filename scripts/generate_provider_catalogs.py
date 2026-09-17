@@ -148,6 +148,99 @@ def read_catalog(provider: str) -> dict[str, Any]:
     return value
 
 
+def validate_token_rates(
+    rates: Mapping[str, Any], path: Path, table_name: str, model_id: str
+) -> None:
+    """Validate the per-token rates shared by text rows and image rows.
+
+    Image models whose provider bills by token carry these under
+    ``token_pricing`` rather than at the top level of the entry.
+    """
+    for field in ("input_price_per_1m_tokens", "output_price_per_1m_tokens"):
+        value = rates.get(field)
+        if not isinstance(value, str) or not DECIMAL_RE.fullmatch(value):
+            raise CatalogError(f"{path}: {table_name}/{model_id} has invalid {field}")
+    # Optional, but still interpolated into Go source unquoted.
+    for field in (
+        "long_context_input_price_per_1m_tokens",
+        "long_context_cache_read_price_per_1m_tokens",
+        "long_context_output_price_per_1m_tokens",
+        "long_context_cache_write_price_per_1m_tokens",
+        "cache_read_price_per_1m_tokens",
+        "cache_read_price_above_threshold_per_1m_tokens",
+        "cache_write_price_per_1m_tokens",
+        "non_global_price_multiplier",
+    ):
+        value = rates.get(field)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str) or not DECIMAL_RE.fullmatch(value):
+            raise CatalogError(f"{path}: {table_name}/{model_id} has invalid {field}")
+    for field in (
+        "input_price_per_1m_tokens_by_modality",
+        "output_price_per_1m_tokens_by_modality",
+        "cache_read_price_per_1m_tokens_by_modality",
+    ):
+        values = rates.get(field)
+        if values is None:
+            continue
+        if not isinstance(values, dict) or not values:
+            raise CatalogError(
+                f"{path}: {table_name}/{model_id} has invalid {field}"
+            )
+        for modality, value in values.items():
+            if (
+                not isinstance(modality, str)
+                or not modality
+                or modality.lower() != modality
+                or not isinstance(value, str)
+                or not DECIMAL_RE.fullmatch(value)
+            ):
+                raise CatalogError(
+                    f"{path}: {table_name}/{model_id} has invalid {field}/{modality}"
+                )
+    cache_threshold = rates.get("cache_read_price_threshold_tokens")
+    cache_above = rates.get(
+        "cache_read_price_above_threshold_per_1m_tokens"
+    )
+    if bool(cache_threshold) != bool(cache_above) or (
+        cache_threshold is not None
+        and (not isinstance(cache_threshold, int) or cache_threshold <= 0)
+    ):
+        raise CatalogError(
+            f"{path}: {table_name}/{model_id} has incomplete cache-read threshold pricing"
+        )
+    long_threshold = rates.get("long_context_threshold_tokens")
+    long_prices = tuple(
+        rates.get(field)
+        for field in (
+            "long_context_input_price_per_1m_tokens",
+            "long_context_cache_read_price_per_1m_tokens",
+            "long_context_output_price_per_1m_tokens",
+        )
+    )
+    long_cache_write = rates.get(
+        "long_context_cache_write_price_per_1m_tokens"
+    )
+    if bool(long_threshold) != (any(long_prices) or bool(long_cache_write)) or (
+        long_threshold is not None
+        and (not isinstance(long_threshold, int) or long_threshold <= 0)
+    ) or (long_threshold and not all(long_prices)):
+        raise CatalogError(
+            f"{path}: {table_name}/{model_id} has incomplete long-context pricing"
+        )
+    # Optional: a model that never surcharges cache writes has no
+    # standard rate for the long-context tier to raise.
+    if long_cache_write and not rates.get("cache_write_price_per_1m_tokens"):
+        raise CatalogError(
+            f"{path}: {table_name}/{model_id} has a long-context cache-write price without a standard one"
+        )
+    multiplier = rates.get("non_global_price_multiplier")
+    if multiplier not in (None, "") and float(multiplier) <= 0:
+        raise CatalogError(
+            f"{path}: {table_name}/{model_id} has invalid non_global_price_multiplier"
+        )
+
 def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> None:
     allowed = {
         "schema_version",
@@ -225,25 +318,36 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                     f"{path}: {table_name} has missing or duplicate model {model_id!r}"
                 )
             seen.add(model_id)
+            if table_name == "image":
+                # Per image or per token, never both: a token rate recorded as
+                # a per-image constant is only right at one output resolution.
+                has_per_image = entry.get("price_per_image") not in (None, "")
+                rates = entry.get("token_pricing")
+                if has_per_image == (rates is not None):
+                    raise CatalogError(
+                        f"{path}: image/{model_id} must set exactly one of "
+                        "price_per_image or token_pricing"
+                    )
+                if rates is not None:
+                    if not isinstance(rates, dict):
+                        raise CatalogError(
+                            f"{path}: image/{model_id} has invalid token_pricing"
+                        )
+                    if entry.get("max_size"):
+                        raise CatalogError(
+                            f"{path}: image/{model_id} sets max_size, which only "
+                            "qualifies a per-image price"
+                        )
+                    validate_token_rates(rates, path, "image", model_id)
             if table_name in {"text", "fast_text"}:
-                price_fields = (
-                    "input_price_per_1m_tokens",
-                    "output_price_per_1m_tokens",
-                )
-                # Optional, but still interpolated into Go source unquoted.
-                optional_price_fields = (
-                    "long_context_input_price_per_1m_tokens",
-                    "long_context_cache_read_price_per_1m_tokens",
-                    "long_context_output_price_per_1m_tokens",
-                    "long_context_cache_write_price_per_1m_tokens",
-                    "cache_read_price_per_1m_tokens",
-                    "cache_read_price_above_threshold_per_1m_tokens",
-                    "cache_write_price_per_1m_tokens",
-                    "non_global_price_multiplier",
-                )
-            elif table_name == "image":
-                price_fields = ("price_per_image",)
+                # The rate fields are checked by validate_token_rates below.
+                price_fields = ()
                 optional_price_fields = ()
+            elif table_name == "image":
+                # Required only when the row is not token-priced; the
+                # exactly-one check above already rejected the empty case.
+                price_fields = ()
+                optional_price_fields = ("price_per_image",)
             else:
                 price_fields = ("price_per_1m_tokens",)
                 optional_price_fields = ()
@@ -262,70 +366,7 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                         f"{path}: {table_name}/{model_id} has invalid {field}"
                     )
             if table_name in {"text", "fast_text"}:
-                for field in (
-                    "input_price_per_1m_tokens_by_modality",
-                    "output_price_per_1m_tokens_by_modality",
-                    "cache_read_price_per_1m_tokens_by_modality",
-                ):
-                    values = entry.get(field)
-                    if values is None:
-                        continue
-                    if not isinstance(values, dict) or not values:
-                        raise CatalogError(
-                            f"{path}: {table_name}/{model_id} has invalid {field}"
-                        )
-                    for modality, value in values.items():
-                        if (
-                            not isinstance(modality, str)
-                            or not modality
-                            or modality.lower() != modality
-                            or not isinstance(value, str)
-                            or not DECIMAL_RE.fullmatch(value)
-                        ):
-                            raise CatalogError(
-                                f"{path}: {table_name}/{model_id} has invalid {field}/{modality}"
-                            )
-                cache_threshold = entry.get("cache_read_price_threshold_tokens")
-                cache_above = entry.get(
-                    "cache_read_price_above_threshold_per_1m_tokens"
-                )
-                if bool(cache_threshold) != bool(cache_above) or (
-                    cache_threshold is not None
-                    and (not isinstance(cache_threshold, int) or cache_threshold <= 0)
-                ):
-                    raise CatalogError(
-                        f"{path}: {table_name}/{model_id} has incomplete cache-read threshold pricing"
-                    )
-                long_threshold = entry.get("long_context_threshold_tokens")
-                long_prices = tuple(
-                    entry.get(field)
-                    for field in (
-                        "long_context_input_price_per_1m_tokens",
-                        "long_context_cache_read_price_per_1m_tokens",
-                        "long_context_output_price_per_1m_tokens",
-                    )
-                )
-                long_cache_write = entry.get(
-                    "long_context_cache_write_price_per_1m_tokens"
-                )
-                if bool(long_threshold) != (any(long_prices) or bool(long_cache_write)) or (
-                    long_threshold is not None
-                    and (not isinstance(long_threshold, int) or long_threshold <= 0)
-                ) or (long_threshold and not all(long_prices)):
-                    raise CatalogError(
-                        f"{path}: {table_name}/{model_id} has incomplete long-context pricing"
-                    )
-                # Optional: a model that never surcharges cache writes has no
-                # standard rate for the long-context tier to raise.
-                if long_cache_write and not entry.get("cache_write_price_per_1m_tokens"):
-                    raise CatalogError(
-                        f"{path}: {table_name}/{model_id} has a long-context cache-write price without a standard one"
-                    )
-                multiplier = entry.get("non_global_price_multiplier")
-                if multiplier not in (None, "") and float(multiplier) <= 0:
-                    raise CatalogError(
-                        f"{path}: {table_name}/{model_id} has invalid non_global_price_multiplier"
-                    )
+                validate_token_rates(entry, path, table_name, model_id)
             for field in ("currency", "updated_at"):
                 value = entry.get(field)
                 if not isinstance(value, str) or not value:
@@ -533,6 +574,50 @@ def pricing_entries(
     return [entry for entry in entries if entry["model"] in allowed]
 
 
+TOKEN_RATE_FIELDS = (
+    ("InputPrice", "input_price_per_1m_tokens"),
+    ("OutputPrice", "output_price_per_1m_tokens"),
+    ("LongContextInputPrice", "long_context_input_price_per_1m_tokens"),
+    ("LongContextCacheReadPrice", "long_context_cache_read_price_per_1m_tokens"),
+    ("LongContextOutputPrice", "long_context_output_price_per_1m_tokens"),
+    ("CacheReadPrice", "cache_read_price_per_1m_tokens"),
+    ("CacheReadPriceAboveThreshold", "cache_read_price_above_threshold_per_1m_tokens"),
+    ("CacheWritePrice", "cache_write_price_per_1m_tokens"),
+    ("LongContextCacheWritePrice", "long_context_cache_write_price_per_1m_tokens"),
+    ("NonGlobalPriceMultiplier", "non_global_price_multiplier"),
+)
+
+TOKEN_MODALITY_FIELDS = (
+    ("InputPriceByModality", "input_price_per_1m_tokens_by_modality"),
+    ("OutputPriceByModality", "output_price_per_1m_tokens_by_modality"),
+    ("CacheReadPriceByModality", "cache_read_price_per_1m_tokens_by_modality"),
+)
+
+
+def render_token_rates(rates: Mapping[str, Any], indent: str) -> list[str]:
+    """Render the per-token rate fields shared by text rows and image rows."""
+    lines = []
+    for go_field, json_field in TOKEN_RATE_FIELDS:
+        value = rates.get(json_field)
+        if value not in (None, ""):
+            lines.append(f"{indent}{go_field}: {value},")
+    for go_field, json_field in TOKEN_MODALITY_FIELDS:
+        prices = rates.get(json_field)
+        if prices:
+            rendered = ", ".join(
+                f"{go_string(modality)}: {prices[modality]}"
+                for modality in sorted(prices)
+            )
+            lines.append(f"{indent}{go_field}: map[string]float64{{{rendered}}},")
+    for go_field, json_field in (
+        ("CacheReadPriceThreshold", "cache_read_price_threshold_tokens"),
+        ("LongContextThreshold", "long_context_threshold_tokens"),
+    ):
+        if rates.get(json_field):
+            lines.append(f"{indent}{go_field}: {rates[json_field]},")
+    return lines
+
+
 def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
     needs_llm = any(table.go_type.startswith("llm.") for table in target.tables)
     lines = [GENERATED_HEADER, "", f"package {target.package}"]
@@ -557,77 +642,29 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
             lines.append(f"\t{key}: {{")
             lines.append(f"\t\tModel: {key},")
             if table.kind == "text":
-                fields = (
-                    ("InputPrice", "input_price_per_1m_tokens"),
-                    ("OutputPrice", "output_price_per_1m_tokens"),
-                    (
-                        "LongContextInputPrice",
-                        "long_context_input_price_per_1m_tokens",
-                    ),
-                    (
-                        "LongContextCacheReadPrice",
-                        "long_context_cache_read_price_per_1m_tokens",
-                    ),
-                    (
-                        "LongContextOutputPrice",
-                        "long_context_output_price_per_1m_tokens",
-                    ),
-                    ("CacheReadPrice", "cache_read_price_per_1m_tokens"),
-                    (
-                        "CacheReadPriceAboveThreshold",
-                        "cache_read_price_above_threshold_per_1m_tokens",
-                    ),
-                    ("CacheWritePrice", "cache_write_price_per_1m_tokens"),
-                    (
-                        "LongContextCacheWritePrice",
-                        "long_context_cache_write_price_per_1m_tokens",
-                    ),
-                    ("NonGlobalPriceMultiplier", "non_global_price_multiplier"),
-                )
+                lines.extend(render_token_rates(entry, "\t\t"))
             elif table.kind == "image":
-                fields = (("Price", "price_per_image"),)
+                if entry.get("price_per_image") not in (None, ""):
+                    lines.append(f"\t\tPrice: {entry['price_per_image']},")
+                if entry.get("max_size"):
+                    lines.append(f"\t\tMaxSize: {go_string(entry['max_size'])},")
+                if entry.get("token_pricing"):
+                    # The nested PricingInfo repeats the row's model and
+                    # currency so the Cost it returns is labelled like any
+                    # other, rather than coming back anonymous.
+                    token_type = table.go_type.replace("ImagePricingInfo", "PricingInfo")
+                    lines.append(f"\t\tTokenPricing: &{token_type}{{")
+                    lines.append(f"\t\t\tModel: {key},")
+                    lines.extend(render_token_rates(entry["token_pricing"], "\t\t\t"))
+                    lines.extend(
+                        (
+                            f"\t\t\tCurrency: {go_string(entry['currency'])},",
+                            f"\t\t\tUpdatedAt: {go_string(entry['updated_at'])},",
+                            "\t\t},",
+                        )
+                    )
             else:
-                fields = (("Price", "price_per_1m_tokens"),)
-            for go_field, json_field in fields:
-                value = entry.get(json_field)
-                if value not in (None, ""):
-                    lines.append(f"\t\t{go_field}: {value},")
-            if table.kind == "text":
-                for go_field, json_field in (
-                    (
-                        "InputPriceByModality",
-                        "input_price_per_1m_tokens_by_modality",
-                    ),
-                    (
-                        "OutputPriceByModality",
-                        "output_price_per_1m_tokens_by_modality",
-                    ),
-                    (
-                        "CacheReadPriceByModality",
-                        "cache_read_price_per_1m_tokens_by_modality",
-                    ),
-                ):
-                    prices = entry.get(json_field)
-                    if prices:
-                        rendered = ", ".join(
-                            f"{go_string(modality)}: {prices[modality]}"
-                            for modality in sorted(prices)
-                        )
-                        lines.append(
-                            f"\t\t{go_field}: map[string]float64{{{rendered}}},"
-                        )
-            if table.kind == "text" and entry.get("cache_read_price_threshold_tokens"):
-                lines.append(
-                    "\t\tCacheReadPriceThreshold: "
-                    f"{entry['cache_read_price_threshold_tokens']},"
-                )
-            if table.kind == "text" and entry.get("long_context_threshold_tokens"):
-                lines.append(
-                    "\t\tLongContextThreshold: "
-                    f"{entry['long_context_threshold_tokens']},"
-                )
-            if table.kind == "image" and entry.get("max_size"):
-                lines.append(f"\t\tMaxSize: {go_string(entry['max_size'])},")
+                lines.append(f"\t\tPrice: {entry['price_per_1m_tokens']},")
             lines.extend(
                 (
                     f"\t\tCurrency: {go_string(entry['currency'])},",
@@ -638,6 +675,7 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
         lines.append("}")
     lines.append("")
     return "\n".join(lines)
+
 
 
 def generated_files(target: Target, catalog: Mapping[str, Any]) -> dict[Path, str | None]:

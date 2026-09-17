@@ -15,6 +15,8 @@ const (
 	ModelGemini31ProPreviewCustomTools = "gemini-3.1-pro-preview-customtools"
 	ModelGemini31FlashLite             = "gemini-3.1-flash-lite"
 	ModelGemini31FlashLitePreview      = "gemini-3.1-flash-lite-preview"
+	ModelGemini38Live                  = "gemini-3.8-live"
+	ModelGemini38LiveExtendedThinking  = "gemini-3.8-live-extended-thinking"
 	ModelGemini31FlashLivePreview      = "gemini-3.1-flash-live-preview"
 	ModelGemini31FlashTTSPreview       = "gemini-3.1-flash-tts-preview"
 	ModelGemini31FlashLiteImage        = "gemini-3.1-flash-lite-image"

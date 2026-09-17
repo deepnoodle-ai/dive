@@ -160,3 +160,98 @@ func TestParseRejectsHostlessSourceURL(t *testing.T) {
 	_, err := Parse("test", []byte(invalid))
 	assert.Error(t, err)
 }
+
+// imageCatalog is a catalog whose only price row is an image row, with the
+// billing shape left to the caller to fill in.
+func imageCatalog(row string) []byte {
+	return []byte(`{
+      "schema_version": 1,
+      "provider": "test",
+      "models": [{"go_name":"ModelPrimary","id":"primary","default":true}],
+      "pricing": {"image":[` + row + `]}
+    }`)
+}
+
+func TestParseAcceptsEitherImageBillingShape(t *testing.T) {
+	perImage, err := Parse("test", imageCatalog(`{
+      "model":"primary",
+      "price_per_image":"0.040",
+      "max_size":"1024x1024",
+      "currency":"USD",
+      "updated_at":"2026-08-08"
+    }`))
+	assert.NoError(t, err)
+	assert.Equal(t, "0.040", perImage.Pricing.Image[0].Price)
+	assert.Nil(t, perImage.Pricing.Image[0].TokenPricing)
+
+	perToken, err := Parse("test", imageCatalog(`{
+      "model":"primary",
+      "token_pricing":{
+        "input_price_per_1m_tokens":"2.00",
+        "output_price_per_1m_tokens":"12.00",
+        "output_price_per_1m_tokens_by_modality":{"image":"120.00"}
+      },
+      "currency":"USD",
+      "updated_at":"2026-08-08"
+    }`))
+	assert.NoError(t, err)
+	assert.Equal(t, "", perToken.Pricing.Image[0].Price)
+	assert.Equal(t, "120.00", perToken.Pricing.Image[0].TokenPricing.OutputPriceByModality["image"])
+}
+
+// Carrying both shapes lets the two drift apart, and carrying neither leaves the
+// row priceless. Either one is a data bug worth failing the build over.
+func TestParseRejectsAmbiguousImageBilling(t *testing.T) {
+	both := imageCatalog(`{
+      "model":"primary",
+      "price_per_image":"0.134",
+      "token_pricing":{
+        "input_price_per_1m_tokens":"2.00",
+        "output_price_per_1m_tokens":"12.00"
+      },
+      "currency":"USD",
+      "updated_at":"2026-08-08"
+    }`)
+	_, err := Parse("test", both)
+	assert.Error(t, err)
+
+	neither := imageCatalog(`{"model":"primary","currency":"USD","updated_at":"2026-08-08"}`)
+	_, err = Parse("test", neither)
+	assert.Error(t, err)
+}
+
+// max_size names the resolution a per-image price is quoted at, so it means
+// nothing next to a token rate that applies at every size.
+func TestParseRejectsMaxSizeOnTokenBilledImage(t *testing.T) {
+	_, err := Parse("test", imageCatalog(`{
+      "model":"primary",
+      "max_size":"4096x4096",
+      "token_pricing":{
+        "input_price_per_1m_tokens":"2.00",
+        "output_price_per_1m_tokens":"12.00"
+      },
+      "currency":"USD",
+      "updated_at":"2026-08-08"
+    }`))
+	assert.Error(t, err)
+}
+
+// Clone must detach the nested token rates too, or a caller mutating its copy
+// reaches back into the embedded package-level catalog.
+func TestCloneDetachesImageTokenPricing(t *testing.T) {
+	catalog, err := Parse("test", imageCatalog(`{
+      "model":"primary",
+      "token_pricing":{
+        "input_price_per_1m_tokens":"2.00",
+        "output_price_per_1m_tokens":"12.00",
+        "output_price_per_1m_tokens_by_modality":{"image":"120.00"}
+      },
+      "currency":"USD",
+      "updated_at":"2026-08-08"
+    }`))
+	assert.NoError(t, err)
+
+	clone := catalog.Clone()
+	clone.Pricing.Image[0].TokenPricing.OutputPriceByModality["image"] = "1.00"
+	assert.Equal(t, "120.00", catalog.Pricing.Image[0].TokenPricing.OutputPriceByModality["image"])
+}

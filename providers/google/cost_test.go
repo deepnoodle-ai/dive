@@ -25,11 +25,13 @@ func TestGoogleCacheReadPricingCoverage(t *testing.T) {
 		ModelGemini20Flash:                 0.025,
 	}
 	exclusions := map[string]string{
-		ModelGemini31FlashLivePreview: "the official pricing row publishes no context-caching price",
-		ModelGemini31FlashLitePreview: "the current official pricing page publishes no row for this retired preview id",
-		ModelGemini31FlashImagePrev:   "the official image-model pricing row publishes no context-caching price",
-		ModelGemini15Pro:              "the current official pricing page no longer publishes a Gemini 1.5 Pro row",
-		ModelGemini15Flash:            "the current official pricing page no longer publishes a Gemini 1.5 Flash row",
+		ModelGemini38Live:                 "the Live API pricing row publishes no context-caching price",
+		ModelGemini38LiveExtendedThinking: "the Live API pricing row publishes no context-caching price",
+		ModelGemini31FlashLivePreview:     "the Live API pricing row publishes no context-caching price",
+		ModelGemini31FlashLitePreview:     "the current official pricing page publishes no row for this retired preview id",
+		ModelGemini31FlashImagePrev:       "the official image-model pricing row publishes no context-caching price",
+		ModelGemini15Pro:                  "the current official pricing page no longer publishes a Gemini 1.5 Pro row",
+		ModelGemini15Flash:                "the current official pricing page no longer publishes a Gemini 1.5 Flash row",
 	}
 
 	for model := range TextModelPricing {
@@ -210,4 +212,35 @@ func TestPopulateGoogleCostUnspecifiedTierParity(t *testing.T) {
 	assert.Equal(t, compute(""), compute(genai.ServiceTierUnspecified))
 	assert.NotNil(t, compute("").Cost)
 	assert.Equal(t, "", compute("").ServiceTier)
+}
+
+// The Live API prices audio well above text -- $3.00 against $0.75 on input and
+// $12.00 against $4.50 on output -- so a voice turn billed at the base text rate
+// undercounts by 4x on input. All three live models share the one pricing row.
+func TestGeminiLiveAudioModalityPricing(t *testing.T) {
+	for _, model := range []string{
+		ModelGemini38Live,
+		ModelGemini38LiveExtendedThinking,
+		ModelGemini31FlashLivePreview,
+	} {
+		t.Run(model, func(t *testing.T) {
+			p, ok := TextModelPricing[model]
+			assert.True(t, ok, "pricing should exist for "+model)
+
+			cost := p.CostOf(&llm.Usage{
+				InputTokens:  1_000_000,
+				OutputTokens: 1_000_000,
+				ModalityTokens: map[string]llm.ModalityTokenUsage{
+					"audio": {InputTokens: 1_000_000, OutputTokens: 1_000_000},
+				},
+			})
+			assert.Equal(t, 3.00, cost.Input)
+			assert.Equal(t, 12.00, cost.Output)
+
+			// Text stays on the base rate in the same table.
+			text := p.CostOf(&llm.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000})
+			assert.Equal(t, 0.75, text.Input)
+			assert.Equal(t, 4.50, text.Output)
+		})
+	}
 }

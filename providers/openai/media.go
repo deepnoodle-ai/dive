@@ -22,7 +22,8 @@ import (
 
 // MediaProvider generates images, videos, speech, and transcriptions using OpenAI APIs.
 //
-// Supported image models: gpt-image-2, gpt-image-1.5, gpt-image-1, gpt-image-1-mini
+// Supported image models: gpt-image-2.5-sunburst, gpt-image-2.5-flare, gpt-image-2,
+// gpt-image-1.5, gpt-image-1, gpt-image-1-mini
 // Supported video models: sora-2, sora-2-pro
 // Supported speech models: gpt-4o-mini-tts, tts-1, tts-1-hd
 // Supported transcription models: gpt-4o-mini-transcribe, gpt-4o-transcribe, whisper-1

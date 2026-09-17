@@ -119,6 +119,18 @@
       "display_name": "Gemini 3.1 Flash"
     },
     {
+      "go_name": "ModelGemini38Live",
+      "id": "gemini-3.8-live",
+      "kind": "audio",
+      "display_name": "Gemini 3.8 Live"
+    },
+    {
+      "go_name": "ModelGemini38LiveExtendedThinking",
+      "id": "gemini-3.8-live-extended-thinking",
+      "kind": "audio",
+      "display_name": "Gemini 3.8 Live Extended Thinking"
+    },
+    {
       "go_name": "ModelGemini31FlashLivePreview",
       "id": "gemini-3.1-flash-live-preview",
       "kind": "audio",
@@ -344,12 +356,52 @@
         "note": "text/image/video ($0.50 audio)"
       },
       {
+        "model": "gemini-3.8-live",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "4.50",
+        "input_price_per_1m_tokens_by_modality": {
+          "audio": "3.00",
+          "image": "1.00",
+          "video": "1.00"
+        },
+        "output_price_per_1m_tokens_by_modality": {
+          "audio": "12.00"
+        },
+        "currency": "USD",
+        "updated_at": "2026-09-17",
+        "note": "Live API rates, shared by all three live models. Base is text; audio input is $3.00\nand image/video $1.00, audio output $12.00. Google also quotes the audio rates per\nminute ($0.005 in, $0.018 out), which the token tables cannot express."
+      },
+      {
+        "model": "gemini-3.8-live-extended-thinking",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "4.50",
+        "input_price_per_1m_tokens_by_modality": {
+          "audio": "3.00",
+          "image": "1.00",
+          "video": "1.00"
+        },
+        "output_price_per_1m_tokens_by_modality": {
+          "audio": "12.00"
+        },
+        "currency": "USD",
+        "updated_at": "2026-09-17",
+        "note": "Live API rates, shared by all three live models. Base is text; audio input is $3.00\nand image/video $1.00, audio output $12.00. Google also quotes the audio rates per\nminute ($0.005 in, $0.018 out), which the token tables cannot express."
+      },
+      {
         "model": "gemini-3.1-flash-live-preview",
         "input_price_per_1m_tokens": "0.75",
         "output_price_per_1m_tokens": "4.50",
+        "input_price_per_1m_tokens_by_modality": {
+          "audio": "3.00",
+          "image": "1.00",
+          "video": "1.00"
+        },
+        "output_price_per_1m_tokens_by_modality": {
+          "audio": "12.00"
+        },
         "currency": "USD",
-        "updated_at": "2026-05-28",
-        "note": "text input text output"
+        "updated_at": "2026-09-17",
+        "note": "Live API rates, shared by all three live models. Base is text; audio input is $3.00\nand image/video $1.00, audio output $12.00. Google also quotes the audio rates per\nminute ($0.005 in, $0.018 out), which the token tables cannot express."
       },
       {
         "model": "gemini-3.1-flash-lite-preview",
@@ -453,35 +505,55 @@
     "image": [
       {
         "model": "gemini-2.5-flash-image",
-        "price_per_image": "0.039",
-        "max_size": "1024x1024",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "0.30",
+          "output_price_per_1m_tokens": "2.50",
+          "output_price_per_1m_tokens_by_modality": {
+            "image": "30.00"
+          }
+        },
         "currency": "USD",
-        "updated_at": "2026-06-30",
-        "note": "$30 per 1M tokens, 1290 tokens per 1024x1024 image"
+        "updated_at": "2026-09-17",
+        "note": "Text input and output match Gemini 2.5 Flash. Generated images bill as output\ntokens at $30.00/1M; a 1024x1024 image is 1290 tokens, about $0.039. Deprecated,\nshutting down 2026-10-02."
       },
       {
         "model": "gemini-3.1-flash-lite-image",
-        "price_per_image": "0.0336",
-        "max_size": "1024x1024",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "0.25",
+          "output_price_per_1m_tokens": "1.50",
+          "output_price_per_1m_tokens_by_modality": {
+            "image": "30.00"
+          }
+        },
         "currency": "USD",
-        "updated_at": "2026-06-30",
-        "note": "$30 per 1M output tokens; 1120 tokens per 1K image"
+        "updated_at": "2026-09-17",
+        "note": "Input covers text, image, and video. Generated images bill as output tokens\nat $30.00/1M, about $0.0336 for a 1K-resolution image."
       },
       {
         "model": "gemini-3.1-flash-image",
-        "price_per_image": "0.067",
-        "max_size": "4096x4096",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "0.50",
+          "output_price_per_1m_tokens": "3.00",
+          "output_price_per_1m_tokens_by_modality": {
+            "image": "60.00"
+          }
+        },
         "currency": "USD",
-        "updated_at": "2026-06-30",
-        "note": "$60 per 1M output tokens; ~$0.067 per 1K-resolution image"
+        "updated_at": "2026-09-17",
+        "note": "Generated images bill as output tokens at $60.00/1M: about $0.045 at 0.5K,\n$0.067 at 1K, $0.101 at 2K, and $0.151 at 4K."
       },
       {
         "model": "gemini-3-pro-image",
-        "price_per_image": "0.134",
-        "max_size": "4096x4096",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "2.00",
+          "output_price_per_1m_tokens": "12.00",
+          "output_price_per_1m_tokens_by_modality": {
+            "image": "120.00"
+          }
+        },
         "currency": "USD",
-        "updated_at": "2026-06-30",
-        "note": "$120 per 1M output tokens; ~$0.134 per 1K/2K image ($0.24 at 4K)"
+        "updated_at": "2026-09-17",
+        "note": "Text input and output match Gemini 3.1 Pro; generated images bill as output\ntokens at $120.00/1M -- about $0.134 for a 1K or 2K image and $0.24 at 4K. The\nrate is recorded rather than a per-image constant, which is only right at one size."
       }
     ],
     "embedding": [

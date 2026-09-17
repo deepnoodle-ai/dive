@@ -287,6 +287,26 @@
       "display_name": "GPT-4o"
     },
     {
+      "go_name": "ModelGPTImage25Sunburst",
+      "id": "gpt-image-2.5-sunburst",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage25Sunburst20260908",
+      "id": "gpt-image-2.5-sunburst-2026-09-08",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage25Flare",
+      "id": "gpt-image-2.5-flare",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage25Flare20260908",
+      "id": "gpt-image-2.5-flare-2026-09-08",
+      "kind": "image"
+    },
+    {
       "go_name": "ModelGPTImage2",
       "id": "gpt-image-2",
       "kind": "image"
@@ -310,6 +330,12 @@
       "go_name": "ModelGPTImage1Mini",
       "id": "gpt-image-1-mini",
       "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTLive1",
+      "id": "gpt-live-1",
+      "kind": "audio",
+      "display_name": "GPT-Live 1"
     },
     {
       "go_name": "ModelGPT4oMiniTTS",
@@ -734,6 +760,40 @@
     ],
     "fast_text": [],
     "image": [
+      {
+        "model": "gpt-image-2.5-sunburst",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "5.00",
+          "output_price_per_1m_tokens": "30.00",
+          "cache_read_price_per_1m_tokens": "1.25",
+          "input_price_per_1m_tokens_by_modality": {
+            "image": "8.00"
+          },
+          "cache_read_price_per_1m_tokens_by_modality": {
+            "image": "2.00"
+          }
+        },
+        "currency": "USD",
+        "updated_at": "2026-09-17",
+        "note": "OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M\nimage input ($1.25 and $2.00 cached), with generated images billed as output tokens\nat $30.00/1M. The model emits no text, so no text output rate applies."
+      },
+      {
+        "model": "gpt-image-2.5-flare",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "5.00",
+          "output_price_per_1m_tokens": "30.00",
+          "cache_read_price_per_1m_tokens": "1.25",
+          "input_price_per_1m_tokens_by_modality": {
+            "image": "8.00"
+          },
+          "cache_read_price_per_1m_tokens_by_modality": {
+            "image": "2.00"
+          }
+        },
+        "currency": "USD",
+        "updated_at": "2026-09-17",
+        "note": "OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M\nimage input ($1.25 and $2.00 cached), with generated images billed as output tokens\nat $30.00/1M. The model emits no text, so no text output rate applies."
+      },
       {
         "model": "dall-e-3",
         "price_per_image": "0.040",
