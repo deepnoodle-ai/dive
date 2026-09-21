@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-09-21
+
 ### Added
 
 - **Grok 4.7.** `grok.ModelGrok47` (`grok-4.7`) is now the Grok default, with
