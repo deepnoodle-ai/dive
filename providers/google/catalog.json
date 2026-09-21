@@ -122,12 +122,14 @@
       "go_name": "ModelGemini38Live",
       "id": "gemini-3.8-live",
       "kind": "audio",
+      "context_window": 131072,
       "display_name": "Gemini 3.8 Live"
     },
     {
       "go_name": "ModelGemini38LiveExtendedThinking",
       "id": "gemini-3.8-live-extended-thinking",
       "kind": "audio",
+      "context_window": 131072,
       "display_name": "Gemini 3.8 Live Extended Thinking"
     },
     {
