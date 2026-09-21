@@ -3,6 +3,7 @@
 package grok
 
 const (
+	ModelGrok47              = "grok-4.7"
 	ModelGrok46              = "grok-4.6"
 	ModelGrok45              = "grok-4.5"
 	ModelGrok43              = "grok-4.3"
@@ -42,4 +43,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGrok46
+var DefaultModel = ModelGrok47

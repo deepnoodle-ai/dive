@@ -40,6 +40,7 @@ const (
 	ModelGemini3FlashPreview = "google/gemini-3-flash-preview"
 	ModelGemini25Pro         = "google/gemini-2.5-pro"
 	ModelGemini25Flash       = "google/gemini-2.5-flash"
+	ModelGrok47              = "x-ai/grok-4.7"
 	ModelGrok46              = "x-ai/grok-4.6"
 	ModelGrok45              = "x-ai/grok-4.5"
 	ModelGrok43              = "x-ai/grok-4.3"

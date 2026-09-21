@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Grok 4.7.** `grok.ModelGrok47` (`grok-4.7`) is now the Grok default, with
+  `openrouter.ModelGrok47`. Same 500k context, pricing, and `low`–`xhigh`
+  effort ladder as `grok-4.6`.
 - **Token pricing for image models.** `llm.ImagePricingInfo.TokenPricing` carries
   per-token rates for image models their provider bills by token, with `CostOf`
   and `CostOfImages` picking the right one. Catalog key: `token_pricing`.
