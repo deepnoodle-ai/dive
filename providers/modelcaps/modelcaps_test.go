@@ -171,7 +171,7 @@ func TestLookupHandlesVendorPrefixes(t *testing.T) {
 // next point release gpt-5's narrower ladder and silently clamp max to high —
 // and the catalog coverage test would not catch it, since the id does resolve.
 func TestUnknownPointReleasesDoNotInheritFamilyLadder(t *testing.T) {
-	for _, model := range []string{"gpt-5.7", "gpt-5.9-turbo", "grok-4.7", "grok-3.9"} {
+	for _, model := range []string{"gpt-5.7", "gpt-5.9-turbo", "grok-4.8", "grok-3.9"} {
 		t.Run(model, func(t *testing.T) {
 			_, found := LookupEntry("", model)
 			assert.False(t, found)
@@ -230,6 +230,7 @@ func TestSupportsReasoning(t *testing.T) {
 		{"openai", "gpt-4.1", false}, // likewise
 		{"openai", "gpt-5.1", true},
 		{"grok", "grok-4.6", true},
+		{"grok", "grok-4.7", true},
 		{"meta", "muse-spark-1.3", true},
 		{"meta", "muse-spark-1.3-contributor", true},
 		{"openai", "some-unknown-finetune", false}, // unknown stays untouched

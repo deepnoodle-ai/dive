@@ -204,6 +204,17 @@ var grokTable = Table{
 		Temperature: true,
 	}},
 
+	// grok-4.7 keeps grok-4.6's ladder: low, medium, high (the default), xhigh.
+	{Prefix: "grok-4.7", Caps: Capabilities{
+		Efforts: []llm.ReasoningEffort{
+			llm.ReasoningEffortLow,
+			llm.ReasoningEffortMedium,
+			llm.ReasoningEffortHigh,
+			llm.ReasoningEffortXHigh,
+		},
+		Temperature: true,
+	}},
+
 	{Prefix: "grok-4.3", Caps: Capabilities{Efforts: grokBelowMax, Temperature: true}},
 	{Prefix: "grok-4", Caps: Capabilities{Efforts: grokBelowMax, Temperature: true}},
 	{Prefix: "grok-3", Caps: Capabilities{Efforts: grokBelowMax, Temperature: true}},

@@ -266,6 +266,13 @@
       "display_name": "Gemini 2.5 Flash"
     },
     {
+      "go_name": "ModelGrok47",
+      "id": "x-ai/grok-4.7",
+      "kind": "text",
+      "context_window": 500000,
+      "display_name": "Grok 4.7"
+    },
+    {
       "go_name": "ModelGrok46",
       "id": "x-ai/grok-4.6",
       "kind": "text",

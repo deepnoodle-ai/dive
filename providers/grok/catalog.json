@@ -28,15 +28,22 @@
   ],
   "models": [
     {
-      "go_name": "ModelGrok46",
-      "id": "grok-4.6",
+      "go_name": "ModelGrok47",
+      "id": "grok-4.7",
       "default": true,
       "kind": "text",
       "context_window": 500000,
-      "display_name": "Grok 4.6",
+      "display_name": "Grok 4.7",
       "recommended": true,
       "cli_order": 1,
       "description": "xAI flagship reasoning model with vision input"
+    },
+    {
+      "go_name": "ModelGrok46",
+      "id": "grok-4.6",
+      "kind": "text",
+      "context_window": 500000,
+      "display_name": "Grok 4.6"
     },
     {
       "go_name": "ModelGrok45",
@@ -224,6 +231,18 @@
   ],
   "pricing": {
     "text": [
+      {
+        "model": "grok-4.7",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "6.00",
+        "cache_read_price_per_1m_tokens": "0.50",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "4.00",
+        "long_context_cache_read_price_per_1m_tokens": "1.00",
+        "long_context_output_price_per_1m_tokens": "12.00",
+        "currency": "USD",
+        "updated_at": "2026-09-21"
+      },
       {
         "model": "grok-4.6",
         "input_price_per_1m_tokens": "2.00",

@@ -88,7 +88,7 @@ func TestGetDefaultModel(t *testing.T) {
 			envVars: map[string]string{
 				"XAI_API_KEY": "test",
 			},
-			expected: "grok-4.6",
+			expected: "grok-4.7",
 		},
 		{
 			name: "mistral key present",
