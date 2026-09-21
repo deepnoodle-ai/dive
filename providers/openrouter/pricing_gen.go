@@ -48,6 +48,17 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
+	// Off-peak list rate. DeepSeek doubles input, output, and cache reads during its UTC
+	// peak windows (Mon-Fri 01:00-04:00 and 06:00-10:00), which the schema has no
+	// time-of-day tier for, so a peak request costs twice what this entry reports.
+	ModelDeepSeekV41Flash: {
+		Model:          ModelDeepSeekV41Flash,
+		InputPrice:     0.15,
+		OutputPrice:    0.60,
+		CacheReadPrice: 0.003,
+		Currency:       "USD",
+		UpdatedAt:      "2026-09-17",
+	},
 	ModelDeepSeekR1: {
 		Model:       ModelDeepSeekR1,
 		InputPrice:  0.50,

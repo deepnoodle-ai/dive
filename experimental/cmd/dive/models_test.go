@@ -82,6 +82,24 @@ func TestOllamaContextWindow(t *testing.T) {
 
 // The CLI reports no context window for a model the catalogs do not list, so
 // the UI hides the context bar instead of showing a guessed size.
+// A catalog entry without context_window is dropped by buildModelCatalog, so
+// omitting it hides the CLI's context bar for the model entirely.
+func TestGemini38LiveContextWindow(t *testing.T) {
+	tests := []struct {
+		model string
+		want  int
+	}{
+		{"gemini-3.8-live", 131_072},
+		{"gemini-3.8-live-extended-thinking", 131_072},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.Equal(t, tt.want, contextWindowForModel(tt.model))
+		})
+	}
+}
+
 func TestUnknownModelHasNoContextWindow(t *testing.T) {
 	assert.Equal(t, 0, contextWindowForModel("not-a-real-model-9000"))
 }

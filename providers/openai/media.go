@@ -17,12 +17,14 @@ import (
 	"github.com/openai/openai-go/v3"
 	_ "golang.org/x/image/webp"
 
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/media"
 )
 
 // MediaProvider generates images, videos, speech, and transcriptions using OpenAI APIs.
 //
-// Supported image models: gpt-image-2, gpt-image-1.5, gpt-image-1, gpt-image-1-mini
+// Supported image models: gpt-image-2.5-sunburst, gpt-image-2.5-flare, gpt-image-2,
+// gpt-image-1.5, gpt-image-1, gpt-image-1-mini
 // Supported video models: sora-2, sora-2-pro
 // Supported speech models: gpt-4o-mini-tts, tts-1, tts-1-hd
 // Supported transcription models: gpt-4o-mini-transcribe, gpt-4o-transcribe, whisper-1
@@ -69,7 +71,12 @@ func (p *MediaProvider) GenerateImage(ctx context.Context, prompt string, config
 		return nil, fmt.Errorf("no images in response")
 	}
 
-	return decodeImageResults(resp.Data, model)
+	results, err := decodeImageResults(resp.Data, model)
+	if err != nil {
+		return nil, err
+	}
+	attachImageUsage(results, resp.Usage, model)
+	return results, nil
 }
 
 // EditImage implements media.ImageEditor.
@@ -127,6 +134,7 @@ func (p *MediaProvider) EditImage(ctx context.Context, prompt string, config *me
 		}
 		r.Metadata["mode"] = "edit"
 	}
+	attachImageUsage(results, resp.Usage, model)
 	return results, nil
 }
 
@@ -317,6 +325,65 @@ func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *me
 		result.Metadata["usage_seconds"] = resp.Usage.Seconds
 	}
 	return result, nil
+}
+
+// attachImageUsage records the request's token usage on the first result. The
+// Images endpoint bills the request, not each image, so repeating the usage on
+// every result would make a fan-out request look several times as expensive.
+func attachImageUsage(results []*media.ImageResult, usage openai.ImagesResponseUsage, model string) {
+	if len(results) == 0 {
+		return
+	}
+	results[0].Usage = convertImageUsage(usage, model)
+}
+
+// convertImageUsage converts the Images endpoint's usage into llm.Usage. The
+// endpoint reports the text/image split for input and output, which is what
+// lets a token-billed image model be priced at its image rates rather than its
+// text ones. It reports nothing about cache hits, so the cache buckets stay
+// zero and are marked unavailable rather than passed off as a measured zero.
+// Models the endpoint reports no usage for -- the per-image ones -- yield nil.
+func convertImageUsage(u openai.ImagesResponseUsage, model string) *llm.Usage {
+	if u.InputTokens <= 0 && u.OutputTokens <= 0 {
+		return nil
+	}
+	usage := &llm.Usage{
+		InputTokens:                         int(max(0, u.InputTokens)),
+		OutputTokens:                        int(max(0, u.OutputTokens)),
+		CacheCreationInputTokensUnavailable: true,
+	}
+	modality := map[string]llm.ModalityTokenUsage{}
+	addModalityInput := func(name string, tokens int64) int {
+		if tokens <= 0 {
+			return 0
+		}
+		entry := modality[name]
+		entry.InputTokens = int(tokens)
+		modality[name] = entry
+		return int(tokens)
+	}
+	addModalityOutput := func(name string, tokens int64) int {
+		if tokens <= 0 {
+			return 0
+		}
+		entry := modality[name]
+		entry.OutputTokens = int(tokens)
+		modality[name] = entry
+		return int(tokens)
+	}
+	assignedInput := addModalityInput("text", u.InputTokensDetails.TextTokens) +
+		addModalityInput("image", u.InputTokensDetails.ImageTokens)
+	assignedOutput := addModalityOutput("text", u.OutputTokensDetails.TextTokens) +
+		addModalityOutput("image", u.OutputTokensDetails.ImageTokens)
+	if len(modality) > 0 {
+		usage.ModalityTokens = modality
+	}
+	// A split that does not account for every token would silently bill the
+	// remainder at the base rate, so say so instead of implying it is exact.
+	usage.InputModalityTokenDetailsIncomplete = assignedInput != usage.InputTokens
+	usage.OutputModalityTokenDetailsIncomplete = assignedOutput != usage.OutputTokens
+	llm.PopulateCost(model, false, usage)
+	return usage
 }
 
 // decodeImageResults extracts image data from OpenAI response items.

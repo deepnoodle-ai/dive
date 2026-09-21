@@ -300,6 +300,13 @@
       "context_window": 128000
     },
     {
+      "go_name": "ModelDeepSeekV41Flash",
+      "id": "deepseek/deepseek-v4.1-flash",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "DeepSeek V4.1 Flash"
+    },
+    {
       "go_name": "ModelDeepSeekR1",
       "id": "deepseek/deepseek-r1-0528",
       "kind": "text"
@@ -348,6 +355,15 @@
         "output_price_per_1m_tokens": "10.00",
         "currency": "USD",
         "updated_at": "2025-01-15"
+      },
+      {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.60",
+        "cache_read_price_per_1m_tokens": "0.003",
+        "currency": "USD",
+        "updated_at": "2026-09-17",
+        "note": "Off-peak list rate. DeepSeek doubles input, output, and cache reads during its UTC\npeak windows (Mon-Fri 01:00-04:00 and 06:00-10:00), which the schema has no\ntime-of-day tier for, so a peak request costs twice what this entry reports."
       },
       {
         "model": "deepseek/deepseek-r1-0528",

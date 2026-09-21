@@ -45,6 +45,7 @@ const (
 	ModelGrok43              = "x-ai/grok-4.3"
 	ModelGrokBuild01         = "x-ai/grok-build-0.1"
 	ModelMistralLarge3       = "mistralai/mistral-large-2512"
+	ModelDeepSeekV41Flash    = "deepseek/deepseek-v4.1-flash"
 	ModelDeepSeekR1          = "deepseek/deepseek-r1-0528"
 )
 

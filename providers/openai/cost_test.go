@@ -199,3 +199,69 @@ func TestGPT56LongContextPricing(t *testing.T) {
 		})
 	}
 }
+
+// GPT-Image-2.5 is billed per token rather than per image, so it carries token
+// rates in the image table rather than a per-image constant. The two modalities
+// in one prompt differ: text input at $5/1M, image input at $8/1M, and cached
+// image tokens at $2/1M against $1.25 for text.
+func TestGPTImage25ModalityPricing(t *testing.T) {
+	for _, model := range []string{ModelGPTImage25Sunburst, ModelGPTImage25Flare} {
+		t.Run(model, func(t *testing.T) {
+			pricing, ok := ImageModelPricing[model]
+			assert.True(t, ok, "pricing should exist for "+model)
+			assert.Equal(t, 0.0, pricing.Price, "OpenAI bills this model per token")
+
+			cost, ok := pricing.CostOf(&llm.Usage{
+				InputTokens:          2_000_000,
+				CacheReadInputTokens: 1_000_000,
+				OutputTokens:         1_000_000,
+				ModalityTokens: map[string]llm.ModalityTokenUsage{
+					"text":  {InputTokens: 1_000_000},
+					"image": {InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
+				},
+			})
+			assert.True(t, ok, "token-billed model should price from usage")
+			// 1M text at $5 plus 1M image at $8.
+			assert.Equal(t, 13.0, cost.Input)
+			assert.Equal(t, 2.0, cost.CacheRead)
+			// The model emits image tokens only, so the base output rate is it.
+			assert.Equal(t, 30.0, cost.Output)
+		})
+	}
+}
+
+// DALL-E really is billed per image, so the per-image side of the table has to
+// keep working while the token side is added beside it.
+func TestDallEPerImagePricing(t *testing.T) {
+	pricing, ok := ImageModelPricing["dall-e-3"]
+	assert.True(t, ok)
+	assert.Nil(t, pricing.TokenPricing, "DALL-E 3 has a genuine per-image list price")
+
+	cost, ok := pricing.CostOfImages(4)
+	assert.True(t, ok)
+	assert.Equal(t, 0.16, cost.Total)
+
+	_, ok = pricing.CostOf(&llm.Usage{OutputTokens: 1_000_000})
+	assert.False(t, ok, "per-image model cannot be priced from token usage")
+}
+
+// The image table used to be unreachable: nothing registered it, so
+// llm.PopulateCost could never price an image request. Token-billed rows now
+// resolve through the same registry as text models.
+func TestTokenBilledImagePricingIsRegistered(t *testing.T) {
+	for _, model := range []string{ModelGPTImage25Sunburst, ModelGPTImage25Flare} {
+		p, ok := providers.PricingFor(model, false)
+		assert.True(t, ok, "image pricing should be registered for "+model)
+		assert.Equal(t, 5.00, p.InputPrice)
+		assert.Equal(t, 8.00, p.InputPriceByModality["image"])
+	}
+	// The dated snapshot resolves through the same stable-id fallback the text
+	// models use.
+	p, ok := providers.PricingFor(ModelGPTImage25Sunburst20260908, false)
+	assert.True(t, ok, "dated snapshot should resolve to the stable id's pricing")
+	assert.Equal(t, 30.00, p.OutputPrice)
+
+	// DALL-E has no token rates, so it stays out of the token registry.
+	_, ok = providers.PricingFor("dall-e-3", false)
+	assert.False(t, ok, "per-image models have no per-token cost to resolve")
+}

@@ -171,13 +171,57 @@ func scalePriceMap(prices map[string]float64, factor float64) map[string]float64
 	return scaled
 }
 
-// ImagePricingInfo represents pricing for image generation services
+// ImagePricingInfo represents pricing for image generation services. Providers
+// bill image generation two different ways and this type carries both, so a
+// caller can stay partitioned by modality rather than by billing unit.
 type ImagePricingInfo struct {
-	Model     string  `json:"model"`
-	Price     float64 `json:"price_per_image"` // per image (USD)
-	MaxSize   string  `json:"max_size"`        // e.g., "1024x1024"
-	Currency  string  `json:"currency"`
-	UpdatedAt string  `json:"updated_at"`
+	Model string `json:"model"`
+	// Price is the per-image list price. It is zero for models the provider
+	// bills per token, which is every current frontier image model; check
+	// TokenPricing before treating a zero here as free.
+	Price   float64 `json:"price_per_image"` // per image (USD)
+	MaxSize string  `json:"max_size"`        // e.g., "1024x1024"
+	// TokenPricing carries the per-token rates for models billed by token
+	// rather than per image, with the emitted-image rates under the "image"
+	// modality. It is nil for genuine per-image list pricing. Keeping the
+	// rates in a PricingInfo means image cost goes through the same CostOf as
+	// everything else instead of a second, parallel implementation.
+	TokenPricing *PricingInfo `json:"token_pricing,omitempty"`
+	Currency     string       `json:"currency"`
+	UpdatedAt    string       `json:"updated_at"`
+}
+
+// CostOf computes the cost of a token-billed image request. ok is false for
+// per-image models, whose cost depends on an image count rather than usage;
+// price those with Price instead.
+func (p ImagePricingInfo) CostOf(u *Usage) (Cost, bool) {
+	if p.TokenPricing == nil {
+		return Cost{}, false
+	}
+	return p.TokenPricing.CostOf(u), true
+}
+
+// CostOfImages returns the list cost of generating count images. ok is false
+// only for token-billed models, whose cost depends on the tokens the request
+// actually consumed; price those with CostOf instead. A per-image model asked
+// for zero images is priced, not unpriced, so it returns a zero Cost with ok
+// true -- a caller dispatching on ok would otherwise send an empty request
+// down the token path.
+func (p ImagePricingInfo) CostOfImages(count int) (Cost, bool) {
+	if p.Price <= 0 {
+		return Cost{}, false
+	}
+	if count < 0 {
+		count = 0
+	}
+	total := float64(count) * p.Price
+	return Cost{
+		Output:   total,
+		Total:    total,
+		Currency: p.Currency,
+		Model:    p.Model,
+		Source:   CostSourceListPriceEstimate,
+	}, true
 }
 
 // EmbeddingPricingInfo represents pricing for embedding services

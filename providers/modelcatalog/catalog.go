@@ -81,9 +81,11 @@ type Pricing struct {
 	Embedding []EmbeddingPrice `json:"embedding,omitempty"`
 }
 
-// TextPrice uses decimal strings so source prices survive JSON and code generation exactly.
-type TextPrice struct {
-	Model                        string            `json:"model"`
+// TokenPrice is the set of per-token rates a model can carry. It is separate
+// from TextPrice so an image model billed by token can reuse it verbatim
+// instead of the image table growing a second copy of every rate field.
+// Decimal strings keep source prices exact through JSON and code generation.
+type TokenPrice struct {
 	InputPrice                   string            `json:"input_price_per_1m_tokens"`
 	OutputPrice                  string            `json:"output_price_per_1m_tokens"`
 	LongContextThreshold         int               `json:"long_context_threshold_tokens,omitempty"`
@@ -99,19 +101,39 @@ type TextPrice struct {
 	OutputPriceByModality        map[string]string `json:"output_price_per_1m_tokens_by_modality,omitempty"`
 	CacheReadPriceByModality     map[string]string `json:"cache_read_price_per_1m_tokens_by_modality,omitempty"`
 	NonGlobalPriceMultiplier     string            `json:"non_global_price_multiplier,omitempty"`
-	Currency                     string            `json:"currency"`
-	UpdatedAt                    string            `json:"updated_at"`
-	Note                         string            `json:"note,omitempty"`
 }
 
-// ImagePrice describes per-image list pricing.
-type ImagePrice struct {
-	Model     string `json:"model"`
-	Price     string `json:"price_per_image"`
-	MaxSize   string `json:"max_size,omitempty"`
+// Clone returns a deep copy whose modality maps may be modified freely.
+func (p TokenPrice) Clone() TokenPrice {
+	p.InputPriceByModality = maps.Clone(p.InputPriceByModality)
+	p.OutputPriceByModality = maps.Clone(p.OutputPriceByModality)
+	p.CacheReadPriceByModality = maps.Clone(p.CacheReadPriceByModality)
+	return p
+}
+
+// TextPrice is a token-billed model's rates plus the metadata every price
+// table row carries. The embedded TokenPrice inlines into the same JSON object,
+// so catalog.json is unchanged by the split.
+type TextPrice struct {
+	Model string `json:"model"`
+	TokenPrice
 	Currency  string `json:"currency"`
 	UpdatedAt string `json:"updated_at"`
 	Note      string `json:"note,omitempty"`
+}
+
+// ImagePrice describes an image model's list pricing. Exactly one of Price and
+// TokenPricing is set: providers bill image generation either per image or per
+// token, and recording a token rate as a per-image constant means picking one
+// output resolution and being wrong at every other.
+type ImagePrice struct {
+	Model        string      `json:"model"`
+	Price        string      `json:"price_per_image,omitempty"`
+	MaxSize      string      `json:"max_size,omitempty"`
+	TokenPricing *TokenPrice `json:"token_pricing,omitempty"`
+	Currency     string      `json:"currency"`
+	UpdatedAt    string      `json:"updated_at"`
+	Note         string      `json:"note,omitempty"`
 }
 
 // EmbeddingPrice describes per-million-token embedding pricing.
@@ -172,12 +194,16 @@ func (c Catalog) Clone() Catalog {
 		clone.Pricing.FastText,
 	} {
 		for i := range prices {
-			prices[i].InputPriceByModality = maps.Clone(prices[i].InputPriceByModality)
-			prices[i].OutputPriceByModality = maps.Clone(prices[i].OutputPriceByModality)
-			prices[i].CacheReadPriceByModality = maps.Clone(prices[i].CacheReadPriceByModality)
+			prices[i].TokenPrice = prices[i].TokenPrice.Clone()
 		}
 	}
 	clone.Pricing.Image = slices.Clone(c.Pricing.Image)
+	for i := range clone.Pricing.Image {
+		if rates := clone.Pricing.Image[i].TokenPricing; rates != nil {
+			cloned := rates.Clone()
+			clone.Pricing.Image[i].TokenPricing = &cloned
+		}
+	}
 	clone.Pricing.Embedding = slices.Clone(c.Pricing.Embedding)
 	return clone
 }
@@ -324,60 +350,69 @@ func validateTextPrices(name string, prices []TextPrice) error {
 		if err := validatePriceCommon(name, price.Model, price.Currency, price.UpdatedAt, seen); err != nil {
 			return err
 		}
-		for field, value := range map[string]string{
-			"input_price_per_1m_tokens":                      price.InputPrice,
-			"output_price_per_1m_tokens":                     price.OutputPrice,
-			"long_context_input_price_per_1m_tokens":         price.LongContextInputPrice,
-			"long_context_cache_read_price_per_1m_tokens":    price.LongContextCacheReadPrice,
-			"long_context_output_price_per_1m_tokens":        price.LongContextOutputPrice,
-			"long_context_cache_write_price_per_1m_tokens":   price.LongContextCacheWritePrice,
-			"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
-			"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
-			"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
-			"non_global_price_multiplier":                    price.NonGlobalPriceMultiplier,
-		} {
-			if err := validateDecimal(name, price.Model, field, value, field == "input_price_per_1m_tokens" || field == "output_price_per_1m_tokens"); err != nil {
+		if err := validateTokenPrice(name, price.Model, price.TokenPrice); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateTokenPrice checks the per-token rates shared by the text tables and
+// by image models their provider bills per token.
+func validateTokenPrice(name, model string, price TokenPrice) error {
+	for field, value := range map[string]string{
+		"input_price_per_1m_tokens":                      price.InputPrice,
+		"output_price_per_1m_tokens":                     price.OutputPrice,
+		"long_context_input_price_per_1m_tokens":         price.LongContextInputPrice,
+		"long_context_cache_read_price_per_1m_tokens":    price.LongContextCacheReadPrice,
+		"long_context_output_price_per_1m_tokens":        price.LongContextOutputPrice,
+		"long_context_cache_write_price_per_1m_tokens":   price.LongContextCacheWritePrice,
+		"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
+		"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
+		"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
+		"non_global_price_multiplier":                    price.NonGlobalPriceMultiplier,
+	} {
+		if err := validateDecimal(name, model, field, value, field == "input_price_per_1m_tokens" || field == "output_price_per_1m_tokens"); err != nil {
+			return err
+		}
+	}
+	for field, prices := range map[string]map[string]string{
+		"input_price_per_1m_tokens_by_modality":      price.InputPriceByModality,
+		"output_price_per_1m_tokens_by_modality":     price.OutputPriceByModality,
+		"cache_read_price_per_1m_tokens_by_modality": price.CacheReadPriceByModality,
+	} {
+		for modality, value := range prices {
+			if modality == "" || strings.ToLower(modality) != modality {
+				return fmt.Errorf("%s pricing for %s has an invalid modality %q in %s", name, model, modality, field)
+			}
+			if err := validateDecimal(name, model, field+"/"+modality, value, true); err != nil {
 				return err
 			}
 		}
-		for field, prices := range map[string]map[string]string{
-			"input_price_per_1m_tokens_by_modality":      price.InputPriceByModality,
-			"output_price_per_1m_tokens_by_modality":     price.OutputPriceByModality,
-			"cache_read_price_per_1m_tokens_by_modality": price.CacheReadPriceByModality,
-		} {
-			for modality, value := range prices {
-				if modality == "" || strings.ToLower(modality) != modality {
-					return fmt.Errorf("%s pricing for %s has an invalid modality %q in %s", name, price.Model, modality, field)
-				}
-				if err := validateDecimal(name, price.Model, field+"/"+modality, value, true); err != nil {
-					return err
-				}
-			}
+	}
+	if price.NonGlobalPriceMultiplier != "" {
+		multiplier, _ := strconv.ParseFloat(price.NonGlobalPriceMultiplier, 64)
+		if multiplier <= 0 {
+			return fmt.Errorf("%s pricing for %s requires a positive non-global price multiplier", name, model)
 		}
-		if price.NonGlobalPriceMultiplier != "" {
-			multiplier, _ := strconv.ParseFloat(price.NonGlobalPriceMultiplier, 64)
-			if multiplier <= 0 {
-				return fmt.Errorf("%s pricing for %s requires a positive non-global price multiplier", name, price.Model)
-			}
-		}
-		hasThreshold := price.CacheReadPriceThreshold != 0
-		hasPriceAboveThreshold := price.CacheReadPriceAboveThreshold != ""
-		if hasThreshold != hasPriceAboveThreshold || price.CacheReadPriceThreshold < 0 {
-			return fmt.Errorf("%s pricing for %s requires a positive cache-read threshold and above-threshold price together", name, price.Model)
-		}
-		hasLongThreshold := price.LongContextThreshold != 0
-		hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != "" || price.LongContextCacheWritePrice != ""
-		if hasLongThreshold != hasLongPrices || price.LongContextThreshold < 0 {
-			return fmt.Errorf("%s pricing for %s requires a positive long-context threshold and long-context prices together", name, price.Model)
-		}
-		if hasLongThreshold && (price.LongContextInputPrice == "" || price.LongContextCacheReadPrice == "" || price.LongContextOutputPrice == "") {
-			return fmt.Errorf("%s pricing for %s requires input, cache-read, and output long-context prices", name, price.Model)
-		}
-		// The long-context cache-write rate is optional: a model that does not
-		// surcharge writes at all has no rate to raise past the threshold.
-		if price.LongContextCacheWritePrice != "" && price.CacheWritePrice == "" {
-			return fmt.Errorf("%s pricing for %s has a long-context cache-write price without a standard one", name, price.Model)
-		}
+	}
+	hasThreshold := price.CacheReadPriceThreshold != 0
+	hasPriceAboveThreshold := price.CacheReadPriceAboveThreshold != ""
+	if hasThreshold != hasPriceAboveThreshold || price.CacheReadPriceThreshold < 0 {
+		return fmt.Errorf("%s pricing for %s requires a positive cache-read threshold and above-threshold price together", name, model)
+	}
+	hasLongThreshold := price.LongContextThreshold != 0
+	hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != "" || price.LongContextCacheWritePrice != ""
+	if hasLongThreshold != hasLongPrices || price.LongContextThreshold < 0 {
+		return fmt.Errorf("%s pricing for %s requires a positive long-context threshold and long-context prices together", name, model)
+	}
+	if hasLongThreshold && (price.LongContextInputPrice == "" || price.LongContextCacheReadPrice == "" || price.LongContextOutputPrice == "") {
+		return fmt.Errorf("%s pricing for %s requires input, cache-read, and output long-context prices", name, model)
+	}
+	// The long-context cache-write rate is optional: a model that does not
+	// surcharge writes at all has no rate to raise past the threshold.
+	if price.LongContextCacheWritePrice != "" && price.CacheWritePrice == "" {
+		return fmt.Errorf("%s pricing for %s has a long-context cache-write price without a standard one", name, model)
 	}
 	return nil
 }
@@ -387,6 +422,20 @@ func validateImagePrices(prices []ImagePrice) error {
 	for _, price := range prices {
 		if err := validatePriceCommon("image", price.Model, price.Currency, price.UpdatedAt, seen); err != nil {
 			return err
+		}
+		// A model is billed one way or the other. Carrying both invites the
+		// two to drift, and carrying neither leaves the row priceless.
+		if (price.Price == "") == (price.TokenPricing == nil) {
+			return fmt.Errorf("image pricing for %s must set exactly one of price_per_image or token_pricing", price.Model)
+		}
+		if price.TokenPricing != nil {
+			if price.MaxSize != "" {
+				return fmt.Errorf("image pricing for %s sets max_size, which only qualifies a per-image price", price.Model)
+			}
+			if err := validateTokenPrice("image", price.Model, *price.TokenPricing); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := validateDecimal("image", price.Model, "price_per_image", price.Price, true); err != nil {
 			return err

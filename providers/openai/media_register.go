@@ -3,7 +3,8 @@ package openai
 import "github.com/deepnoodle-ai/dive/media"
 
 func init() {
-	// gpt-image-2, gpt-image-1.5, gpt-image-1, gpt-image-1-mini
+	// gpt-image-2.5-sunburst, gpt-image-2.5-flare, gpt-image-2, gpt-image-1.5,
+	// gpt-image-1, gpt-image-1-mini
 	media.RegisterImage(media.ImageProviderEntry{
 		Name:  "openai",
 		Match: media.PrefixMatcher("gpt-image-"),

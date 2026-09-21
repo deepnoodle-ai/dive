@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // ImageResult is the output of an image generation or edit operation.
@@ -30,6 +32,13 @@ type ImageResult struct {
 
 	// Metadata contains provider-specific metadata.
 	Metadata map[string]any
+
+	// Usage is the token usage of the request that produced this image, with
+	// Cost attached when the model's rates are known. It is nil for providers
+	// that bill per image or report no usage. A request for several images
+	// reports usage once, on the first result, because the provider bills the
+	// request rather than each image.
+	Usage *llm.Usage
 
 	// Err is non-nil if this result represents a provider failure
 	// during fan-out generation. Other fields may be empty.
