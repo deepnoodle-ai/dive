@@ -89,16 +89,7 @@ TARGETS: dict[str, Target] = {
         "mistral",
         REPO_ROOT / "providers" / "mistral",
         "mistral",
-        (
-            TEXT,
-            Table("image", "ImageModelPricing", "ImagePricingInfo", "image"),
-            Table(
-                "embedding",
-                "EmbeddingModelPricing",
-                "EmbeddingPricingInfo",
-                "embedding",
-            ),
-        ),
+        (TEXT, IMAGE, EMBEDDING),
     ),
     "ollama": Target(
         "ollama",
@@ -649,11 +640,20 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                 if entry.get("max_size"):
                     lines.append(f"\t\tMaxSize: {go_string(entry['max_size'])},")
                 if entry.get("token_pricing"):
+                    # Only llm.ImagePricingInfo has a TokenPricing field, so a
+                    # provider-local image type cannot carry token rates. Fail
+                    # here rather than emitting Go that names a type the target
+                    # package does not define.
+                    if table.go_type != LLM_IMAGE:
+                        raise CatalogError(
+                            f"{target.name}: {table.go_name}/{entry['model']} has "
+                            f"token_pricing, which requires {LLM_IMAGE}, not "
+                            f"{table.go_type}"
+                        )
                     # The nested PricingInfo repeats the row's model and
                     # currency so the Cost it returns is labelled like any
                     # other, rather than coming back anonymous.
-                    token_type = table.go_type.replace("ImagePricingInfo", "PricingInfo")
-                    lines.append(f"\t\tTokenPricing: &{token_type}{{")
+                    lines.append(f"\t\tTokenPricing: &{LLM_TEXT}{{")
                     lines.append(f"\t\t\tModel: {key},")
                     lines.extend(render_token_rates(entry["token_pricing"], "\t\t\t"))
                     lines.extend(

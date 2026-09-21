@@ -775,7 +775,7 @@
         },
         "currency": "USD",
         "updated_at": "2026-09-17",
-        "note": "OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M\nimage input ($1.25 and $2.00 cached), with generated images billed as output tokens\nat $30.00/1M. The model emits no text, so no text output rate applies."
+        "note": "OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M\nimage input ($1.25 and $2.00 cached), with generated images billed as output tokens\nat $30.00/1M. The model emits no text, so the image rate sits in the base output slot\nrather than under the \"image\" modality the way Gemini's rows do -- that way a request\npriced without a modality breakdown still bills at the image rate instead of silently\nat zero."
       },
       {
         "model": "gpt-image-2.5-flare",
@@ -792,7 +792,7 @@
         },
         "currency": "USD",
         "updated_at": "2026-09-17",
-        "note": "OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M\nimage input ($1.25 and $2.00 cached), with generated images billed as output tokens\nat $30.00/1M. The model emits no text, so no text output rate applies."
+        "note": "OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M\nimage input ($1.25 and $2.00 cached), with generated images billed as output tokens\nat $30.00/1M. The model emits no text, so the image rate sits in the base output slot\nrather than under the \"image\" modality the way Gemini's rows do -- that way a request\npriced without a modality breakdown still bills at the image rate instead of silently\nat zero."
       },
       {
         "model": "dall-e-3",

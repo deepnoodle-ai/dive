@@ -202,11 +202,17 @@ func (p ImagePricingInfo) CostOf(u *Usage) (Cost, bool) {
 }
 
 // CostOfImages returns the list cost of generating count images. ok is false
-// for token-billed models, whose cost depends on the tokens the request
-// actually consumed; price those with CostOf instead.
+// only for token-billed models, whose cost depends on the tokens the request
+// actually consumed; price those with CostOf instead. A per-image model asked
+// for zero images is priced, not unpriced, so it returns a zero Cost with ok
+// true -- a caller dispatching on ok would otherwise send an empty request
+// down the token path.
 func (p ImagePricingInfo) CostOfImages(count int) (Cost, bool) {
-	if p.Price <= 0 || count <= 0 {
+	if p.Price <= 0 {
 		return Cost{}, false
+	}
+	if count < 0 {
+		count = 0
 	}
 	total := float64(count) * p.Price
 	return Cost{

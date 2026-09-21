@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   and `CostOfImages` picking the right one. Catalog key: `token_pricing`.
 - **Token-billed image models resolve through the pricing registry**, so
   `llm.PopulateCost` can price an image request. Per-image models stay out.
+- **`media.ImageResult.Usage`** carries the token usage of the request that
+  produced the image, with `Cost` attached. Set on the first result only, since
+  the provider bills the request rather than each image.
+- **OpenAI image requests report their text/image token split.** `GenerateImage`
+  and `EditImage` now convert the Images endpoint's usage, so GPT-Image-2.5
+  bills image input at $8.00/1M instead of the $5.00 text rate.
 - **OpenAI GPT-Image-2.5.** `ModelGPTImage25Sunburst` and `ModelGPTImage25Flare`
   plus their `2026-09-08` snapshots, at $5 text in, $8 image in, $30 image out
   per 1M.
@@ -36,6 +42,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`modelcatalog.TextPrice` embeds the new `TokenPrice`** so image rows can
   reuse the rate fields. JSON and field access are unchanged; only unkeyed
   struct literals would need updating.
+- **`llm.ImagePricingInfo.Price` is now zero for every Gemini image model** and
+  for the new OpenAI ones, because their provider bills by token. Code doing
+  `Price * count` silently reports `$0.00`; switch to `CostOf(usage)`, or use
+  `CostOfImages`, which reports `ok == false` for these models.
+- **`CostOfImages` no longer reports `ok == false` for a zero image count.** A
+  per-image model asked for zero images returns a zero `Cost` with `ok == true`;
+  only token-billed models return false.
+- **Mistral's `ImagePricingInfo` and `EmbeddingPricingInfo` are gone**, replaced
+  by the shared `llm` types every other provider already used. Both tables are
+  empty, so only the type names change.
 
 ## [1.29.0] - 2026-09-09
 

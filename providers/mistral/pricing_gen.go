@@ -161,7 +161,7 @@ var TextModelPricing = map[string]llm.PricingInfo{
 }
 
 // ImageModelPricing is generated from catalog.json.
-var ImageModelPricing = map[string]ImagePricingInfo{}
+var ImageModelPricing = map[string]llm.ImagePricingInfo{}
 
 // EmbeddingModelPricing is generated from catalog.json.
-var EmbeddingModelPricing = map[string]EmbeddingPricingInfo{}
+var EmbeddingModelPricing = map[string]llm.EmbeddingPricingInfo{}

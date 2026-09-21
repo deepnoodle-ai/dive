@@ -281,7 +281,10 @@ var TextModelPricing = map[string]llm.PricingInfo{
 var ImageModelPricing = map[string]llm.ImagePricingInfo{
 	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
 	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
-	// at $30.00/1M. The model emits no text, so no text output rate applies.
+	// at $30.00/1M. The model emits no text, so the image rate sits in the base output slot
+	// rather than under the "image" modality the way Gemini's rows do -- that way a request
+	// priced without a modality breakdown still bills at the image rate instead of silently
+	// at zero.
 	ModelGPTImage25Sunburst: {
 		Model: ModelGPTImage25Sunburst,
 		TokenPricing: &llm.PricingInfo{
@@ -299,7 +302,10 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 	},
 	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
 	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
-	// at $30.00/1M. The model emits no text, so no text output rate applies.
+	// at $30.00/1M. The model emits no text, so the image rate sits in the base output slot
+	// rather than under the "image" modality the way Gemini's rows do -- that way a request
+	// priced without a modality breakdown still bills at the image rate instead of silently
+	// at zero.
 	ModelGPTImage25Flare: {
 		Model: ModelGPTImage25Flare,
 		TokenPricing: &llm.PricingInfo{
