@@ -80,3 +80,24 @@ func TestGenerateEmptyContentWithPrefill(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, resp.Content, 0)
 }
+
+// Stream applies a prefill only when a text block arrives; Generate matches it
+// for a response that is only a tool call.
+func TestGenerateToolUseOnlyWithPrefill(t *testing.T) {
+	server := emptyContentServer(t, `{
+		"id": "msg_4", "type": "message", "role": "assistant",
+		"model": "claude-haiku-4-5", "stop_reason": "tool_use",
+		"content": [{"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Paris"}}],
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`)
+	provider := New(WithEndpoint(server.URL), WithAPIKey("test-key"))
+
+	resp, err := provider.Generate(context.Background(),
+		llm.WithModel("claude-haiku-4-5"),
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithPrefill("{", ""),
+	)
+
+	assert.NoError(t, err)
+	assert.Len(t, resp.ToolCalls(), 1)
+}

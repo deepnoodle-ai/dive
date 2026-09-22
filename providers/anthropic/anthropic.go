@@ -146,7 +146,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	// tool_choice "none" with no blocks, and a refusal can arrive with none.
 	// Stream already returns these, and StopReason says why.
 	finalizeUsage(config, request.Model, &result.Usage)
-	if config.Prefill != "" && len(result.Content) > 0 {
+	if config.Prefill != "" {
 		if err := addPrefill(result.Content, config.Prefill, config.PrefillClosingTag); err != nil {
 			return nil, err
 		}
