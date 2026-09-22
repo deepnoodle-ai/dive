@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-09-22
+
 ### Added
 
 - **Claude Opus 5.5.** `anthropic.ModelClaudeOpus55` (`claude-opus-5-5`) and
