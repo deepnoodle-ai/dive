@@ -34,6 +34,9 @@ func reorderMessageContent(messages []*llm.Message) {
 	}
 }
 
+// addPrefill prepends the prefill to the first text block. A response with no
+// text block (empty, or only tool calls) has nothing to prepend it to and is
+// returned as is, matching Stream.
 func addPrefill(blocks []llm.Content, prefill, closingTag string) error {
 	if prefill == "" {
 		return nil
@@ -48,5 +51,5 @@ func addPrefill(blocks []llm.Content, prefill, closingTag string) error {
 			return fmt.Errorf("prefill closing tag not found")
 		}
 	}
-	return fmt.Errorf("no text content found in message")
+	return nil
 }

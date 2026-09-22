@@ -142,9 +142,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
-	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty response from anthropic api")
-	}
+	// Empty content is a valid response, not a failure: Opus 5.5 answers
+	// tool_choice "none" with no blocks, and a refusal can arrive with none.
+	// Stream already returns these, and StopReason says why.
 	finalizeUsage(config, request.Model, &result.Usage)
 	if config.Prefill != "" {
 		if err := addPrefill(result.Content, config.Prefill, config.PrefillClosingTag); err != nil {
