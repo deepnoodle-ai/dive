@@ -8,6 +8,8 @@ import (
 
 const (
 	ModelGPT6Astra          openaisdk.ChatModel = "gpt-6-astra"
+	ModelGPT6Sol            openaisdk.ChatModel = "gpt-6-sol"
+	ModelGPT6Luna           openaisdk.ChatModel = "gpt-6-luna"
 	ModelGPT56                                  = "gpt-5.6"
 	ModelGPT56Sol           openaisdk.ChatModel = "gpt-5.6-sol"
 	ModelGPT56Terra         openaisdk.ChatModel = "gpt-5.6-terra"
@@ -73,4 +75,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGPT56Sol
+var DefaultModel = ModelGPT6Sol

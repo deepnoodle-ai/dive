@@ -76,9 +76,28 @@ func TestGPT6AstraLongContextPricing(t *testing.T) {
 	assert.Equal(t, shortWrite.CacheWrite, 1.25)
 }
 
+// GPT-6 Sol and Luna follow Astra's long-context rule.
+func TestGPT6SolAndLunaPricing(t *testing.T) {
+	for model, want := range map[string][4]float64{
+		ModelGPT6Sol:  {2.00, 0.20, 2.50, 10.00},
+		ModelGPT6Luna: {0.10, 0.01, 0.125, 0.50},
+	} {
+		p, ok := TextModelPricing[model]
+		assert.True(t, ok, "pricing should exist for "+model)
+		assert.Equal(t, want, [4]float64{p.InputPrice, p.CacheReadPrice, p.CacheWritePrice, p.OutputPrice})
+		assert.Equal(t, p.LongContextThreshold, 272_001)
+		assert.Equal(t, p.LongContextInputPrice, p.InputPrice*2)
+		assert.Equal(t, p.LongContextCacheReadPrice, p.CacheReadPrice*2)
+		assert.Equal(t, p.LongContextCacheWritePrice, p.CacheWritePrice*2)
+		assert.Equal(t, p.LongContextOutputPrice, p.OutputPrice*1.5)
+	}
+}
+
 func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	expected := map[string]float64{
 		ModelGPT6Astra:          1.00,
+		ModelGPT6Sol:            0.20,
+		ModelGPT6Luna:           0.01,
 		ModelGPT56:              0.40,
 		ModelGPT56Sol:           0.40,
 		ModelGPT56Terra:         0.20,
@@ -109,6 +128,8 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	// generated view is expected to omit them.
 	responsesOnly := map[string]string{
 		ModelGPT6Astra:          "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",
+		ModelGPT6Sol:            "Chat Completions rejects function tools with GPT-6 Sol unless reasoning_effort is none, so the model is Responses-only",
+		ModelGPT6Luna:           "Chat Completions rejects function tools with GPT-6 Luna unless reasoning_effort is none, so the model is Responses-only",
 		ModelGPT56Cyber:         "the Daybreak cybersecurity models are documented on v1/responses only",
 		ModelDaybreakBlueLatest: "the Daybreak cybersecurity models are documented on v1/responses only",
 		ModelDaybreakRedLatest:  "the Daybreak cybersecurity models are documented on v1/responses only",
