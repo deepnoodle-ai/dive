@@ -256,12 +256,59 @@ func TestApplyRequestConfig_NormalizesReasoningEffortForTools(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			name:         "openai-prefixed gpt-5.4-mini uses none with function tools",
-			model:        "openai/gpt-5.4-mini",
-			effort:       llm.ReasoningEffortMedium,
+			name:         "gpt-5.4 uses none with function tools",
+			model:        ModelGPT54,
+			effort:       llm.ReasoningEffortHigh,
 			withTools:    true,
 			want:         ReasoningEffortNone,
 			wantWarnings: 1,
+		},
+		{
+			name:         "gpt-5.6-sol uses none with function tools",
+			model:        ModelGPT56Sol,
+			effort:       llm.ReasoningEffortMax,
+			withTools:    true,
+			want:         ReasoningEffortNone,
+			wantWarnings: 1,
+		},
+		{
+			// gpt-5.6 defaults to a reasoning effort, so an unset effort is
+			// rejected with tools just like an explicit one. No warning: the
+			// caller asked for nothing.
+			name:      "gpt-5.6 sends none with function tools when effort is unset",
+			model:     ModelGPT56,
+			withTools: true,
+			want:      ReasoningEffortNone,
+		},
+		{
+			name:      "gpt-6-luna sends none with function tools when effort is unset",
+			model:     "gpt-6-luna",
+			withTools: true,
+			want:      ReasoningEffortNone,
+		},
+		{
+			// gpt-6-astra rejects none outright, so there is nothing to fall
+			// back to; the request is sent as asked.
+			name:      "gpt-6-astra keeps its effort with function tools",
+			model:     "gpt-6-astra",
+			effort:    llm.ReasoningEffortHigh,
+			withTools: true,
+			want:      ReasoningEffortHigh,
+		},
+		{
+			// OpenRouter routes openai/ ids to the Responses API, which takes
+			// reasoning with tools.
+			name:      "openai-prefixed gpt-5.4-mini keeps reasoning with function tools",
+			model:     "openai/gpt-5.4-mini",
+			effort:    llm.ReasoningEffortMedium,
+			withTools: true,
+			want:      ReasoningEffortMedium,
+		},
+		{
+			name:      "openai-prefixed gpt-5.6 leaves effort unset with function tools",
+			model:     "openai/gpt-5.6",
+			withTools: true,
+			want:      ReasoningEffort(""),
 		},
 		{
 			name:      "gpt-5.4-mini preserves reasoning without tools",
@@ -271,8 +318,14 @@ func TestApplyRequestConfig_NormalizesReasoningEffortForTools(t *testing.T) {
 			want:      ReasoningEffortHigh,
 		},
 		{
-			name:      "gpt-5.4 preserves reasoning with tools",
-			model:     ModelGPT54,
+			name:      "gpt-5.6 leaves effort unset without tools",
+			model:     ModelGPT56,
+			withTools: false,
+			want:      ReasoningEffort(""),
+		},
+		{
+			name:      "gpt-5.2 preserves reasoning with tools",
+			model:     "gpt-5.2",
 			effort:    llm.ReasoningEffortHigh,
 			withTools: true,
 			want:      ReasoningEffortHigh,

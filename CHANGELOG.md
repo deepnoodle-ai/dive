@@ -44,6 +44,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`ThinkingDisplay` was dropped on models that think by default.** Set
   without `Thinking` on Opus 5, Opus 5.5, Sonnet 5, Fable, or Mythos, it now
   goes out on an adaptive thinking config.
+- **GPT-5.6 tool calls failed on Chat Completions.** OpenAI refuses function
+  tools there unless effort is `none`, for gpt-5.4 through gpt-6. Dive now sends
+  `none` whenever tools are present. OpenRouter keeps the requested effort.
 
 ## [1.30.0] - 2026-09-21
 
