@@ -21,6 +21,28 @@ type Response struct {
 	Type              string                     `json:"type"`
 	Usage             Usage                      `json:"usage"`
 	ContextManagement *ContextManagementResponse `json:"context_management,omitempty"`
+	// InputTransformations lists changes the provider made to the request
+	// input before the model read it. Anthropic reports thinking blocks it
+	// dropped or let through despite a mismatch, when the
+	// thinking-binding-controls beta is on.
+	InputTransformations []InputTransformation `json:"input_transformations,omitempty"`
+}
+
+// InputTransformation describes one change the provider made to the request
+// input. Ignore entries whose Type or Reason you don't recognize; providers add
+// values over time.
+type InputTransformation struct {
+	// Type is "thinking_dropped" (the model did not read the block) or
+	// "thinking_mismatch_allowed" (the block failed a check the provider did
+	// not enforce, and the model read it).
+	Type string `json:"type"`
+	// Path locates the block in the request as sent, such as
+	// "messages.3.content.0". Indexes can differ from the caller's messages,
+	// since providers drop empty messages before sending.
+	Path string `json:"path,omitempty"`
+	// Reason is "model_binding_mismatch" (the block came from another model)
+	// or "prefix_binding_mismatch" (something before the block changed).
+	Reason string `json:"reason,omitempty"`
 }
 
 // StopDetails provides additional structured detail about why generation
@@ -75,10 +97,11 @@ func (r *Response) ToolCalls() []*ToolUseContent {
 	for _, content := range r.Content {
 		if toolUse, ok := content.(*ToolUseContent); ok {
 			toolCalls = append(toolCalls, &ToolUseContent{
-				ID:       toolUse.ID,    // e.g. "toolu_01A09q90qw90lq917835lq9"
-				Name:     toolUse.Name,  // tool name e.g. "get_weather"
-				Input:    toolUse.Input, // tool call input JSON
-				Metadata: toolUse.Metadata.Clone(),
+				ID:          toolUse.ID,   // e.g. "toolu_01A09q90qw90lq917835lq9"
+				Name:        toolUse.Name, // tool name e.g. "get_weather"
+				ToolsetName: toolUse.ToolsetName,
+				Input:       toolUse.Input, // tool call input JSON
+				Metadata:    toolUse.Metadata.Clone(),
 			})
 		}
 	}
@@ -89,16 +112,17 @@ func (r *Response) ToolCalls() []*ToolUseContent {
 // the polymorphic Content field.
 func (r *Response) UnmarshalJSON(data []byte) error {
 	type tempResponse struct {
-		ID                string                     `json:"id"`
-		Model             string                     `json:"model"`
-		Role              Role                       `json:"role"`
-		Content           []json.RawMessage          `json:"content"`
-		StopReason        string                     `json:"stop_reason"`
-		StopSequence      *string                    `json:"stop_sequence,omitempty"`
-		StopDetails       *StopDetails               `json:"stop_details,omitempty"`
-		Type              string                     `json:"type"`
-		Usage             Usage                      `json:"usage"`
-		ContextManagement *ContextManagementResponse `json:"context_management,omitempty"`
+		ID                   string                     `json:"id"`
+		Model                string                     `json:"model"`
+		Role                 Role                       `json:"role"`
+		Content              []json.RawMessage          `json:"content"`
+		StopReason           string                     `json:"stop_reason"`
+		StopSequence         *string                    `json:"stop_sequence,omitempty"`
+		StopDetails          *StopDetails               `json:"stop_details,omitempty"`
+		Type                 string                     `json:"type"`
+		Usage                Usage                      `json:"usage"`
+		ContextManagement    *ContextManagementResponse `json:"context_management,omitempty"`
+		InputTransformations []InputTransformation      `json:"input_transformations,omitempty"`
 	}
 
 	// Unmarshal JSON into the temporary struct
@@ -117,6 +141,7 @@ func (r *Response) UnmarshalJSON(data []byte) error {
 	r.Type = tmp.Type
 	r.Usage = tmp.Usage
 	r.ContextManagement = tmp.ContextManagement
+	r.InputTransformations = tmp.InputTransformations
 
 	// Process each content item
 	r.Content = make([]Content, 0, len(tmp.Content))

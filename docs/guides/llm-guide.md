@@ -170,7 +170,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 | `ReasoningBudget`   | `*int`                | Manual thinking budget (o-series, older Claude)  |
 | `ReasoningEffort`   | `llm.ReasoningEffort` | none, minimal, low, medium, high, xhigh, max     |
 | `Thinking`          | `llm.ThinkingType`    | adaptive, enabled, or disabled extended thinking |
-| `ThinkingDisplay`   | `llm.ThinkingDisplay` | summarized or omitted thinking content           |
+| `ThinkingDisplay`   | `llm.ThinkingDisplay` | summarized, omitted, or updates (Claude beta)    |
 | `Speed`             | `llm.Speed`           | fast or standard (Claude fast mode)              |
 | `Caching`           | `*bool`               | Enable prompt caching (Claude)                   |
 | `ParallelToolCalls` | `*bool`               | Allow simultaneous tool calls                    |
@@ -227,6 +227,39 @@ changes with extended thinking.
 `output_tokens_details.thinking_tokens` value when it is present. Fast mode
 (`Speed: llm.SpeedFast`) requires fast-mode access on your account and applies
 the `fast-mode-2026-02-01` beta header automatically.
+
+### Claude Beta Controls
+
+Each of these sends its beta header automatically.
+
+- **Progress updates.** `ThinkingDisplayUpdates` keeps reasoning hidden but
+  returns the short updates Opus 5.5, Fable 5.1, and Mythos 5.1 write between
+  tool calls as `thinking` blocks with text. Render the blocks that have text.
+  On models that think by default, Dive sends the adaptive thinking config the
+  display needs.
+- **Per-message effort.** Append `llm.NewEffortMessage(llm.ReasoningEffortLow)`
+  to the conversation to change effort from the next user turn onward without
+  restarting the prompt cache (Opus 5, Opus 5.5, Fable 5.1, Mythos 5.1). The
+  message stays in the history; other models and providers skip it.
+- **Thinking block binding.** On Opus 5.5 and Fable 5.1, editing the system
+  prompt, tools, or earlier messages invalidates the thinking blocks after the
+  edit, and newer accounts get a 400. Keep conversations append-only, or create
+  the provider with
+  `anthropic.WithPrefixMismatchBehavior(anthropic.PrefixMismatchDropBlock)` to
+  drop those blocks instead. `Response.InputTransformations` lists what was
+  dropped. Enabling `anthropic.FeatureThinkingBindingControls` alone reports
+  mismatches without enforcing anything.
+
+### Computer Use On Claude
+
+`anthropic.NewComputerToolset` declares the `computer_toolset_20260801`
+toolset, the only computer use Opus 5.5 accepts on the Claude API. Each action
+is its own tool call: `ToolUseContent.Name` is the member (`left_click`,
+`screenshot`) and `ToolsetName` is `"computer"`. Run a batch in order, stop at
+the first failure, and answer the remaining calls with
+`anthropic.ComputerToolsetHaltText`. The provider adds the toolset name to
+each result. `anthropic.NewComputerTool` still declares the earlier
+`computer_20251124` tool for other models.
 
 ## Provider Registry
 

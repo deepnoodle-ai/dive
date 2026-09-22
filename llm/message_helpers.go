@@ -23,6 +23,20 @@ func NewUserTextMessage(text string) *Message {
 	}
 }
 
+// NewEffortMessage creates a system message with no content that changes the
+// reasoning effort from the next user turn onward. Append it to the
+// conversation where the change should take effect; it stays in the history
+// and holds until a later effort message changes it again. Unlike changing the
+// request's effort (WithReasoningEffort), it leaves earlier turns untouched, so
+// the prompt cache keeps matching.
+//
+// Anthropic supports it on Opus 5, Opus 5.5, Fable 5.1, and Mythos 5.1 as a
+// beta, and the provider sends the beta header. Providers and models without
+// per-message effort skip the message.
+func NewEffortMessage(effort ReasoningEffort) *Message {
+	return &Message{Role: System, Content: []Content{}, Effort: effort}
+}
+
 // NewSystemMessage creates a system message with a single text content block.
 func NewSystemMessage(text string) *Message {
 	return &Message{
@@ -74,9 +88,10 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	content := make([]Content, len(outputs))
 	for i, output := range outputs {
 		content[i] = &ToolResultContent{
-			ToolUseID: output.ToolUseID,
-			Content:   output.Content,
-			IsError:   output.IsError,
+			ToolUseID:   output.ToolUseID,
+			ToolsetName: output.ToolsetName,
+			Content:     output.Content,
+			IsError:     output.IsError,
 		}
 	}
 	return &Message{Role: User, Content: content}

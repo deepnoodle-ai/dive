@@ -360,6 +360,11 @@ const (
 	// Opus 4.7, and Opus 4.8, and reduces time-to-first text token when
 	// streaming.
 	ThinkingDisplayOmitted ThinkingDisplay = "omitted"
+	// ThinkingDisplayUpdates returns reasoning blocks empty, as with
+	// ThinkingDisplayOmitted, but fills in the progress updates that Opus 5.5,
+	// Fable 5.1, and Mythos 5.1 write between tool calls. Anthropic beta; the
+	// provider sends the beta header.
+	ThinkingDisplayUpdates ThinkingDisplay = "updates"
 )
 
 // WithThinking sets the extended thinking mode for the interaction.

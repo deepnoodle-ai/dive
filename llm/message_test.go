@@ -214,3 +214,35 @@ func TestMessageJSONRoundTripPreservesProviderMetadata(t *testing.T) {
 	text.Metadata["example.phase"] = "final_answer"
 	assert.Equal(t, "commentary", reloaded.Content[0].(*TextContent).Metadata["example.phase"])
 }
+
+// An effort message is saved with the session, so its level must survive the
+// JSON round trip and Copy.
+func TestEffortMessageRoundTrip(t *testing.T) {
+	msg := NewEffortMessage(ReasoningEffortLow)
+	data, err := json.Marshal(msg)
+	assert.NoError(t, err)
+	assert.Equal(t, `{"role":"system","content":null,"effort":"low"}`, string(data))
+
+	var decoded Message
+	assert.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, System, decoded.Role)
+	assert.Equal(t, ReasoningEffortLow, decoded.Effort)
+	assert.Len(t, decoded.Content, 0)
+
+	assert.Equal(t, ReasoningEffortLow, msg.Copy().Effort)
+}
+
+// A toolset member's call and result must keep toolset_name through session
+// persistence, or the replayed conversation is rejected.
+func TestToolsetNameRoundTrip(t *testing.T) {
+	original := []*Message{
+		NewAssistantMessage(&ToolUseContent{ID: "toolu_1", Name: "left_click", ToolsetName: "computer", Input: json.RawMessage(`{}`)}),
+		NewToolResultMessage(&ToolResultContent{ToolUseID: "toolu_1", ToolsetName: "computer", Content: "OK"}),
+	}
+	data, err := json.Marshal(original)
+	assert.NoError(t, err)
+	var decoded []*Message
+	assert.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "computer", decoded[0].Content[0].(*ToolUseContent).ToolsetName)
+	assert.Equal(t, "computer", decoded[1].Content[0].(*ToolResultContent).ToolsetName)
+}

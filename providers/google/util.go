@@ -432,6 +432,11 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 
 	for i, message := range messages {
 		if len(message.Content) == 0 {
+			// An effort message is Anthropic's per-message effort, which
+			// Gemini has no equivalent for.
+			if message.Effort != "" {
+				continue
+			}
 			return nil, fmt.Errorf("empty message detected (index %d)", i)
 		}
 		// Convert role

@@ -141,11 +141,11 @@ func TestUnknownModelKeepsParametersUntouched(t *testing.T) {
 	assert.NotNil(t, req.Temperature)
 }
 
-// The 5.1 point releases have no entry of their own and inherit the Fable and
-// Mythos ones by prefix. Landing on *an* entry is not enough — a wrong match
+// The 5.1 point releases have entries of their own, since only they take
+// per-message effort. Otherwise they must match their family: a wrong entry
 // would hand them explicitDisable or a manual budget, both of which the API
-// answers with a 400 — so pin the classification they actually resolve to.
-func TestFableAndMythos51InheritTheirFamilyEntries(t *testing.T) {
+// answers with a 400, so pin the classification they resolve to.
+func TestFableAndMythos51Classification(t *testing.T) {
 	for _, model := range []string{ModelClaudeFable51, ModelClaudeMythos51} {
 		t.Run(model, func(t *testing.T) {
 			caps, known := lookupCapabilities(model)
@@ -156,7 +156,12 @@ func TestFableAndMythos51InheritTheirFamilyEntries(t *testing.T) {
 			assert.False(t, caps.explicitDisable, "5.1 rejects thinking:{type:disabled}")
 			assert.False(t, caps.manualBudget, "5.1 rejects budget_tokens")
 			assert.False(t, caps.temperature, "5.1 rejects temperature")
+			assert.True(t, caps.perMessageEffort)
 		})
+	}
+	for _, model := range []string{ModelClaudeFable5, ModelClaudeMythos5} {
+		caps, _ := lookupCapabilities(model)
+		assert.False(t, caps.perMessageEffort, model)
 	}
 }
 
