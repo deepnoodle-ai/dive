@@ -110,3 +110,32 @@ data: {"type":"message_stop"}
 	assert.Equal(t, ComputerToolsetName, calls[0].ToolsetName)
 	assert.Equal(t, `{"text":"cats"}`, string(calls[0].Input))
 }
+
+// A member with no arguments, such as screenshot, can stream no input deltas.
+// The accumulated call must still hold the empty object Generate returns, so
+// a loop can unmarshal it.
+func TestStreamedCallWithoutInputDeltasHasEmptyObject(t *testing.T) {
+	stream := `data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}
+
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"screenshot","toolset_name":"computer","input":{}}}
+
+data: {"type":"content_block_stop","index":0}
+
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}
+
+data: {"type":"message_stop"}
+
+`
+	server, _ := capturingServer(t, "text/event-stream", stream)
+	provider := New(WithEndpoint(server.URL), WithAPIKey("test-key"))
+	iterator, err := provider.Stream(context.Background(),
+		llm.WithModel(ModelClaudeOpus55),
+		llm.WithMessages(llm.NewUserTextMessage("Take a screenshot.")),
+	)
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	calls := consumeAnthropicStream(t, iterator).Response().ToolCalls()
+	assert.Len(t, calls, 1)
+	assert.Equal(t, `{}`, string(calls[0].Input))
+}

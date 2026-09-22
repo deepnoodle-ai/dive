@@ -197,6 +197,15 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		}
 
+	case EventTypeContentBlockStop:
+		// A call with no arguments can stream no input deltas at all. Complete
+		// it as the empty object Generate would have returned.
+		if event.Index != nil {
+			if toolUse, ok := r.contentBlocks[*event.Index].(*ToolUseContent); ok && len(toolUse.Input) == 0 {
+				toolUse.Input = json.RawMessage("{}")
+			}
+		}
+
 	case EventTypeMessageDelta:
 		if r.response == nil || event.Delta == nil {
 			return errors.New("invalid message delta event")

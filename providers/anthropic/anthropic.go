@@ -86,7 +86,10 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
-	msgs = resolveEffortMessages(msgs, request.Model, config)
+	msgs, err = resolveEffortMessages(msgs, request.Model, config)
+	if err != nil {
+		return nil, err
+	}
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
@@ -189,7 +192,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-	msgs = resolveEffortMessages(msgs, request.Model, config)
+	msgs, err = resolveEffortMessages(msgs, request.Model, config)
+	if err != nil {
+		return nil, err
+	}
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
@@ -362,8 +368,9 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 // that moves to another model carries it along, so there it is dropped with a
 // warning rather than failing the request. That includes unknown models, which
 // Dive cannot tell apart from an Anthropic-compatible server without the beta.
-// The messages are convertMessages' copies, so they are edited in place.
-func resolveEffortMessages(messages []*llm.Message, model string, config *llm.Config) []*llm.Message {
+// The messages are convertMessages' copies, so they are edited in place. It
+// fails when only dropped effort messages were given, leaving nothing to send.
+func resolveEffortMessages(messages []*llm.Message, model string, config *llm.Config) ([]*llm.Message, error) {
 	caps, known := lookupCapabilities(model)
 	out := messages[:0]
 	for _, message := range messages {
@@ -389,7 +396,10 @@ func resolveEffortMessages(messages []*llm.Message, model string, config *llm.Co
 		message.Effort = effort
 		out = append(out, message)
 	}
-	return out
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no messages to send: model %q does not support per-message effort", model)
+	}
+	return out, nil
 }
 
 // convertToolResultBlocks renders tool_result content in the Anthropic wire

@@ -234,3 +234,19 @@ func TestEffortMessageDoesNotMutateCaller(t *testing.T) {
 	)
 	assert.Equal(t, llm.ReasoningEffortMinimal, effort.Effort)
 }
+
+// When every message is an effort message the model drops, nothing is left to
+// send. Both paths must fail before the request instead of sending no messages.
+func TestOnlyDroppedEffortMessagesIsAnError(t *testing.T) {
+	provider := New(WithEndpoint("http://127.0.0.1:0"), WithAPIKey("test-key"))
+	opts := []llm.Option{
+		llm.WithModel(ModelClaudeSonnet5),
+		llm.WithMessages(llm.NewEffortMessage(llm.ReasoningEffortLow)),
+	}
+	_, err := provider.Generate(context.Background(), opts...)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no messages to send")
+	_, err = provider.Stream(context.Background(), opts...)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no messages to send")
+}
