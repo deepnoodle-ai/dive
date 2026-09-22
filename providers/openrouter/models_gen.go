@@ -20,6 +20,8 @@ const (
 	ModelGPT56Sol           = "openai/gpt-5.6-sol"
 	ModelGPT56Terra         = "openai/gpt-5.6-terra"
 	ModelGPT56Luna          = "openai/gpt-5.6-luna"
+	ModelGPT6Sol            = "openai/gpt-6-sol"
+	ModelGPT6Luna           = "openai/gpt-6-luna"
 	ModelGPT55              = "openai/gpt-5.5"
 	ModelGPT54              = "openai/gpt-5.4"
 	ModelGPT54Mini          = "openai/gpt-5.4-mini"
