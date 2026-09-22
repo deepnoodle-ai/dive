@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **The provider watcher missed point releases.** Gap detection treated
   `claude-opus-5-5` as a spelling of `claude-opus-5`; version suffixes now
   surface as gaps.
+- **Anthropic `Generate` no longer fails on an empty response.** A response
+  with no content blocks (Opus 5.5 with `tool_choice: none`, some refusals) is
+  returned with its `StopReason`, as `Stream` already did.
 
 ## [1.30.0] - 2026-09-21
 
