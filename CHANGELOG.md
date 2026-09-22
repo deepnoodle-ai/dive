@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Opus 5.5.** `anthropic.ModelClaudeOpus55` (`claude-opus-5-5`) and
+  `openrouter.ModelClaudeOpus55`, replacing Opus 5 in the CLI's recommended
+  models. $4/$20 per 1M (fast mode $8/$40); cache reads bill at 0.05x input.
+- **Opus 5.5 thinking and tool-choice rules.** An explicit thinking disable is
+  omitted, and forced `tool_choice` is rejected before sending. Its API default
+  effort is `medium`, not `high`.
+
+### Fixed
+
+- **The provider watcher missed point releases.** Gap detection treated
+  `claude-opus-5-5` as a spelling of `claude-opus-5`; version suffixes now
+  surface as gaps.
+
 ## [1.30.0] - 2026-09-21
 
 ### Added

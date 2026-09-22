@@ -38,6 +38,13 @@
       "display_name": "Sonnet 5"
     },
     {
+      "go_name": "ModelClaudeOpus55",
+      "id": "anthropic/claude-opus-5.5",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Opus 5.5"
+    },
+    {
       "go_name": "ModelClaudeOpus5",
       "id": "anthropic/claude-opus-5",
       "kind": "text",

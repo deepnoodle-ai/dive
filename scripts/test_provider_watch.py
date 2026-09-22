@@ -789,6 +789,42 @@ class CatalogGapTests(unittest.TestCase):
 
         self.assertEqual(snapshot["gaps"], {})
 
+    def test_point_release_of_a_listed_model_is_a_gap(self) -> None:
+        # claude-opus-5-5 begins with claude-opus-5, and a plain prefix test
+        # filed it as a naming variant: the release went unreported.
+        snapshot = self.gap_snapshot(
+            model_tokens=["claude-opus-5", "claude-opus-5-5"],
+            listed=["claude-opus-5"],
+        )
+
+        self.assertEqual(snapshot["gaps"], {"anthropic": ["claude-opus-5-5"]})
+
+    def test_dotted_point_release_of_a_listed_model_is_a_gap(self) -> None:
+        snapshot = self.gap_snapshot(
+            model_tokens=["grok-4.8"], listed=["grok-4"], provider="xai"
+        )
+
+        self.assertEqual(snapshot["gaps"], {"xai": ["grok-4.8"]})
+
+    def test_revision_suffixes_of_listed_models_are_not_gaps(self) -> None:
+        snapshot = self.gap_snapshot(
+            model_tokens=["gemini-3.6-flash-001", "mistral-large-2512"],
+            listed=["gemini-3.6-flash", "mistral-large"],
+            provider="google",
+        )
+
+        self.assertEqual(snapshot["gaps"], {})
+
+    def test_dash_spelled_doc_slugs_of_listed_models_are_not_gaps(self) -> None:
+        # xAI's release notes link "/developers/grok-4-5" for grok-4.5.
+        snapshot = self.gap_snapshot(
+            model_tokens=["grok-4-5", "grok-4-6"],
+            listed=["grok-4", "grok-4.5", "grok-4.6"],
+            provider="xai",
+        )
+
+        self.assertEqual(snapshot["gaps"], {})
+
     def test_only_newly_appearing_gaps_are_reported(self) -> None:
         # The retired-model tail lives in the accepted baseline so it never files
         # an issue twice; a model that shows up after the baseline does.

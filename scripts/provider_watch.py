@@ -169,6 +169,13 @@ MODEL_CANDIDATE_RE = re.compile(r"^(?:[a-z0-9-]+/)?[a-z][a-z0-9]*(?:[.\-:][a-z0-
 # satisfies MODEL_CANDIDATE_RE and files a phantom gap alongside the real one.
 # No published model id ends in a documentation extension, so drop it.
 DOC_EXTENSION_RE = re.compile(r"\.(?:md|html?|json|txt)$", re.IGNORECASE)
+# What separates a new point release from a naming variant of a listed model.
+# "claude-opus-5-5" extends "claude-opus-5" by a short version segment and is a
+# different model; "claude-opus-4-8-20260115" and "gemini-3.6-flash-001" extend
+# theirs by a date or revision and are not. One or two digits per segment is the
+# line: no provider numbers a release past 99, and no date or revision is that
+# short.
+VERSION_SUFFIX_RE = re.compile(r"^(?:[.\-]\d{1,2})+$")
 # Change kinds that lead the report; everything else keeps its natural order. An
 # id Dive ships that upstream does not serve is broken right now, so it outranks
 # a model Dive merely lacks.
@@ -1197,6 +1204,20 @@ def upstream_model_ids(provider_data: Mapping[str, Any]) -> set[str]:
     return tokens
 
 
+def is_naming_variant(candidate: str, listed: str) -> bool:
+    """Whether an upstream id is another spelling of a listed model.
+
+    A dated or otherwise-suffixed sibling of a listed model is a naming variant,
+    not a model Dive is missing, and neither is a shorter alias of one. A
+    version suffix is the exception: a plain prefix test once filed
+    claude-opus-5-5 as a variant of claude-opus-5, hiding the release this check
+    exists to catch.
+    """
+    if candidate.startswith(listed):
+        return not VERSION_SUFFIX_RE.match(candidate[len(listed) :])
+    return listed.startswith(candidate)
+
+
 def catalog_gaps(
     providers_data: Mapping[str, Any], repo_facts: Mapping[str, Any]
 ) -> dict[str, list[str]]:
@@ -1219,6 +1240,9 @@ def catalog_gaps(
             # No catalog to compare against; reporting every id as missing would
             # bury the signal rather than surface it.
             continue
+        # Documentation slugs spell dotted ids with dashes ("/developers/grok-4-5"
+        # for grok-4.5), so compare in that spelling too.
+        listed_spellings = {model.replace(".", "-") for model in listed}
         found: set[str] = set()
         for token in upstream_model_ids(provider_data):
             candidate = normalize_upstream_id(provider, str(token).lower())
@@ -1226,14 +1250,9 @@ def catalog_gaps(
                 continue
             if not any(char.isdigit() for char in candidate):
                 continue
-            if candidate in listed:
+            if candidate in listed or candidate.replace(".", "-") in listed_spellings:
                 continue
-            # A dated or otherwise-suffixed sibling of something already listed
-            # is a naming variant, not a model Dive is missing.
-            if any(
-                candidate.startswith(model) or model.startswith(candidate)
-                for model in listed
-            ):
+            if any(is_naming_variant(candidate, model) for model in listed):
                 continue
             found.add(candidate)
         if found:

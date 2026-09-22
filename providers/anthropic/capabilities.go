@@ -163,6 +163,12 @@ var modelCapabilityTable = []capabilityEntry{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
 		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
 	}},
+	// Opus 5.5 needs its own entry: by prefix it would inherit Opus 5's, which
+	// sends an explicit disable. 5.5 rejects the disable at every effort level
+	// and, like Fable 5.1, rejects a forced tool_choice.
+	{prefix: "claude-opus-5-5", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+	}},
 	{prefix: "claude-sonnet-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
 		thinkingOnByDefault: true,

@@ -73,6 +73,24 @@ func TestFable51CacheReadPricingIsNotDerived(t *testing.T) {
 	}
 }
 
+// Opus 5.5 bills cache hits at 0.05x base input, and the caching multipliers
+// stack on the fast-mode rate, so both cache-read rates are stated, not derived.
+func TestOpus55Pricing(t *testing.T) {
+	p, ok := providers.PricingFor(ModelClaudeOpus55, false)
+	assert.True(t, ok, "Opus 5.5 standard pricing should be registered")
+	assert.Equal(t, 4.0, p.InputPrice)
+	assert.Equal(t, 20.0, p.OutputPrice)
+	assert.Equal(t, 0.2, p.CacheReadPrice)  // 0.05x input, not 0.4
+	assert.Equal(t, 5.0, p.CacheWritePrice) // 1.25x input, as everywhere
+
+	fast, ok := providers.PricingFor(ModelClaudeOpus55, true)
+	assert.True(t, ok, "Opus 5.5 fast-mode pricing should be registered")
+	assert.Equal(t, 8.0, fast.InputPrice)
+	assert.Equal(t, 40.0, fast.OutputPrice)
+	assert.Equal(t, 0.4, fast.CacheReadPrice)
+	assert.Equal(t, 10.0, fast.CacheWritePrice)
+}
+
 func TestSonnet5StandardPricing(t *testing.T) {
 	p, ok := providers.PricingFor(ModelClaudeSonnet5, false)
 	assert.True(t, ok, "Sonnet 5 pricing should be registered")
