@@ -20,6 +20,8 @@ const (
 	ModelGPT56Sol           = "openai/gpt-5.6-sol"
 	ModelGPT56Terra         = "openai/gpt-5.6-terra"
 	ModelGPT56Luna          = "openai/gpt-5.6-luna"
+	ModelGPT6Sol            = "openai/gpt-6-sol"
+	ModelGPT6Luna           = "openai/gpt-6-luna"
 	ModelGPT55              = "openai/gpt-5.5"
 	ModelGPT54              = "openai/gpt-5.4"
 	ModelGPT54Mini          = "openai/gpt-5.4-mini"
@@ -46,9 +48,10 @@ const (
 	ModelGrok45              = "x-ai/grok-4.5"
 	ModelGrok43              = "x-ai/grok-4.3"
 	ModelGrokBuild01         = "x-ai/grok-build-0.1"
-	ModelMistralLarge3       = "mistralai/mistral-large-2512"
-	ModelDeepSeekV41Flash    = "deepseek/deepseek-v4.1-flash"
-	ModelDeepSeekR1          = "deepseek/deepseek-r1-0528"
+	// Deprecated: OpenRouter no longer serves this model. Use mistral.ModelMistralLarge3 on Mistral's API.
+	ModelMistralLarge3    = "mistralai/mistral-large-2512"
+	ModelDeepSeekV41Flash = "deepseek/deepseek-v4.1-flash"
+	ModelDeepSeekR1       = "deepseek/deepseek-r1-0528"
 )
 
 // DefaultModel is generated from the catalog's default model.

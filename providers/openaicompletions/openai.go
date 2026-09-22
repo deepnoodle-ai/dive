@@ -848,16 +848,16 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	req.PresencePenalty = config.PresencePenalty
 	req.FrequencyPenalty = config.FrequencyPenalty
 	reasoningEffort, includeReasoningEffort := p.resolveReasoningEffort(req.Model, config)
-	if includeReasoningEffort {
-		requestedReasoningEffort := config.ReasoningEffort
-		var adjusted bool
-		reasoningEffort, adjusted = normalizeToolReasoningEffort(req.Model, reasoningEffort, len(tools) > 0)
-		if adjusted && config.Logger != nil {
+	if len(tools) > 0 && reasoningEffort != ReasoningEffortNone && chatToolsRequireNoReasoning(req.Model) {
+		if includeReasoningEffort && config.Logger != nil {
 			config.Logger.Warn("reasoning effort is not supported with function tools for this model in Chat Completions; using none",
 				"model", req.Model,
-				"requested_reasoning_effort", requestedReasoningEffort,
-				"effective_reasoning_effort", reasoningEffort)
+				"requested_reasoning_effort", config.ReasoningEffort,
+				"effective_reasoning_effort", ReasoningEffortNone)
 		}
+		reasoningEffort, includeReasoningEffort = ReasoningEffortNone, true
+	}
+	if includeReasoningEffort {
 		req.ReasoningEffort = reasoningEffort
 	}
 	return nil

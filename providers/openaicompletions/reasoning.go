@@ -1,6 +1,7 @@
 package openaicompletions
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -35,17 +36,28 @@ func (p *Provider) resolveReasoningEffort(model string, config *llm.Config) (Rea
 	return ReasoningEffort(effort), true
 }
 
-// normalizeToolReasoningEffort handles Chat Completions constraints that only
-// apply when function tools and reasoning are requested together. GPT-5.4 mini
-// rejects that combination unless reasoning_effort is "none".
-func normalizeToolReasoningEffort(model string, effort ReasoningEffort, hasFunctionTools bool) (ReasoningEffort, bool) {
-	if !hasFunctionTools || effort == ReasoningEffortNone {
-		return effort, false
+// chatToolsRequireNoReasoning reports whether OpenAI's Chat Completions
+// endpoint rejects function tools for a model unless reasoning_effort is
+// "none". That holds for gpt-5.4 through gpt-6: any other effort is refused,
+// and gpt-5.6 and gpt-6 default to a reasoning effort, so leaving the field
+// off fails too.
+//
+// Only bare OpenAI ids qualify. OpenRouter's "openai/..." ids route to the
+// Responses API, which accepts reasoning with tools. A model that rejects
+// "none" itself (gpt-6-astra) is left alone, since forcing it would only trade
+// one 400 for another.
+func chatToolsRequireNoReasoning(model string) bool {
+	id := strings.ToLower(strings.TrimSpace(model))
+	restricted := false
+	for _, family := range []string{"gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6"} {
+		if id == family || strings.HasPrefix(id, family+"-") {
+			restricted = true
+			break
+		}
 	}
-
-	model = strings.TrimPrefix(strings.ToLower(model), "openai/")
-	if model == ModelGPT54Mini || strings.HasPrefix(model, ModelGPT54Mini+"-") {
-		return ReasoningEffortNone, true
+	if !restricted {
+		return false
 	}
-	return effort, false
+	caps, known := modelcaps.Lookup("openai", id)
+	return known && slices.Contains(caps.Efforts, llm.ReasoningEffortNone)
 }
