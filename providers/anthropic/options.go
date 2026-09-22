@@ -71,3 +71,15 @@ func WithVersion(version string) Option {
 		p.version = version
 	}
 }
+
+// WithPrefixMismatchBehavior sets thinking.block_binding.prefix_mismatch_behavior
+// on every request that configures thinking, and sends the
+// thinking-binding-controls beta header. Use PrefixMismatchDropBlock to keep a
+// conversation running after an edit invalidates its earlier thinking blocks,
+// instead of receiving a 400. Anthropic recommends setting it for the life of a
+// session rather than per request.
+func WithPrefixMismatchBehavior(behavior PrefixMismatchBehavior) Option {
+	return func(p *Provider) {
+		p.prefixMismatchBehavior = behavior
+	}
+}

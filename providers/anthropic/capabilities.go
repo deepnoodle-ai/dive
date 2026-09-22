@@ -46,6 +46,11 @@ type modelCapabilities struct {
 
 	// temperature reports whether the temperature parameter is accepted.
 	temperature bool
+
+	// perMessageEffort reports whether a system message may carry
+	// output_config.effort (the mid-conversation-output-config beta). Fable 5
+	// answers "this model does not" support per-turn effort.
+	perMessageEffort bool
 }
 
 // reasoningKind classifies how the model takes a reasoning effort.
@@ -162,12 +167,14 @@ var modelCapabilityTable = []capabilityEntry{
 	{prefix: "claude-opus-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
 		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
+		perMessageEffort: true,
 	}},
 	// Opus 5.5 needs its own entry: by prefix it would inherit Opus 5's, which
 	// sends an explicit disable. 5.5 rejects the disable at every effort level
 	// and, like Fable 5.1, rejects a forced tool_choice.
 	{prefix: "claude-opus-5-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		perMessageEffort: true,
 	}},
 	{prefix: "claude-sonnet-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
@@ -175,19 +182,26 @@ var modelCapabilityTable = []capabilityEntry{
 	}},
 	// Fable 5 and Mythos 5 always think and reject an explicit disable, so
 	// Dive omits the thinking parameter for them instead. The 5.1 point
-	// releases behave identically here and deliberately share these entries by
-	// prefix: "claude-fable-5-1" matches "claude-fable-5", and likewise for
-	// Mythos. Their added restriction — forced tool_choice returns a 400 — is
-	// already covered, since requestThinkingBlocksForcedToolChoice rejects a
-	// forced choice for any model that always thinks and cannot be disabled.
+	// releases behave the same way and add two things: per-message effort, and
+	// a 400 for forced tool_choice. The second is already covered, since
+	// requestThinkingBlocksForcedToolChoice rejects a forced choice for any
+	// model that always thinks and cannot be disabled.
 	{prefix: "claude-fable-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+	}},
+	{prefix: "claude-fable-5-1", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		perMessageEffort: true,
 	}},
 	// Mythos 5 and 5.1 are catalogued but reachable only through Anthropic's
 	// limited-availability program, so these values mirror Fable and are
 	// untested against the live API.
 	{prefix: "claude-mythos-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+	}},
+	{prefix: "claude-mythos-5-1", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		perMessageEffort: true,
 	}},
 	{prefix: "claude-mythos-preview", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,

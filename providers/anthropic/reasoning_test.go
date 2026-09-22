@@ -282,7 +282,7 @@ func TestSpeedFastSetsRequestField(t *testing.T) {
 func TestSpeedFastAddsBetaHeader(t *testing.T) {
 	p := New()
 	cfg := &llm.Config{Speed: llm.SpeedFast}
-	httpReq, err := p.createRequest(context.Background(), []byte("{}"), cfg, false)
+	httpReq, err := p.createRequest(context.Background(), []byte("{}"), cfg, nil, false)
 	assert.NoError(t, err)
 	assert.Contains(t, httpReq.Header.Get("anthropic-beta"), FeatureFastMode)
 }

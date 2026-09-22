@@ -12,12 +12,106 @@ import (
 var (
 	_ llm.Tool              = &ComputerTool{}
 	_ llm.ToolConfiguration = &ComputerTool{}
+	_ llm.Tool              = &ComputerToolset{}
+	_ llm.ToolConfiguration = &ComputerToolset{}
 )
 
+const (
+	// ComputerToolsetType is the computer use toolset. It needs no beta
+	// header, and it is the only form of computer use Opus 5.5 accepts on the
+	// Claude API and Google Cloud.
+	ComputerToolsetType = "computer_toolset_20260801"
+	// ComputerToolsetName is the toolset_name on each of the toolset's calls
+	// (llm.ToolUseContent.ToolsetName) and results.
+	ComputerToolsetName = "computer"
+	// ComputerToolsetHaltText is the result text Anthropic specifies for the
+	// calls in a batch after one that failed, which the agent loop must not
+	// run. Send it with IsError set.
+	ComputerToolsetHaltText = "Not executed: an earlier computer action in this turn failed."
+)
+
+// ComputerToolsetOptions configures a ComputerToolset.
+type ComputerToolsetOptions struct {
+	// Disabled lists members to withhold from the model, such as "zoom" for
+	// an environment that can't produce zoom images. All 17 members,
+	// including zoom, are enabled by default.
+	Disabled []string
+}
+
+// NewComputerToolset declares the computer_toolset_20260801 toolset.
+func NewComputerToolset(opts ComputerToolsetOptions) *ComputerToolset {
+	return &ComputerToolset{disabled: append([]string(nil), opts.Disabled...)}
+}
+
+// ComputerToolset declares Anthropic's computer use toolset, which gives Claude
+// 17 member tools such as screenshot, left_click, type, and zoom. Supported on
+// Opus 4.8 and later, Sonnet 5, Fable 5 and 5.1, and Mythos 5 and 5.1.
+//
+// Your application runs every call. The toolset changes the agent loop from
+// ComputerTool's:
+//   - Each action is its own tool call. Its Name is the member ("left_click"),
+//     its ToolsetName is ComputerToolsetName, and its input has no "action".
+//   - A response can hold several calls (a batch). Run them in order and stop
+//     at the first failure: answer that call with IsError and a description,
+//     and each later one with IsError and ComputerToolsetHaltText.
+//   - Each result must carry the toolset name. The Anthropic provider fills
+//     it in from the matching call when ToolResultContent.ToolsetName is
+//     empty.
+//   - The API rejects screenshots and zoom images over the model's image
+//     limits instead of downscaling them, so resize them first.
+//
+// https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool
+type ComputerToolset struct {
+	disabled []string
+}
+
+// Name returns the toolset name. The model never calls a tool by this name;
+// its calls name the member.
+func (t *ComputerToolset) Name() string {
+	return ComputerToolsetName
+}
+
+func (t *ComputerToolset) Description() string {
+	return "Uses Anthropic's computer use toolset to give Claude the ability to use a computer."
+}
+
+func (t *ComputerToolset) Schema() *schema.Schema {
+	return nil // Anthropic defines the member schemas
+}
+
+func (t *ComputerToolset) ToolConfiguration(providerName string) map[string]any {
+	config := map[string]any{"type": ComputerToolsetType}
+	if len(t.disabled) > 0 {
+		configs := make(map[string]any, len(t.disabled))
+		for _, member := range t.disabled {
+			configs[member] = map[string]any{"enabled": false}
+		}
+		config["configs"] = configs
+	}
+	return config
+}
+
+func (t *ComputerToolset) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
+		Title:           "Computer",
+		ReadOnlyHint:    false,
+		DestructiveHint: true,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
+	}
+}
+
+func (t *ComputerToolset) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return nil, errors.New("computer use toolset calls must be run by the application")
+}
+
 // Tool versions:
+//   - computer_toolset_20260801 - see ComputerToolset
 //   - computer_20241022 - Claude 3.5 Sonnet (legacy)
 //   - computer_20250124 - Claude Sonnet 4, Sonnet 4.5, Haiku 4.5, Opus 4, Opus 4.1, Sonnet 3.7
-//   - computer_20251124 - Claude Opus 4.5, Sonnet 4.6, Opus 4.6 (adds zoom action)
+//   - computer_20251124 - Claude Opus 4.5 through 4.8, Opus 5, Sonnet 4.6 and 5,
+//     Fable 5 and 5.1, Mythos 5 and 5.1 (adds zoom action). Opus 5.5 rejects
+//     it with a 400 on the Claude API and Google Cloud; use ComputerToolset.
 //
 // Beta headers required (use llm.WithFeatures):
 //   - FeatureComputerUse ("computer-use-2025-01-24") for computer_20250124
@@ -40,7 +134,7 @@ type ComputerToolOptions struct {
 	DisplayWidthPx  int
 	DisplayHeightPx int
 	DisplayNumber   int
-	EnableZoom      bool // Only for computer_20251124 (Opus 4.5, Sonnet 4.6, Opus 4.6)
+	EnableZoom      bool // Only for computer_20251124
 }
 
 // NewComputerTool creates a new ComputerTool with the given options.
@@ -89,7 +183,7 @@ func (t *ComputerTool) ToolConfiguration(providerName string) map[string]any {
 		"display_height_px": t.displayHeightPx,
 		"display_number":    t.displayNumber,
 	}
-	// enable_zoom is only valid for computer_20251124 (Opus 4.5, Sonnet 4.6, Opus 4.6)
+	// enable_zoom is only valid for computer_20251124
 	if t.enableZoom {
 		config["enable_zoom"] = true
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -40,6 +41,8 @@ type Provider struct {
 	maxRetries    int
 	retryBaseWait time.Duration
 	version       string
+
+	prefixMismatchBehavior PrefixMismatchBehavior
 }
 
 // New creates a new Anthropic provider with the given options.
@@ -83,11 +86,16 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
+	msgs, err = resolveEffortMessages(msgs, request.Model, config)
+	if err != nil {
+		return nil, err
+	}
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
 	request.Messages = msgs
 	p.applyCaching(&request, config)
+	betas := requestBetas(&request)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -107,7 +115,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 
 	var result llm.Response
 	sendRequest := func() error {
-		req, err := p.createRequest(ctx, body, config, false)
+		req, err := p.createRequest(ctx, body, config, betas, false)
 		if err != nil {
 			return err
 		}
@@ -184,12 +192,17 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
+	msgs, err = resolveEffortMessages(msgs, request.Model, config)
+	if err != nil {
+		return nil, err
+	}
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
 	request.Messages = msgs
 	request.Stream = true
 	p.applyCaching(&request, config)
+	betas := requestBetas(&request)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -213,7 +226,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		RetryBaseWait: p.retryBaseWait,
 		Logger:        config.Logger,
 	}, func() (llm.StreamIterator, error) {
-		req, err := p.createRequest(ctx, body, config, true)
+		req, err := p.createRequest(ctx, body, config, betas, true)
 		if err != nil {
 			return nil, err
 		}
@@ -247,7 +260,7 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	// during long tool-calling loops and are simply ignored by the API
 	filtered := make([]*llm.Message, 0, len(messages))
 	for _, message := range messages {
-		if len(message.Content) > 0 {
+		if len(message.Content) > 0 || message.Effort != "" {
 			filtered = append(filtered, message)
 		}
 	}
@@ -255,6 +268,16 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		return nil, fmt.Errorf("all messages are empty")
 	}
 	messages = filtered
+	// A toolset member's result must name its toolset, as its call does.
+	// Fill it in from the call so results built without it are accepted.
+	toolsets := map[string]string{}
+	for _, message := range messages {
+		for _, content := range message.Content {
+			if toolUse, ok := content.(*llm.ToolUseContent); ok && toolUse.ToolsetName != "" {
+				toolsets[toolUse.ID] = toolUse.ToolsetName
+			}
+		}
+	}
 	// Anthropic errors if a message ID is set, so make a copy of the messages
 	// and omit the ID field
 	copied := make([]*llm.Message, len(messages))
@@ -280,9 +303,14 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 				}
 				copiedContent = append(copiedContent, c.CloneContent())
 			case *llm.ToolResultContent:
+				toolsetName := c.ToolsetName
+				if toolsetName == "" {
+					toolsetName = toolsets[c.ToolUseID]
+				}
 				copiedContent = append(copiedContent, &llm.ToolResultContent{
 					Content:      convertToolResultBlocks(c),
 					ToolUseID:    c.ToolUseID,
+					ToolsetName:  toolsetName,
 					IsError:      c.IsError,
 					CacheControl: c.CacheControl,
 				})
@@ -316,11 +344,12 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		copied[i] = &llm.Message{
 			Role:    message.Role,
 			Content: copiedContent,
+			Effort:  message.Effort,
 		}
 	}
 	nonEmpty := copied[:0]
 	for _, message := range copied {
-		if len(message.Content) > 0 {
+		if len(message.Content) > 0 || message.Effort != "" {
 			nonEmpty = append(nonEmpty, message)
 		}
 	}
@@ -331,6 +360,46 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	// messages are not mutated.
 	reorderMessageContent(nonEmpty)
 	return nonEmpty, nil
+}
+
+// resolveEffortMessages keeps effort messages (llm.NewEffortMessage) only for
+// models that take per-message effort, clamping each level to what the model
+// accepts. An effort message is history, not a request parameter: a session
+// that moves to another model carries it along, so there it is dropped with a
+// warning rather than failing the request. That includes unknown models, which
+// Dive cannot tell apart from an Anthropic-compatible server without the beta.
+// The messages are convertMessages' copies, so they are edited in place. It
+// fails when only dropped effort messages were given, leaving nothing to send.
+func resolveEffortMessages(messages []*llm.Message, model string, config *llm.Config) ([]*llm.Message, error) {
+	caps, known := lookupCapabilities(model)
+	out := messages[:0]
+	for _, message := range messages {
+		if message.Effort == "" {
+			out = append(out, message)
+			continue
+		}
+		if !known || !caps.perMessageEffort {
+			warnf(config, "model does not support per-message effort; skipping the effort message",
+				"model", model, "effort", message.Effort)
+			// Without its effort, a message with no content has nothing to send.
+			if len(message.Content) > 0 {
+				message.Effort = ""
+				out = append(out, message)
+			}
+			continue
+		}
+		effort, clamped := llm.ClampReasoningEffort(message.Effort, caps.efforts)
+		if clamped {
+			warnf(config, "model does not support the requested reasoning effort; clamping",
+				"model", model, "requested", message.Effort, "using", effort)
+		}
+		message.Effort = effort
+		out = append(out, message)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no messages to send: model %q does not support per-message effort", model)
+	}
+	return out, nil
 }
 
 // convertToolResultBlocks renders tool_result content in the Anthropic wire
@@ -651,7 +720,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.MaxTokens = &p.maxTokens
 	}
 
-	if err := applyReasoningConfig(req, config); err != nil {
+	if err := applyReasoningConfig(req, config, p.prefixMismatchBehavior); err != nil {
 		return err
 	}
 	if requestHasThinkingEnabled(req.Model, req.Thinking) && config.Prefill != "" {
@@ -742,7 +811,11 @@ func warnf(config *llm.Config, msg string, args ...any) {
 // turned into an error: one ModelSettings is meant to survive being pointed at a
 // different model. Unknown models — fine-tunes, gateways, custom deployments —
 // keep their parameters untouched, since Dive cannot know what they accept.
-func applyReasoningConfig(req *Request, config *llm.Config) error {
+//
+// The display and block-binding settings ride on the thinking object. A model
+// that thinks without being asked gets an explicit adaptive config to carry
+// them, which is the same thinking it would do anyway.
+func applyReasoningConfig(req *Request, config *llm.Config, binding PrefixMismatchBehavior) error {
 	model := req.Model
 	caps, known := lookupCapabilities(model)
 
@@ -755,9 +828,22 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 	if thinking != nil {
 		thinking = clampThinkingBudget(req, config, thinking)
 	}
+	// A model that rejects an explicit disable gets no thinking object when
+	// the caller disables thinking, so display and binding settings must not
+	// bring one back.
+	if thinking == nil && config.Thinking != llm.ThinkingTypeDisabled &&
+		(config.ThinkingDisplay != "" || binding != "") &&
+		known && caps.thinkingOnByDefault && caps.adaptive {
+		thinking = &Thinking{Type: "adaptive"}
+	}
 	if thinking != nil {
-		if config.ThinkingDisplay != "" && thinking.Type != "disabled" {
-			thinking.Display = string(config.ThinkingDisplay)
+		if thinking.Type != "disabled" {
+			if config.ThinkingDisplay != "" {
+				thinking.Display = string(config.ThinkingDisplay)
+			}
+			if binding != "" {
+				thinking.BlockBinding = &BlockBinding{PrefixMismatchBehavior: binding}
+			}
 		}
 		req.Thinking = thinking
 	}
@@ -1058,8 +1144,31 @@ func modelRunsThinkingByDefault(model string) bool {
 	return known && caps.thinkingOnByDefault
 }
 
-// createRequest creates an HTTP request with appropriate headers for Anthropic API calls
-func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.Config, isStreaming bool) (*http.Request, error) {
+// requestBetas returns the beta headers the request body itself needs: each
+// is set by a Dive option, so the caller never has to name the header too.
+func requestBetas(req *Request) []string {
+	var betas []string
+	if thinking := req.Thinking; thinking != nil {
+		if thinking.Display == string(llm.ThinkingDisplayUpdates) {
+			betas = append(betas, FeatureThinkingDisplayUpdates)
+		}
+		if thinking.BlockBinding != nil {
+			betas = append(betas, FeatureThinkingBindingControls)
+		}
+	}
+	for _, message := range req.Messages {
+		if message.Effort != "" {
+			betas = append(betas, FeatureMidConversationOutputConfig)
+			break
+		}
+	}
+	return betas
+}
+
+// createRequest creates an HTTP request with appropriate headers for Anthropic
+// API calls. betas lists the headers the request body needs (requestBetas),
+// sent alongside those enabled with llm.WithFeatures.
+func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.Config, betas []string, isStreaming bool) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
@@ -1123,6 +1232,19 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 		betaFeatures = append(betaFeatures, FeatureComputerUse45_46)
 	} else if config.IsFeatureEnabled(FeatureComputerUse) {
 		betaFeatures = append(betaFeatures, FeatureComputerUse)
+	}
+
+	// These are also honored when enabled explicitly. Binding controls on its
+	// own is useful: responses then report mismatched thinking blocks in
+	// input_transformations without the API enforcing anything.
+	for _, feature := range []string{
+		FeatureMidConversationOutputConfig,
+		FeatureThinkingBindingControls,
+		FeatureThinkingDisplayUpdates,
+	} {
+		if config.IsFeatureEnabled(feature) || slices.Contains(betas, feature) {
+			betaFeatures = append(betaFeatures, feature)
+		}
 	}
 
 	if len(betaFeatures) > 0 {

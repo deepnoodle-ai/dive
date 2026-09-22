@@ -14,6 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Opus 5.5 thinking and tool-choice rules.** An explicit thinking disable is
   omitted, and forced `tool_choice` is rejected before sending. Its API default
   effort is `medium`, not `high`.
+- **Computer use toolset.** `anthropic.NewComputerToolset` declares
+  `computer_toolset_20260801`, which Opus 5.5 requires. `ToolsetName` on tool
+  calls and results carries `toolset_name`; the provider fills in results.
+- **Per-message effort.** `llm.NewEffortMessage` changes effort mid-conversation
+  without restarting the prompt cache, on Opus 5, Opus 5.5, Fable 5.1, and
+  Mythos 5.1. Other models and providers skip it.
+- **Thinking progress updates and block binding.** `llm.ThinkingDisplayUpdates`,
+  `anthropic.WithPrefixMismatchBehavior`, and `Response.InputTransformations`.
+  Beta headers are sent automatically.
 
 ### Fixed
 
@@ -23,6 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Anthropic `Generate` no longer fails on an empty response.** A response
   with no content blocks (Opus 5.5 with `tool_choice: none`, some refusals) is
   returned with its `StopReason`, as `Stream` already did.
+- **`ThinkingDisplay` was dropped on models that think by default.** Set
+  without `Thinking` on Opus 5, Opus 5.5, Sonnet 5, Fable, or Mythos, it now
+  goes out on an adaptive thinking config.
 
 ## [1.30.0] - 2026-09-21
 

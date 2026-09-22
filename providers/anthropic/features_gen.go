@@ -14,12 +14,15 @@ const (
 	FeatureComputerUse         = "computer-use-2025-01-24"
 	FeatureComputerUse45_46    = "computer-use-2025-11-24"
 	// Deprecated: Use FeatureComputerUse45_46 instead.
-	FeatureComputerUseOpus45   = FeatureComputerUse45_46
-	FeatureContext1M           = "context-1m-2025-08-07"
-	FeatureFastMode            = "fast-mode-2026-02-01"
-	FeatureOutput300k          = "output-300k-2026-03-24"
-	FeatureCompact             = "compact-2026-01-12"
-	FeatureMCPClientV2         = "mcp-client-2025-11-20"
-	FeatureFilesAPI            = "files-api-2025-04-14"
-	FeatureInterleavedThinking = "interleaved-thinking-2025-05-14"
+	FeatureComputerUseOpus45           = FeatureComputerUse45_46
+	FeatureContext1M                   = "context-1m-2025-08-07"
+	FeatureFastMode                    = "fast-mode-2026-02-01"
+	FeatureOutput300k                  = "output-300k-2026-03-24"
+	FeatureCompact                     = "compact-2026-01-12"
+	FeatureMCPClientV2                 = "mcp-client-2025-11-20"
+	FeatureFilesAPI                    = "files-api-2025-04-14"
+	FeatureInterleavedThinking         = "interleaved-thinking-2025-05-14"
+	FeatureMidConversationOutputConfig = "mid-conversation-output-config-2026-07-01"
+	FeatureThinkingBindingControls     = "thinking-binding-controls-2026-08-01"
+	FeatureThinkingDisplayUpdates      = "thinking-display-updates-2026-08-18"
 )

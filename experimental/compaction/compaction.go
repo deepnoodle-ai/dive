@@ -553,9 +553,9 @@ func reduceBlock(c llm.Content, excess int) llm.Content {
 		return &llm.TextContent{Text: truncateText(cc.Text, len(cc.Text)-excess), CacheControl: cc.CacheControl, Citations: cc.Citations, Metadata: cc.Metadata.Clone()}
 	case *llm.ToolResultContent:
 		txt := toolResultText(cc)
-		return &llm.ToolResultContent{ToolUseID: cc.ToolUseID, Content: truncateText(txt, len(txt)-excess), IsError: cc.IsError, CacheControl: cc.CacheControl}
+		return &llm.ToolResultContent{ToolUseID: cc.ToolUseID, ToolsetName: cc.ToolsetName, Content: truncateText(txt, len(txt)-excess), IsError: cc.IsError, CacheControl: cc.CacheControl}
 	case *llm.ToolUseContent:
-		return &llm.ToolUseContent{ID: cc.ID, Name: cc.Name, Input: culledToolInput, Metadata: cc.Metadata.Clone()}
+		return &llm.ToolUseContent{ID: cc.ID, Name: cc.Name, ToolsetName: cc.ToolsetName, Input: culledToolInput, Metadata: cc.Metadata.Clone()}
 	case *llm.ImageContent:
 		return &llm.TextContent{Text: "[image content omitted for summarization]"}
 	case *llm.DocumentContent:

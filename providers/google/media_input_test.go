@@ -176,6 +176,18 @@ func TestMessagesToContentsSkipsThinking(t *testing.T) {
 	assert.Equal(t, "The answer is 4.", contents[0].Parts[0].Text)
 }
 
+// Anthropic's per-message effort has no Gemini equivalent. A session that
+// carries an effort message must still convert, without it.
+func TestMessagesToContentsSkipsEffortMessages(t *testing.T) {
+	contents, err := messagesToContents([]*llm.Message{
+		llm.NewUserTextMessage("first"),
+		llm.NewEffortMessage(llm.ReasoningEffortLow),
+		llm.NewUserTextMessage("second"),
+	})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 2)
+}
+
 // TestMessagesToContentsUnknownContentErrors verifies the switch has no silent
 // fall-through: content the provider cannot encode is a visible error, not a
 // dropped block.

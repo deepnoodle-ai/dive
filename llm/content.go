@@ -452,8 +452,12 @@ func (m ProviderMetadata) Clone() ProviderMetadata {
 }
 
 type ToolUseContent struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// ToolsetName is set when the call is to a member of a provider-defined
+	// toolset, such as Anthropic's computer use toolset, whose calls name
+	// the member ("left_click") in Name and the toolset ("computer") here.
+	ToolsetName  string          `json:"toolset_name,omitempty"`
 	Input        json.RawMessage `json:"input"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 	// Metadata carries opaque provider-specific data (see ProviderMetadata) that
@@ -478,6 +482,7 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 		Type         ContentType      `json:"type"`
 		ID           string           `json:"id"`
 		Name         string           `json:"name"`
+		ToolsetName  string           `json:"toolset_name,omitempty"`
 		Input        json.RawMessage  `json:"input"`
 		CacheControl *CacheControl    `json:"cache_control,omitempty"`
 		Metadata     ProviderMetadata `json:"metadata,omitempty"`
@@ -485,6 +490,7 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 		Type:         ContentTypeToolUse,
 		ID:           c.ID,
 		Name:         c.Name,
+		ToolsetName:  c.ToolsetName,
 		Input:        input,
 		CacheControl: c.CacheControl,
 		Metadata:     c.Metadata,
@@ -529,7 +535,11 @@ func (c *ToolUseContent) CloneContent() Content {
 */
 
 type ToolResultContent struct {
-	ToolUseID    string        `json:"tool_use_id"`
+	ToolUseID string `json:"tool_use_id"`
+	// ToolsetName echoes ToolUseContent.ToolsetName for a toolset member's
+	// result. The Anthropic provider fills it in from the matching call when
+	// it is left empty.
+	ToolsetName  string        `json:"toolset_name,omitempty"`
 	Content      any           `json:"content"`
 	IsError      bool          `json:"is_error,omitempty"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
@@ -560,6 +570,7 @@ func (c *ToolResultContent) MarshalJSON() ([]byte, error) {
 func (c *ToolResultContent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		ToolUseID    string          `json:"tool_use_id"`
+		ToolsetName  string          `json:"toolset_name,omitempty"`
 		Content      json.RawMessage `json:"content"`
 		IsError      bool            `json:"is_error,omitempty"`
 		CacheControl *CacheControl   `json:"cache_control,omitempty"`
@@ -568,6 +579,7 @@ func (c *ToolResultContent) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	c.ToolUseID = aux.ToolUseID
+	c.ToolsetName = aux.ToolsetName
 	c.IsError = aux.IsError
 	c.CacheControl = aux.CacheControl
 	c.rawContent = nil

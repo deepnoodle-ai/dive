@@ -33,18 +33,22 @@ type Event struct {
 	Delta             *EventDelta                `json:"delta,omitempty"`
 	Usage             *Usage                     `json:"usage,omitempty"`
 	ContextManagement *ContextManagementResponse `json:"context_management,omitempty"`
+	// InputTransformations can arrive again on the final message_delta, after
+	// a server-side fallback, with the serving model's entries.
+	InputTransformations []InputTransformation `json:"input_transformations,omitempty"`
 }
 
 // EventContentBlock carries the start of a content block in an LLM event.
 type EventContentBlock struct {
-	Type      ContentType      `json:"type"`
-	Text      string           `json:"text,omitempty"`
-	ID        string           `json:"id,omitempty"`
-	Name      string           `json:"name,omitempty"`
-	Input     json.RawMessage  `json:"input,omitempty"`
-	Thinking  string           `json:"thinking,omitempty"`
-	Signature string           `json:"signature,omitempty"`
-	Metadata  ProviderMetadata `json:"metadata,omitempty"`
+	Type        ContentType      `json:"type"`
+	Text        string           `json:"text,omitempty"`
+	ID          string           `json:"id,omitempty"`
+	Name        string           `json:"name,omitempty"`
+	ToolsetName string           `json:"toolset_name,omitempty"`
+	Input       json.RawMessage  `json:"input,omitempty"`
+	Thinking    string           `json:"thinking,omitempty"`
+	Signature   string           `json:"signature,omitempty"`
+	Metadata    ProviderMetadata `json:"metadata,omitempty"`
 }
 
 // EventDeltaType indicates the type of delta in an LLM event.
@@ -118,9 +122,10 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		case ContentTypeToolUse:
 			content = &ToolUseContent{
-				ID:       event.ContentBlock.ID,
-				Name:     event.ContentBlock.Name,
-				Metadata: event.ContentBlock.Metadata.Clone(),
+				ID:          event.ContentBlock.ID,
+				Name:        event.ContentBlock.Name,
+				ToolsetName: event.ContentBlock.ToolsetName,
+				Metadata:    event.ContentBlock.Metadata.Clone(),
 			}
 		case ContentTypeThinking:
 			content = &ThinkingContent{
@@ -192,6 +197,15 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		}
 
+	case EventTypeContentBlockStop:
+		// A call with no arguments can stream no input deltas at all. Complete
+		// it as the empty object Generate would have returned.
+		if event.Index != nil {
+			if toolUse, ok := r.contentBlocks[*event.Index].(*ToolUseContent); ok && len(toolUse.Input) == 0 {
+				toolUse.Input = json.RawMessage("{}")
+			}
+		}
+
 	case EventTypeMessageDelta:
 		if r.response == nil || event.Delta == nil {
 			return errors.New("invalid message delta event")
@@ -219,6 +233,9 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	// Update context management information if provided
 	if event.ContextManagement != nil && r.response != nil {
 		r.response.ContextManagement = event.ContextManagement
+	}
+	if event.InputTransformations != nil && r.response != nil {
+		r.response.InputTransformations = event.InputTransformations
 	}
 
 	// Once the message is complete, attach an estimated cost from resolved

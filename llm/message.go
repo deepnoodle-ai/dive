@@ -29,6 +29,10 @@ type Message struct {
 	ID      string    `json:"id,omitempty"`
 	Role    Role      `json:"role"`
 	Content []Content `json:"content"`
+	// Effort, on a system message with no content, changes the reasoning
+	// effort from the next user turn onward without restarting the prompt
+	// cache. See NewEffortMessage.
+	Effort ReasoningEffort `json:"effort,omitempty"`
 }
 
 // LastText returns the last text content in the message.
@@ -127,6 +131,7 @@ func (m *Message) Copy() *Message {
 			ID:      m.ID,
 			Role:    m.Role,
 			Content: contentCopy,
+			Effort:  m.Effort,
 		}
 	}
 	var messageCopy Message
@@ -138,6 +143,7 @@ func (m *Message) Copy() *Message {
 			ID:      m.ID,
 			Role:    m.Role,
 			Content: contentCopy,
+			Effort:  m.Effort,
 		}
 	}
 	return &messageCopy
@@ -150,6 +156,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ID      string            `json:"id,omitempty"`
 		Role    Role              `json:"role"`
 		Content []json.RawMessage `json:"content"`
+		Effort  ReasoningEffort   `json:"effort,omitempty"`
 	}
 
 	// Marshal each content item individually
@@ -166,6 +173,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ID:      m.ID,
 		Role:    m.Role,
 		Content: contentRaw,
+		Effort:  m.Effort,
 	}
 
 	return json.Marshal(tmp)
@@ -178,6 +186,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		ID      string            `json:"id,omitempty"`
 		Role    Role              `json:"role"`
 		Content []json.RawMessage `json:"content"`
+		Effort  ReasoningEffort   `json:"effort,omitempty"`
 	}
 
 	// Unmarshal JSON into the temporary struct
@@ -189,6 +198,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	// Copy all fields except Content
 	m.ID = tmp.ID
 	m.Role = tmp.Role
+	m.Effort = tmp.Effort
 
 	// Process each content item
 	m.Content = make([]Content, 0, len(tmp.Content))
