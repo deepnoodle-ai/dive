@@ -88,10 +88,11 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	content := make([]Content, len(outputs))
 	for i, output := range outputs {
 		content[i] = &ToolResultContent{
-			ToolUseID:   output.ToolUseID,
-			ToolsetName: output.ToolsetName,
-			Content:     output.Content,
-			IsError:     output.IsError,
+			ToolUseID:    output.ToolUseID,
+			ToolsetName:  output.ToolsetName,
+			Content:      output.Content,
+			IsError:      output.IsError,
+			CacheControl: output.CacheControl,
 		}
 	}
 	return &Message{Role: User, Content: content}

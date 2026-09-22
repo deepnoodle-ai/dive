@@ -246,3 +246,9 @@ func TestToolsetNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "computer", decoded[0].Content[0].(*ToolUseContent).ToolsetName)
 	assert.Equal(t, "computer", decoded[1].Content[0].(*ToolResultContent).ToolsetName)
 }
+
+func TestNewToolResultMessageKeepsCacheControl(t *testing.T) {
+	cc := &CacheControl{Type: CacheControlTypeEphemeral}
+	msg := NewToolResultMessage(&ToolResultContent{ToolUseID: "toolu_1", Content: "OK", CacheControl: cc})
+	assert.Equal(t, cc, msg.Content[0].(*ToolResultContent).CacheControl)
+}

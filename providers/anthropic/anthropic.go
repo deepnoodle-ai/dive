@@ -828,7 +828,11 @@ func applyReasoningConfig(req *Request, config *llm.Config, binding PrefixMismat
 	if thinking != nil {
 		thinking = clampThinkingBudget(req, config, thinking)
 	}
-	if thinking == nil && (config.ThinkingDisplay != "" || binding != "") &&
+	// A model that rejects an explicit disable gets no thinking object when
+	// the caller disables thinking, so display and binding settings must not
+	// bring one back.
+	if thinking == nil && config.Thinking != llm.ThinkingTypeDisabled &&
+		(config.ThinkingDisplay != "" || binding != "") &&
 		known && caps.thinkingOnByDefault && caps.adaptive {
 		thinking = &Thinking{Type: "adaptive"}
 	}

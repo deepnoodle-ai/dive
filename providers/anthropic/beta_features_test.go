@@ -111,16 +111,26 @@ func TestPrefixMismatchBehaviorSetsBlockBinding(t *testing.T) {
 }
 
 // block_binding is part of the thinking object, so it cannot go on a request
-// that disables thinking.
+// that disables thinking. Opus 5 takes an explicit disable; Opus 5.5 rejects
+// one, so its thinking object is omitted and must not be rebuilt to carry the
+// binding or display.
 func TestPrefixMismatchBehaviorSkippedWhenThinkingDisabled(t *testing.T) {
-	_, captured := generateCaptured(t, okResponse,
-		[]Option{WithPrefixMismatchBehavior(PrefixMismatchError)},
-		llm.WithModel(ModelClaudeOpus5),
-		llm.WithThinking(llm.ThinkingTypeDisabled),
-		llm.WithMessages(llm.NewUserTextMessage("hi")),
-	)
-	assert.Equal(t, map[string]any{"type": "disabled"}, captured.body["thinking"])
-	assert.Len(t, captured.betas, 0)
+	for model, want := range map[string]any{
+		ModelClaudeOpus5:  map[string]any{"type": "disabled"},
+		ModelClaudeOpus55: nil,
+	} {
+		t.Run(model, func(t *testing.T) {
+			_, captured := generateCaptured(t, okResponse,
+				[]Option{WithPrefixMismatchBehavior(PrefixMismatchError)},
+				llm.WithModel(model),
+				llm.WithThinking(llm.ThinkingTypeDisabled),
+				llm.WithThinkingDisplay(llm.ThinkingDisplayUpdates),
+				llm.WithMessages(llm.NewUserTextMessage("hi")),
+			)
+			assert.Equal(t, want, captured.body["thinking"])
+			assert.Len(t, captured.betas, 0)
+		})
+	}
 }
 
 // The binding-controls header on its own reports mismatches without
