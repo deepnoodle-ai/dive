@@ -843,8 +843,8 @@ func resolveThinking(model string, caps modelCapabilities, known bool, config *l
 
 	switch config.Thinking {
 	case llm.ThinkingTypeDisabled:
-		// Fable 5 and Mythos 5 reject an explicit disable; omitting the
-		// parameter is the accepted way to ask them for less.
+		// Fable 5, Mythos 5, and Opus 5.5 reject an explicit disable; omitting
+		// the parameter is the accepted way to ask them for less.
 		if known && !caps.explicitDisable {
 			warnf(config, "model does not accept an explicit thinking disable; omitting the thinking parameter",
 				"model", model)
@@ -975,9 +975,9 @@ func requestHasThinkingEnabled(model string, thinking *Thinking) bool {
 // requestThinkingBlocksForcedToolChoice reports whether the request's thinking
 // configuration rules out a forced tool_choice. An explicit thinking config is
 // authoritative. When the request omits it, only models that always run thinking
-// and reject an explicit disable (Fable 5, Mythos 5) block forced tool choice:
-// Opus 5 and Sonnet 5 default thinking on but the caller can still turn it off,
-// so Dive leaves that request to the API rather than rejecting it here.
+// and reject an explicit disable (Fable 5, Mythos 5, Opus 5.5) block forced tool
+// choice: Opus 5 and Sonnet 5 default thinking on but the caller can still turn
+// it off, so Dive leaves that request to the API rather than rejecting it here.
 func requestThinkingBlocksForcedToolChoice(model string, thinking *Thinking) bool {
 	if thinking != nil {
 		return thinking.Type != "disabled"

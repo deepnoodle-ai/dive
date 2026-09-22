@@ -6,6 +6,7 @@ const (
 	ModelClaudeFable51      = "anthropic/claude-fable-5.1"
 	ModelClaudeFable5       = "anthropic/claude-fable-5"
 	ModelClaudeSonnet5      = "anthropic/claude-sonnet-5"
+	ModelClaudeOpus55       = "anthropic/claude-opus-5.5"
 	ModelClaudeOpus5        = "anthropic/claude-opus-5"
 	ModelClaudeOpus48       = "anthropic/claude-opus-4.8"
 	ModelClaudeOpus47       = "anthropic/claude-opus-4.7"

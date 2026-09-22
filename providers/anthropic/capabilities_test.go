@@ -166,3 +166,35 @@ func TestForcedToolChoiceRejectedOnFable51(t *testing.T) {
 	assert.True(t, requestThinkingBlocksForcedToolChoice(ModelClaudeFable51, nil))
 	assert.True(t, requestThinkingBlocksForcedToolChoice(ModelClaudeMythos51, nil))
 }
+
+// Opus 5.5 prefixes as Opus 5, whose entry sends an explicit thinking disable
+// and caps effort under it. 5.5 rejects the disable at every effort level, so it
+// must resolve to its own entry.
+func TestOpus55DoesNotInheritOpus5(t *testing.T) {
+	caps, known := lookupCapabilities(ModelClaudeOpus55)
+	assert.True(t, known)
+	assert.Equal(t, reasoningNative, caps.reasoningKind())
+	assert.Equal(t, effortsFull, caps.efforts)
+	assert.True(t, caps.adaptive)
+	assert.True(t, caps.thinkingOnByDefault)
+	assert.False(t, caps.explicitDisable, "5.5 rejects thinking:{type:disabled}")
+	assert.Equal(t, llm.ReasoningEffort(""), caps.disabledEffortCap)
+	assert.False(t, caps.manualBudget, "5.5 rejects budget_tokens")
+	assert.False(t, caps.temperature, "5.5 rejects temperature")
+}
+
+func TestThinkingDisabledOpus55OmitsThinking(t *testing.T) {
+	// Opus 5 would send {type:"disabled"} and clamp xhigh to high here; 5.5
+	// omits the parameter and keeps the requested effort.
+	req := buildReq(t, ModelClaudeOpus55,
+		llm.WithReasoningEffort(llm.ReasoningEffortXHigh),
+		llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.Nil(t, req.Thinking)
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "xhigh", req.OutputConfig.Effort)
+}
+
+func TestForcedToolChoiceRejectedOnOpus55(t *testing.T) {
+	assert.True(t, requestThinkingBlocksForcedToolChoice(ModelClaudeOpus55, nil))
+	assert.False(t, requestThinkingBlocksForcedToolChoice(ModelClaudeOpus5, nil))
+}

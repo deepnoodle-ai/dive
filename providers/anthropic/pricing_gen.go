@@ -104,6 +104,15 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-08-09",
 	},
+	// Cache hits bill at 0.05x base input on Opus 5.5, not the standard 0.1x, so the rate is stated rather than derived. Cache writes keep the standard 1.25x (5m) and 2x (1h).
+	ModelClaudeOpus55: {
+		Model:          ModelClaudeOpus55,
+		InputPrice:     4.00,
+		OutputPrice:    20.00,
+		CacheReadPrice: 0.20,
+		Currency:       "USD",
+		UpdatedAt:      "2026-09-22",
+	},
 	// Cache hits bill at 0.025x base input on Fable 5.1 and Mythos 5.1, not the 0.1x every other Claude model uses, so the rate is stated rather than derived.
 	ModelClaudeFable51: {
 		Model:          ModelClaudeFable51,
@@ -174,5 +183,14 @@ var FastModeTextPricing = map[string]llm.PricingInfo{
 		OutputPrice: 50.00,
 		Currency:    "USD",
 		UpdatedAt:   "2026-08-09",
+	},
+	// Prompt-caching multipliers stack on the fast rate, so the 0.05x cache-hit rate applies to $8, not $4.
+	ModelClaudeOpus55: {
+		Model:          ModelClaudeOpus55,
+		InputPrice:     8.00,
+		OutputPrice:    40.00,
+		CacheReadPrice: 0.40,
+		Currency:       "USD",
+		UpdatedAt:      "2026-09-22",
 	},
 }
