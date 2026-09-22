@@ -40,6 +40,8 @@ const (
 	ModelImagineImage20      = "grok-imagine-image-2.0"
 	ModelImagineVideo        = "grok-imagine-video"
 	ModelImagineVideo15      = "grok-imagine-video-1.5"
+	ModelVoiceTranscribe20   = "grok-voice-transcribe-2.0"
+	ModelVoiceTranscribe10   = "grok-voice-transcribe-1.0"
 )
 
 // DefaultModel is generated from the catalog's default model.

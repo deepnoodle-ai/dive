@@ -227,6 +227,20 @@
       "id": "grok-imagine-video-1.5",
       "kind": "video",
       "context_window": 131072
+    },
+    {
+      "go_name": "ModelVoiceTranscribe20",
+      "id": "grok-voice-transcribe-2.0",
+      "kind": "audio",
+      "display_name": "Grok Voice Transcribe 2.0",
+      "description": "Speech to text, batch or streaming; the API default. $0.10 per hour of audio (batch), $0.20 (streaming)"
+    },
+    {
+      "go_name": "ModelVoiceTranscribe10",
+      "id": "grok-voice-transcribe-1.0",
+      "kind": "audio",
+      "display_name": "Grok Voice Transcribe 1.0",
+      "description": "The original speech-to-text model. $0.10 per hour of audio (batch), $0.20 (streaming)"
     }
   ],
   "pricing": {

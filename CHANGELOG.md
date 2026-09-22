@@ -26,12 +26,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **OpenAI GPT-6 Sol and Luna.** `openai.ModelGPT6Sol` (`gpt-6-sol`, $2/$10 per
   1M) and `openai.ModelGPT6Luna` (`gpt-6-luna`, $0.10/$0.50), Responses only.
   Both take effort `none` through `max` and explicit cache breakpoints.
+- **Grok Voice Transcribe.** `grok.ModelVoiceTranscribe20`
+  (`grok-voice-transcribe-2.0`, the API default) and `grok.ModelVoiceTranscribe10`.
+  Both bill $0.10 per hour of audio batch or $0.20 streaming.
 
 ### Changed
 
 - **OpenAI defaults to `gpt-6-luna`.** `openai.DefaultModel` and the CLI move
   from `gpt-5.6-sol` to the cheaper, smaller Luna. Set `openai.ModelGPT6Sol`
   to keep a Sol-class model.
+
+### Deprecated
+
+- **`openrouter.ModelMistralLarge3`.** OpenRouter no longer serves
+  `mistralai/mistral-large-2512`. Use `mistral.ModelMistralLarge3` instead.
 
 ### Fixed
 

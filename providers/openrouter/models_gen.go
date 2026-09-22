@@ -46,9 +46,10 @@ const (
 	ModelGrok45              = "x-ai/grok-4.5"
 	ModelGrok43              = "x-ai/grok-4.3"
 	ModelGrokBuild01         = "x-ai/grok-build-0.1"
-	ModelMistralLarge3       = "mistralai/mistral-large-2512"
-	ModelDeepSeekV41Flash    = "deepseek/deepseek-v4.1-flash"
-	ModelDeepSeekR1          = "deepseek/deepseek-r1-0528"
+	// Deprecated: OpenRouter no longer serves this model. Use mistral.ModelMistralLarge3 on Mistral's API.
+	ModelMistralLarge3    = "mistralai/mistral-large-2512"
+	ModelDeepSeekV41Flash = "deepseek/deepseek-v4.1-flash"
+	ModelDeepSeekR1       = "deepseek/deepseek-r1-0528"
 )
 
 // DefaultModel is generated from the catalog's default model.
