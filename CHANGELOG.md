@@ -29,8 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **OpenAI defaults to `gpt-6-sol`.** `openai.DefaultModel` and the CLI move
-  from `gpt-5.6-sol`. Temperature is dropped, as it was for `gpt-5.6-sol`.
+- **OpenAI defaults to `gpt-6-luna`.** `openai.DefaultModel` and the CLI move
+  from `gpt-5.6-sol` to the cheaper, smaller Luna. Set `openai.ModelGPT6Sol`
+  to keep a Sol-class model.
 
 ### Fixed
 

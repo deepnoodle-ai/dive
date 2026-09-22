@@ -332,7 +332,7 @@ func TestProviderDefaultModel(t *testing.T) {
 
 	params, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
-	assert.Equal(t, ModelGPT6Sol, string(params.Model))
+	assert.Equal(t, ModelGPT6Luna, string(params.Model))
 }
 
 func TestBuildRequestParams_ReasoningEffortNone(t *testing.T) {

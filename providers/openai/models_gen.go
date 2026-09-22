@@ -75,4 +75,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGPT6Sol
+var DefaultModel = ModelGPT6Luna
