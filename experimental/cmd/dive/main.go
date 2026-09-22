@@ -1388,7 +1388,7 @@ func getDefaultModel() string {
 		return "gemini-3.7-flash"
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
-		return "gpt-5.6-sol"
+		return "gpt-6-luna"
 	}
 	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
 		return defaultGrokModel

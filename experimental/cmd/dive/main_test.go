@@ -81,7 +81,7 @@ func TestGetDefaultModel(t *testing.T) {
 			envVars: map[string]string{
 				"OPENAI_API_KEY": "test",
 			},
-			expected: "gpt-5.6-sol",
+			expected: "gpt-6-luna",
 		},
 		{
 			name: "grok key present",

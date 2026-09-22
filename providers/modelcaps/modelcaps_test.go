@@ -91,9 +91,7 @@ func TestResolveEffortKeepsSupportedLevels(t *testing.T) {
 
 func TestGPT6AstraDropsNoneAndKeepsMax(t *testing.T) {
 	// Astra narrows the gpt-5.6 ladder at the bottom and keeps it at the top:
-	// OpenAI's release notes state it does not accept "none", and does not take
-	// a custom temperature. Neither has been probed against the endpoint yet --
-	// see the entry comment in tables.go.
+	// the endpoint rejects "none" and refuses a custom temperature.
 	effort, send := ResolveEffort("openai", "gpt-6-astra", llm.ReasoningEffortNone, nil)
 	assert.True(t, send)
 	assert.Equal(t, llm.ReasoningEffortLow, effort)
@@ -109,6 +107,26 @@ func TestGPT6AstraDropsNoneAndKeepsMax(t *testing.T) {
 	// inherit Astra's ladder on the strength of a shared prefix.
 	_, known := Lookup("openai", "gpt-6")
 	assert.False(t, known)
+}
+
+// Sol and Luna keep none, unlike Astra, and drop minimal like every model
+// since gpt-5.1.
+func TestGPT6SolAndLunaKeepNone(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		effort, send := ResolveEffort("openai", model, llm.ReasoningEffortNone, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortNone, effort)
+
+		effort, send = ResolveEffort("openai", model, llm.ReasoningEffortMinimal, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortLow, effort)
+
+		effort, send = ResolveEffort("openai", model, llm.ReasoningEffortMax, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortMax, effort)
+
+		assert.False(t, AcceptsTemperature("openai", model))
+	}
 }
 
 func TestResolveEffortPassesThroughUnknownModels(t *testing.T) {

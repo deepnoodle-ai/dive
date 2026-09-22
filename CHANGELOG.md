@@ -23,6 +23,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Thinking progress updates and block binding.** `llm.ThinkingDisplayUpdates`,
   `anthropic.WithPrefixMismatchBehavior`, and `Response.InputTransformations`.
   Beta headers are sent automatically.
+- **OpenAI GPT-6 Sol and Luna.** `openai.ModelGPT6Sol` (`gpt-6-sol`, $2/$10 per
+  1M) and `openai.ModelGPT6Luna` (`gpt-6-luna`, $0.10/$0.50), Responses only.
+  Both take effort `none` through `max` and explicit cache breakpoints.
+
+### Changed
+
+- **OpenAI defaults to `gpt-6-luna`.** `openai.DefaultModel` and the CLI move
+  from `gpt-5.6-sol` to the cheaper, smaller Luna. Set `openai.ModelGPT6Sol`
+  to keep a Sol-class model.
 
 ### Fixed
 

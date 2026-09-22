@@ -104,7 +104,7 @@ func TestUnknownModelHasNoContextWindow(t *testing.T) {
 	assert.Equal(t, 0, contextWindowForModel("not-a-real-model-9000"))
 }
 
-func TestGPT56ContextWindow(t *testing.T) {
+func TestGPT56AndGPT6ContextWindow(t *testing.T) {
 	tests := []struct {
 		model string
 		want  int
@@ -113,6 +113,8 @@ func TestGPT56ContextWindow(t *testing.T) {
 		{"gpt-5.6-sol", 1_050_000},
 		{"gpt-5.6-terra", 1_050_000},
 		{"gpt-5.6-luna", 1_050_000},
+		{"gpt-6-sol", 1_050_000},
+		{"gpt-6-luna", 1_050_000},
 	}
 
 	for _, tt := range tests {

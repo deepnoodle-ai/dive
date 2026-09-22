@@ -473,6 +473,8 @@ func isNativeOpenAIEndpoint(providerName, endpoint string) bool {
 var explicitPromptCachingModels = []string{
 	"gpt-5.6",
 	"gpt-6-astra",
+	"gpt-6-sol",
+	"gpt-6-luna",
 }
 
 // supportsExplicitPromptCaching reports whether to mark cache breakpoints in the

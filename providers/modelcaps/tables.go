@@ -138,15 +138,16 @@ var openAITable = Table{
 	// rather than borrowing gpt-5.1's by prefix.
 	{Prefix: "gpt-5.1-codex-mini", Unverified: true},
 
-	// Documented rather than probed: this entry comes from OpenAI's release
-	// notes and model page, not from a 200/400 the endpoint returned. It is
-	// recorded rather than left Unverified because both exclusions are stated
-	// outright -- "GPT-6 Astra does not support none reasoning effort", and no
-	// custom temperature, top_p, or logprobs -- and passing either through
-	// would send a request already known to fail. The published ladder (low
-	// through max) is what the entry carries; confirm it against the live
-	// endpoint the next time the tables are re-probed.
+	// First recorded from OpenAI's release notes while the model was gated,
+	// then confirmed against the endpoint once it opened: none is rejected
+	// with a ladder of low through max, and temperature is refused at every
+	// effort.
 	{Prefix: "gpt-6-astra", Caps: Capabilities{Efforts: effortsLowToMax}},
+	// Sol and Luna keep gpt-5.6's ladder, none through max, where Astra drops
+	// none. Temperature is rejected unless effort is none, the same as gpt-5.6,
+	// so it is recorded as refused.
+	{Prefix: "gpt-6-sol", Caps: Capabilities{Efforts: effortsNoneToMax}},
+	{Prefix: "gpt-6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
 
 	{Prefix: "o3", Caps: Capabilities{Efforts: effortsLowToHigh}},
 	{Prefix: "o3-pro", Caps: Capabilities{Efforts: effortsLowToHigh}},

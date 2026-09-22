@@ -154,29 +154,33 @@ func TestBuildRequestParams_GPT56PromptCaching(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
 }
 
-func TestBuildRequestParams_AstraPromptCaching(t *testing.T) {
-	provider := New(WithAPIKey("test"))
-	config := &llm.Config{}
-	config.Apply(
-		llm.WithModel("gpt-6-astra"),
-		llm.WithPromptCacheKey("stable-session-key"),
-		llm.WithMessages(
-			llm.NewUserTextMessage("one"),
-			llm.NewAssistantTextMessage("answer one"),
-			llm.NewUserTextMessage("two"),
-			llm.NewAssistantTextMessage("answer two"),
-			llm.NewUserTextMessage("three"),
-			llm.NewAssistantTextMessage("answer three"),
-			llm.NewUserTextMessage("four"),
-		),
-	)
+func TestBuildRequestParams_GPT6PromptCaching(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			provider := New(WithAPIKey("test"))
+			config := &llm.Config{}
+			config.Apply(
+				llm.WithModel(model),
+				llm.WithPromptCacheKey("stable-session-key"),
+				llm.WithMessages(
+					llm.NewUserTextMessage("one"),
+					llm.NewAssistantTextMessage("answer one"),
+					llm.NewUserTextMessage("two"),
+					llm.NewAssistantTextMessage("answer two"),
+					llm.NewUserTextMessage("three"),
+					llm.NewAssistantTextMessage("answer three"),
+					llm.NewUserTextMessage("four"),
+				),
+			)
 
-	params, err := provider.buildRequestParams(config)
-	assert.NoError(t, err)
-	body, err := json.Marshal(params)
-	assert.NoError(t, err)
-	assert.True(t, strings.Contains(string(body), `"prompt_cache_key":"stable-session-key"`))
-	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
+			params, err := provider.buildRequestParams(config)
+			assert.NoError(t, err)
+			body, err := json.Marshal(params)
+			assert.NoError(t, err)
+			assert.True(t, strings.Contains(string(body), `"prompt_cache_key":"stable-session-key"`))
+			assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
+		})
+	}
 }
 
 func TestBuildRequestParams_OlderModelOmitsExplicitPromptCaching(t *testing.T) {
@@ -328,7 +332,7 @@ func TestProviderDefaultModel(t *testing.T) {
 
 	params, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
-	assert.Equal(t, ModelGPT56Sol, string(params.Model))
+	assert.Equal(t, ModelGPT6Luna, string(params.Model))
 }
 
 func TestBuildRequestParams_ReasoningEffortNone(t *testing.T) {
