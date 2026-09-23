@@ -57,6 +57,8 @@ func New(opts ...Option) *Provider {
 		openaic.WithBaseWait(c.baseWait),
 		openaic.WithReportedEstimatedUsageCost("USD"),
 		openaic.WithDisableCatalogCost(),
+		openaic.WithPromptCacheKeySupport(),
+		openaic.WithResponseFormatSupport(),
 	)}
 }
 

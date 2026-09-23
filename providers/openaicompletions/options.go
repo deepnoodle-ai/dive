@@ -99,3 +99,15 @@ func WithDisableCatalogCost() Option {
 		p.disableCatalogCost = true
 	}
 }
+
+// WithPromptCacheKeySupport forwards llm.WithPromptCacheKey to compatible
+// Chat Completions endpoints.
+func WithPromptCacheKeySupport() Option {
+	return func(p *Provider) { p.supportsPromptCacheKey = true }
+}
+
+// WithResponseFormatSupport enables llm.WithResponseFormat for endpoints that
+// support the OpenAI Chat Completions response_format request shape.
+func WithResponseFormatSupport() Option {
+	return func(p *Provider) { p.supportsResponseFormat = true }
+}

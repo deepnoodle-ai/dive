@@ -49,6 +49,18 @@ dive --model deepinfra/zai-org/GLM-5.3-Flash
 
 The `deepinfra/` prefix selects Dive's provider; it is removed from the API request. Other DeepInfra model categories, such as embeddings and image generation, use different APIs. The built-in catalog supplies context windows for recommended models. Arbitrary chat models work without a catalog entry, but their context window is unknown to Dive. Dive uses DeepInfra's reported cost estimate when present and leaves cost unknown otherwise.
 
+DeepInfra [caches repeated prompt prefixes automatically](https://docs.deepinfra.com/chat/prompt-caching). Library callers can pass a stable session key with `llm.WithPromptCacheKey("agent-session-123")` to improve reuse. Dive also forwards `llm.WithResponseFormat` for DeepInfra's `json_object` and `json_schema` modes on models that support structured output. For example:
+
+```go
+response, err := model.Generate(ctx,
+    llm.WithMessages(llm.NewUserTextMessage("Return a JSON object with an answer field.")),
+    llm.WithPromptCacheKey("agent-session-123"),
+    llm.WithResponseFormat(&llm.ResponseFormat{Type: llm.ResponseFormatTypeJSON}),
+)
+```
+
+DeepInfra's [retained cache windows](https://docs.deepinfra.com/chat/prompt-cache-retention) require an additional paid cache-write option that Dive does not expose yet. The ordinary cache and cache key do not request a retained window.
+
 ### Google (Gemini)
 
 ```go
@@ -127,14 +139,15 @@ message := llm.NewUserMessage(
 Each provider encodes these blocks into its native request format. Supported
 content sources by provider:
 
-| Provider                                          | Images                   | Documents                              |
-| ------------------------------------------------- | ------------------------ | -------------------------------------- |
-| anthropic                                         | base64, URL, file ID     | base64, URL, file ID, text             |
-| openai (Responses)                                | base64, URL, file ID     | base64, URL, file ID, text             |
-| grok                                              | base64, URL, file ID     | same as openai (server support varies) |
-| google                                            | base64, URL/file URI     | base64, URL/file URI, text             |
-| openaicompletions, deepinfra, mistral, openrouter | base64, URL              | base64, file ID, text (no URL)         |
-| ollama                                            | base64 (model-dependent) | model-dependent                        |
+| Provider                               | Images                   | Documents                                        |
+| -------------------------------------- | ------------------------ | ------------------------------------------------ |
+| anthropic                              | base64, URL, file ID     | base64, URL, file ID, text                       |
+| openai (Responses)                     | base64, URL, file ID     | base64, URL, file ID, text                       |
+| grok                                   | base64, URL, file ID     | same as openai (server support varies)           |
+| google                                 | base64, URL/file URI     | base64, URL/file URI, text                       |
+| openaicompletions, mistral, openrouter | base64, URL              | base64, file ID, text (no URL)                   |
+| deepinfra                              | base64, URL              | text only; send page images for visual documents |
+| ollama                                 | base64 (model-dependent) | model-dependent                                  |
 
 Notes:
 

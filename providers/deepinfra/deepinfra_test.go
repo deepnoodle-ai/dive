@@ -11,7 +11,88 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
+
+func TestRequestForwardsCacheKeyAndStructuredOutput(t *testing.T) {
+	var request struct {
+		PromptCacheKey string `json:"prompt_cache_key"`
+		ResponseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name        string         `json:"name"`
+				Description string         `json:"description"`
+				Strict      bool           `json:"strict"`
+				Schema      map[string]any `json:"schema"`
+			} `json:"json_schema"`
+		} `json:"response_format"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{\"answer\":\"OK\"}"}}]}`))
+	}))
+	defer server.Close()
+
+	provider := New(WithAPIKey("test-key"), WithEndpoint(server.URL))
+	response, err := provider.Generate(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("Answer in JSON")),
+		llm.WithPromptCacheKey("agent-session-123"),
+		llm.WithResponseFormat(&llm.ResponseFormat{
+			Type:        llm.ResponseFormatTypeJSONSchema,
+			Name:        "answer",
+			Description: "A short answer",
+			Schema: &schema.Schema{
+				Type:       "object",
+				Properties: map[string]*schema.Property{"answer": {Type: "string"}},
+				Required:   []string{"answer"},
+			},
+		}))
+	assert.NoError(t, err)
+	assert.Equal(t, response.Message().Text(), `{"answer":"OK"}`)
+	assert.Equal(t, request.PromptCacheKey, "agent-session-123")
+	assert.Equal(t, request.ResponseFormat.Type, "json_schema")
+	assert.Equal(t, request.ResponseFormat.JSONSchema.Name, "answer")
+	assert.Equal(t, request.ResponseFormat.JSONSchema.Description, "A short answer")
+	assert.True(t, request.ResponseFormat.JSONSchema.Strict)
+	assert.Equal(t, request.ResponseFormat.JSONSchema.Schema["additionalProperties"], false)
+}
+
+func TestRequestJSONModeAndInvalidSchema(t *testing.T) {
+	var format map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ResponseFormat map[string]any `json:"response_format"`
+		}
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		format = request.ResponseFormat
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{}"}}]}`))
+	}))
+	defer server.Close()
+
+	provider := New(WithAPIKey("test-key"), WithEndpoint(server.URL))
+	message := llm.WithMessages(llm.NewUserTextMessage("Answer in JSON"))
+	_, err := provider.Generate(context.Background(), message,
+		llm.WithResponseFormat(&llm.ResponseFormat{Type: llm.ResponseFormatTypeJSON}))
+	assert.NoError(t, err)
+	assert.Equal(t, format["type"], "json_object")
+	_, err = provider.Generate(context.Background(), message,
+		llm.WithResponseFormat(&llm.ResponseFormat{Type: llm.ResponseFormatTypeJSONSchema, Name: "answer"}))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "schema is required")
+}
+
+func TestBinaryDocumentFailsBeforeRequest(t *testing.T) {
+	provider := New(WithAPIKey("test-key"), WithEndpoint("http://localhost:1"))
+	_, err := provider.Generate(context.Background(), llm.WithMessages(llm.NewUserMessage(
+		&llm.DocumentContent{Source: &llm.ContentSource{
+			Type: llm.ContentSourceTypeBase64, MediaType: "application/pdf", Data: "eA==",
+		}},
+	)))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "supports text documents only")
+}
 
 func TestCreateModelSendsNativeIDAndDeepInfraKey(t *testing.T) {
 	t.Setenv("DEEP_INFRA_API_KEY", "deepinfra-key")

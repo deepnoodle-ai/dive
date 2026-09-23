@@ -26,21 +26,34 @@ type StreamOptions struct {
 }
 
 type Request struct {
-	Model               string          `json:"model"`
-	Messages            []Message       `json:"messages"`
-	MaxTokens           *int            `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64        `json:"temperature,omitempty"`
-	Stream              bool            `json:"stream,omitempty"`
-	StreamOptions       *StreamOptions  `json:"stream_options,omitempty"`
-	Tools               []Tool          `json:"tools,omitempty"`
-	ToolChoice          any             `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"`
-	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`  // -2 to 2, default 0
-	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
-	ReasoningEffort     ReasoningEffort `json:"reasoning_effort,omitempty"`  // supported reasoning models only
-	ReasoningFormat     string          `json:"reasoning_format,omitempty"`  // groq only?
-	PromptCacheKey      string          `json:"prompt_cache_key,omitempty"`
+	Model               string              `json:"model"`
+	Messages            []Message           `json:"messages"`
+	MaxTokens           *int                `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64            `json:"temperature,omitempty"`
+	Stream              bool                `json:"stream,omitempty"`
+	StreamOptions       *StreamOptions      `json:"stream_options,omitempty"`
+	Tools               []Tool              `json:"tools,omitempty"`
+	ToolChoice          any                 `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool               `json:"parallel_tool_calls,omitempty"`
+	PresencePenalty     *float64            `json:"presence_penalty,omitempty"`  // -2 to 2, default 0
+	FrequencyPenalty    *float64            `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
+	ReasoningEffort     ReasoningEffort     `json:"reasoning_effort,omitempty"`  // supported reasoning models only
+	ReasoningFormat     string              `json:"reasoning_format,omitempty"`  // groq only?
+	PromptCacheKey      string              `json:"prompt_cache_key,omitempty"`
+	ResponseFormat      *ChatResponseFormat `json:"response_format,omitempty"`
+}
+
+type ChatResponseFormat struct {
+	Type       llm.ResponseFormatType `json:"type"`
+	JSONSchema *ChatJSONSchema        `json:"json_schema,omitempty"`
+}
+
+type ChatJSONSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Strict      bool           `json:"strict"`
+	Schema      map[string]any `json:"schema"`
 }
 
 type Message struct {

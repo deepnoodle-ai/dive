@@ -84,6 +84,9 @@ type Provider struct {
 	// disableCatalogCost prevents a different provider's price for the same
 	// native model ID from being attributed to this endpoint.
 	disableCatalogCost bool
+	// Provider wrappers opt into these compatible endpoint capabilities.
+	supportsPromptCacheKey bool
+	supportsResponseFormat bool
 }
 
 // New creates a new OpenAI Completions provider with the given options.
@@ -475,6 +478,9 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 				parts = append(parts, part)
 				hasMedia = true
 			case *llm.DocumentContent:
+				if providerName == "deepinfra" && c.Source != nil && c.Source.Type != llm.ContentSourceTypeText {
+					return nil, fmt.Errorf("DeepInfra Chat Completions supports text documents only; send rendered page images for visual document input")
+				}
 				part, err := encodeDocumentContentPart(c)
 				if err != nil {
 					return nil, err
@@ -790,8 +796,15 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	} else {
 		req.Model = p.model
 	}
-	if config.PromptCacheKey != "" && isDefaultOpenAICompletionsEndpoint(p.Name(), p.endpoint) {
+	if config.PromptCacheKey != "" && (p.supportsPromptCacheKey || isDefaultOpenAICompletionsEndpoint(p.Name(), p.endpoint)) {
 		req.PromptCacheKey = config.PromptCacheKey
+	}
+	if config.ResponseFormat != nil && p.supportsResponseFormat {
+		format, err := chatResponseFormat(config.ResponseFormat)
+		if err != nil {
+			return err
+		}
+		req.ResponseFormat = format
 	}
 
 	var maxTokens int
