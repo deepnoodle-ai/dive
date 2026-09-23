@@ -6,11 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-09-23
+
+### Changed
+
+- **File search now gives clearer, bounded results.** `Glob` selects the newest
+  matches; `Grep` supports paging, context, and multiline search. Both flag
+  incomplete searches.
+
 ### Fixed
 
-- **Cancelling a run now stops it during tool calls.** `Glob` and `Grep`'s
-  pure-Go search stop walking when their context ends. A sequential batch starts
-  no further calls, and a parallel batch stops waiting for tools that ignore it.
+- **Cancelling a run now stops tool batches promptly.** File walks stop,
+  sequential batches stop dispatching, and parallel batches stop waiting.
+- **Tool errors are explicit.** Null inputs and special-file targets fail
+  clearly; built-in tools check cancellation and ended batches suppress late events.
 
 ## [1.31.0] - 2026-09-22
 
