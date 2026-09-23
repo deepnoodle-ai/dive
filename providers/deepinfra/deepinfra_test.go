@@ -117,6 +117,34 @@ func TestStreamUsesChatCompletionsAndEstimatedCost(t *testing.T) {
 	assert.False(t, response.Usage.CostEstimateUnavailable)
 }
 
+func TestStreamKeepsCostUnknownWhenEstimateMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"zai-org/GLM-5.3-Flash","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"}}]}`,
+			``,
+			`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"zai-org/GLM-5.3-Flash","choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	provider := New(WithAPIKey("test-key"), WithEndpoint(server.URL), WithModel(ModelGLM53Flash))
+	stream, err := provider.Stream(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("Reply with OK")))
+	assert.NoError(t, err)
+	defer stream.Close()
+	acc := llm.NewResponseAccumulator()
+	for stream.Next() {
+		assert.NoError(t, acc.AddEvent(stream.Event()))
+	}
+	assert.NoError(t, stream.Err())
+	assert.Nil(t, acc.Response().Usage.Cost)
+	assert.True(t, acc.Response().Usage.CostEstimateUnavailable)
+}
+
 func TestAPIKeyPrecedence(t *testing.T) {
 	t.Setenv("DEEP_INFRA_API_KEY", "")
 	t.Setenv("DEEPINFRA_API_KEY", "")
