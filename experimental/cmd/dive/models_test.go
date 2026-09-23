@@ -26,6 +26,15 @@ func TestLatestGeminiFlashModels(t *testing.T) {
 	}
 }
 
+func TestDeepInfraModelChoicesUseProviderPrefix(t *testing.T) {
+	info := deepinfraProviderInfo()
+	assert.Equal(t, "DeepInfra", info.Name)
+	assert.True(t, len(info.Models) > 0)
+	assert.Equal(t, "deepinfra/zai-org/GLM-5.3-Flash", info.Models[0].ModelID)
+	assert.Equal(t, 1048576, contextWindowForModel(info.Models[0].ModelID))
+	assert.Equal(t, 0, contextWindowForModel("zai-org/GLM-5.3-Flash"))
+}
+
 func TestGoogleProviderCatalogIncludesLatestFlashModels(t *testing.T) {
 	want := map[string]bool{
 		"gemini-3.8-flash":      false,

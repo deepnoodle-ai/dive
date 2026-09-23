@@ -28,6 +28,27 @@ model := openai.New() // defaults to gpt-6-luna
 **Models:** See `providers/openai/models.go` for available models.
 **Features:** Streaming, tool calling, vision input, reasoning effort
 
+### DeepInfra
+
+```go
+import "github.com/deepnoodle-ai/dive/providers/deepinfra"
+
+model := deepinfra.New(deepinfra.WithModel(deepinfra.ModelQwen38Flash))
+```
+
+**Env:** `DEEP_INFRA_API_KEY` (also accepts `DEEPINFRA_API_KEY` or `DEEPINFRA_TOKEN`).
+**API:** OpenAI-compatible Chat Completions, with streaming and tool calling when the selected model supports them. This provider does not use the OpenAI Responses API.
+
+The Dive CLI shows a short list of recommended DeepInfra chat models in `/model` and `dive models`. Any Chat Completions model from [DeepInfra's catalog](https://deepinfra.com/models) can be selected with its exact native ID after `deepinfra/`:
+
+```bash
+dive --model deepinfra/Qwen/Qwen3.8-Flash
+dive --model deepinfra/zai-org/GLM-5.3-Flash
+# In an interactive Dive session: /model deepinfra/<publisher>/<model>
+```
+
+The `deepinfra/` prefix selects Dive's provider; it is removed from the API request. Other DeepInfra model categories, such as embeddings and image generation, use different APIs. The built-in catalog supplies context windows for recommended models. Arbitrary chat models work without a catalog entry, but their context window is unknown to Dive. DeepInfra costs are currently reported as unknown.
+
 ### Google (Gemini)
 
 ```go
@@ -106,14 +127,14 @@ message := llm.NewUserMessage(
 Each provider encodes these blocks into its native request format. Supported
 content sources by provider:
 
-| Provider                               | Images                   | Documents                              |
-| -------------------------------------- | ------------------------ | -------------------------------------- |
-| anthropic                              | base64, URL, file ID     | base64, URL, file ID, text             |
-| openai (Responses)                     | base64, URL, file ID     | base64, URL, file ID, text             |
-| grok                                   | base64, URL, file ID     | same as openai (server support varies) |
-| google                                 | base64, URL/file URI     | base64, URL/file URI, text             |
-| openaicompletions, mistral, openrouter | base64, URL              | base64, file ID, text (no URL)         |
-| ollama                                 | base64 (model-dependent) | model-dependent                        |
+| Provider                                          | Images                   | Documents                              |
+| ------------------------------------------------- | ------------------------ | -------------------------------------- |
+| anthropic                                         | base64, URL, file ID     | base64, URL, file ID, text             |
+| openai (Responses)                                | base64, URL, file ID     | base64, URL, file ID, text             |
+| grok                                              | base64, URL, file ID     | same as openai (server support varies) |
+| google                                            | base64, URL/file URI     | base64, URL/file URI, text             |
+| openaicompletions, deepinfra, mistral, openrouter | base64, URL              | base64, file ID, text (no URL)         |
+| ollama                                            | base64 (model-dependent) | model-dependent                        |
 
 Notes:
 

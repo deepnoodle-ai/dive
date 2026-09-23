@@ -80,3 +80,11 @@ func WithReportedUsageCost(currency string) Option {
 		p.reportedCostCurrency = currency
 	}
 }
+
+// WithDisableCatalogCost leaves cost unknown when this endpoint may charge
+// differently from another provider serving the same native model ID.
+func WithDisableCatalogCost() Option {
+	return func(p *Provider) {
+		p.disableCatalogCost = true
+	}
+}

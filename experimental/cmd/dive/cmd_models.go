@@ -27,10 +27,14 @@ func runModels(ctx *cli.Context) error {
 		}
 
 		// Model rows
+		modelWidth := 30
+		for _, m := range p.Models {
+			modelWidth = max(modelWidth, len(m.ModelID)+2)
+		}
 		for _, m := range p.Models {
 			ctx := contextWindowForModel(m.ModelID)
 			ctxStr := formatContextWindow(ctx)
-			fmt.Printf("    %-30s %-18s %6s    %s\n", m.ModelID, m.Label, ctxStr, m.Description)
+			fmt.Printf("    %-*s %-18s %6s    %s\n", modelWidth, m.ModelID, m.Label, ctxStr, m.Description)
 		}
 		fmt.Println()
 	}

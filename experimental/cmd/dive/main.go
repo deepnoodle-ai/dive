@@ -23,6 +23,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/deepinfra"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/subagent"
@@ -1395,6 +1396,9 @@ func getDefaultModel() string {
 	}
 	if os.Getenv("MISTRAL_API_KEY") != "" {
 		return defaultMistralModel
+	}
+	if deepinfra.APIKey() != "" {
+		return "deepinfra/" + deepinfra.DefaultModel
 	}
 	// Checked last: Meta documents the generic name MODEL_API_KEY, which is
 	// likelier than a vendor-scoped name to already mean something else in a

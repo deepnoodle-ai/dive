@@ -13,6 +13,7 @@ import (
 
 	// Import providers to trigger their init() registration
 	_ "github.com/deepnoodle-ai/dive/providers/anthropic"
+	_ "github.com/deepnoodle-ai/dive/providers/deepinfra"
 	_ "github.com/deepnoodle-ai/dive/providers/google"
 	_ "github.com/deepnoodle-ai/dive/providers/grok"
 	_ "github.com/deepnoodle-ai/dive/providers/meta"

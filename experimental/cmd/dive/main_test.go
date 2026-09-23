@@ -42,6 +42,9 @@ func TestGetDefaultModel(t *testing.T) {
 		"GOOGLE_API_KEY",
 		"GEMINI_API_KEY",
 		"OPENAI_API_KEY",
+		"DEEP_INFRA_API_KEY",
+		"DEEPINFRA_API_KEY",
+		"DEEPINFRA_TOKEN",
 		"XAI_API_KEY",
 		"GROK_API_KEY",
 		"MISTRAL_API_KEY",
@@ -82,6 +85,21 @@ func TestGetDefaultModel(t *testing.T) {
 				"OPENAI_API_KEY": "test",
 			},
 			expected: "gpt-6-luna",
+		},
+		{
+			name: "deepinfra key present",
+			envVars: map[string]string{
+				"DEEP_INFRA_API_KEY": "test",
+			},
+			expected: "deepinfra/zai-org/GLM-5.3-Flash",
+		},
+		{
+			name: "existing provider keeps default with deepinfra key present",
+			envVars: map[string]string{
+				"XAI_API_KEY":        "test",
+				"DEEP_INFRA_API_KEY": "test",
+			},
+			expected: "grok-4.7",
 		},
 		{
 			name: "grok key present",

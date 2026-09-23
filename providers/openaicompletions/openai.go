@@ -80,6 +80,9 @@ type Provider struct {
 	// reportedCostCurrency opts an OpenAI-compatible provider into trusting the
 	// authoritative usage.cost value it returns on every response.
 	reportedCostCurrency string
+	// disableCatalogCost prevents a different provider's price for the same
+	// native model ID from being attributed to this endpoint.
+	disableCatalogCost bool
 }
 
 // New creates a new OpenAI Completions provider with the given options.
@@ -228,6 +231,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		Usage:   result.Usage.toLLMUsage(),
 	}
 	p.applyReportedUsageCost(result.Usage, &response.Usage, response.Model)
+	if p.disableCatalogCost && response.Usage.Cost == nil {
+		response.Usage.CostEstimateUnavailable = true
+	}
 
 	llm.PopulateCost(response.Model, response.Usage.Speed == string(llm.SpeedFast), &response.Usage)
 	p.markReportedCostUnavailable(result.Usage, &response.Usage)
@@ -327,6 +333,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			thinkingIndex:        -1,
 			textIndex:            -1,
 			reportedCostCurrency: p.reportedCostCurrency,
+			disableCatalogCost:   p.disableCatalogCost,
 			providerName:         p.Name(),
 		}, nil
 	})

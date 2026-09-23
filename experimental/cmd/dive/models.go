@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/deepinfra"
 	"github.com/deepnoodle-ai/dive/providers/google"
 	"github.com/deepnoodle-ai/dive/providers/grok"
 	"github.com/deepnoodle-ai/dive/providers/meta"
@@ -30,6 +31,7 @@ var embeddedProviderCatalogs = []modelcatalog.Catalog{
 	grok.Catalog(),
 	mistral.Catalog(),
 	meta.Catalog(),
+	deepinfra.Catalog(),
 	openrouter.Catalog(),
 	ollama.Catalog(),
 }
@@ -44,12 +46,16 @@ func buildModelCatalog(catalogs []modelcatalog.Catalog) []modelInfo {
 	seen := map[string]bool{}
 	for _, catalog := range catalogs {
 		for _, model := range catalog.Models {
-			if model.ID == "" || model.ContextWindow == 0 || seen[model.ID] {
+			id := model.ID
+			if catalog.Provider == "deepinfra" {
+				id = "deepinfra/" + id
+			}
+			if model.ID == "" || model.ContextWindow == 0 || seen[id] {
 				continue
 			}
-			seen[model.ID] = true
+			seen[id] = true
 			models = append(models, modelInfo{
-				Pattern:       model.ID,
+				Pattern:       id,
 				Label:         model.DisplayName,
 				ContextWindow: model.ContextWindow,
 			})
@@ -121,11 +127,25 @@ func providerInfoFromCatalog(
 	return providerInfo{Name: name, EnvVars: envVars, Models: choices}
 }
 
+// DeepInfra's native IDs have their own publisher prefix (for example,
+// Qwen/Qwen3.8-Flash). The leading deepinfra/ selects Dive's provider and is
+// removed by the registry before the wire request is sent.
+func deepinfraProviderInfo() providerInfo {
+	info := providerInfoFromCatalog("DeepInfra",
+		[]string{"DEEP_INFRA_API_KEY", "DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"},
+		deepinfra.Catalog())
+	for i := range info.Models {
+		info.Models[i].ModelID = "deepinfra/" + info.Models[i].ModelID
+	}
+	return info
+}
+
 // providerCatalog is derived from each provider's embedded recommended models.
 var providerCatalog = []providerInfo{
 	providerInfoFromCatalog("Anthropic", []string{"ANTHROPIC_API_KEY"}, anthropic.Catalog()),
 	providerInfoFromCatalog("Google", []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"}, google.Catalog()),
 	providerInfoFromCatalog("OpenAI", []string{"OPENAI_API_KEY"}, openai.Catalog()),
+	deepinfraProviderInfo(),
 	providerInfoFromCatalog("Grok", []string{"XAI_API_KEY", "GROK_API_KEY"}, grok.Catalog()),
 	providerInfoFromCatalog("Mistral", []string{"MISTRAL_API_KEY"}, mistral.Catalog()),
 	providerInfoFromCatalog("Meta", []string{"MODEL_API_KEY", "META_API_KEY"}, meta.Catalog()),
