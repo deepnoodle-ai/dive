@@ -43,7 +43,7 @@ search root. Results are the newest matching regular files, with path order brea
 ties. `MaxResults` limits the returned files; a separate model-visible content
 block states when more matches or inaccessible paths exist. The complete tree
 is walked to select the newest files, so a broad search may take time.
-Directory symlinks are not followed.
+Directory symlinks are not followed; a symlink used as the search root is an error.
 
 ### Grep
 
@@ -57,7 +57,8 @@ Grep searches regular files up to 64 MiB each. It includes hidden and ignored
 files except for `DefaultExcludes`; set that option to an empty slice to remove
 the built-in excludes. `UseRipgrep` enables an optional streaming ripgrep
 backend when `rg` is installed. The Go backend is used otherwise. Both support
-`glob`, `type`, context lines, and multiline patterns.
+`glob`, `type`, context lines, and multiline patterns. A symlink used as the
+search root is an error.
 
 `output_mode` selects matching lines (`content`), unique files
 (`files_with_matches`, the default), or per-file match counts (`count`; matching
@@ -161,9 +162,10 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 ```
 
 Built-in file tools check the run context before expensive or mutating work.
-Parallel batches return promptly on cancellation and stop sending stream or
-progress events after the batch ends. An arbitrary in-process custom tool that
-ignores its context can continue running after the call returns; implement
+Parallel batches return promptly on cancellation and stop admitting stream or
+progress callbacks after the batch ends. A callback already running may finish
+after cancellation. An arbitrary in-process custom tool that ignores its
+context can continue running after the call returns; implement
 cooperative cancellation in custom tools that have side effects.
 
 ## Tool Annotations

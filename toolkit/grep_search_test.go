@@ -91,6 +91,38 @@ func TestGrepSearch_LongLineAndMissingRoot(t *testing.T) {
 	})
 }
 
+func TestGrepSearch_NoPhantomEOFLine(t *testing.T) {
+	grepBackends(t, func(t *testing.T, useRipgrep bool) {
+		dir := t.TempDir()
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "empty.txt"), nil, 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "trailing.txt"), []byte("one\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "blank.txt"), []byte("one\n\n"), 0644))
+		tool := NewGrepTool(GrepToolOptions{WorkspaceDir: dir, UseRipgrep: useRipgrep})
+		result, err := tool.Call(context.Background(), &GrepInput{Path: dir, Pattern: "^$", OutputMode: GrepOutputCount})
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
+		assert.Equal(t, "blank.txt:1", result.Content[0].Text)
+	})
+}
+
+func TestGrepSearch_RejectsSymlinkRoot(t *testing.T) {
+	grepBackends(t, func(t *testing.T, useRipgrep bool) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "target")
+		assert.NoError(t, os.Mkdir(target, 0755))
+		assert.NoError(t, os.WriteFile(filepath.Join(target, "match.txt"), []byte("needle\n"), 0644))
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		tool := NewGrepTool(GrepToolOptions{UseRipgrep: useRipgrep})
+		result, err := tool.Call(context.Background(), &GrepInput{Path: link, Pattern: "needle"})
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "symlink")
+	})
+}
+
 func TestGrepSearch_CountsAreCompleteAcrossPages(t *testing.T) {
 	grepBackends(t, func(t *testing.T, useRipgrep bool) {
 		dir := t.TempDir()
@@ -104,6 +136,7 @@ func TestGrepSearch_CountsAreCompleteAcrossPages(t *testing.T) {
 		result, err = tool.Call(context.Background(), &GrepInput{Path: dir, Pattern: "match", OutputMode: GrepOutputCount, Offset: 1})
 		assert.NoError(t, err)
 		assert.Equal(t, "b.txt:1", result.Content[0].Text)
+		assert.False(t, strings.Contains(result.Content[1].Text, "continue"))
 	})
 }
 

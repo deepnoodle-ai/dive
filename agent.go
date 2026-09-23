@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -2257,25 +2258,29 @@ func (a *Agent) executeToolCallsParallel(
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	deniedResults := make([]*ToolCallResult, len(toolCalls))
 	// Tool goroutines that ignore cancellation may outlive this batch. Route
-	// their stream/progress events through a gate so no callback from an ended
-	// batch can reach the caller. The mutex also serializes callbacks from
-	// parallel tools with completion events.
-	var callbackMu sync.Mutex
-	callbackClosed := false
+	// their stream/progress events through a gate so no new callback from an
+	// ended batch can reach the caller. A channel serializes callbacks, while
+	// closure stays independent of an in-flight user callback that may block.
+	callbackSlot := make(chan struct{}, 1)
+	callbackSlot <- struct{}{}
+	var callbackClosed atomic.Bool
 	originalCallback := callback
 	callback = func(ctx context.Context, item *ResponseItem) error {
-		callbackMu.Lock()
-		defer callbackMu.Unlock()
-		if callbackClosed || ctx.Err() != nil || originalCallback == nil {
+		if callbackClosed.Load() || ctx.Err() != nil || originalCallback == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-callbackSlot:
+		}
+		defer func() { callbackSlot <- struct{}{} }()
+		if callbackClosed.Load() || ctx.Err() != nil {
 			return nil
 		}
 		return originalCallback(ctx, item)
 	}
-	defer func() {
-		callbackMu.Lock()
-		callbackClosed = true
-		callbackMu.Unlock()
-	}()
+	defer callbackClosed.Store(true)
 
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

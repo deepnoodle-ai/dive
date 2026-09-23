@@ -312,13 +312,17 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 		}
 	}
 
-	// Check if path exists
-	info, err := os.Stat(searchPath)
+	// Reject a symlinked search root. Walk does not follow it and would
+	// otherwise report a complete search with no matches.
+	info, err := os.Lstat(searchPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return dive.NewToolResultError(fmt.Sprintf("Path does not exist: %s", searchPath)), nil
 		}
 		return dive.NewToolResultError(fmt.Sprintf("Cannot access path %s: %v", searchPath, err)), nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return dive.NewToolResultError(fmt.Sprintf("Search root must not be a symlink: %s", searchPath)), nil
 	}
 	if !info.IsDir() {
 		return dive.NewToolResultError(fmt.Sprintf("Path is not a directory: %s", searchPath)), nil

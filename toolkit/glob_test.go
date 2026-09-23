@@ -122,6 +122,22 @@ func TestGlobTool_ResultLimitKeepsNewestFiles(t *testing.T) {
 	assert.Contains(t, result.Content[1].Text, "more matches exist")
 }
 
+func TestGlobTool_RejectsSymlinkRoot(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	assert.NoError(t, os.Mkdir(target, 0755))
+	assert.NoError(t, os.WriteFile(filepath.Join(target, "match.go"), []byte("package main"), 0644))
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	tool := NewGlobTool()
+	result, err := tool.Call(context.Background(), &GlobInput{Path: link, Pattern: "*.go"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "symlink")
+}
+
 func TestGlobTool_NoMatches(t *testing.T) {
 	tempDir := t.TempDir()
 

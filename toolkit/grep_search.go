@@ -239,6 +239,13 @@ func (t *GrepTool) search(ctx context.Context, input *GrepInput) (*dive.ToolResu
 			return dive.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 	}
+	rootEntry, err := os.Lstat(searchPath)
+	if err != nil {
+		return dive.NewToolResultError(fmt.Sprintf("cannot access search path %s: %v", searchPath, err)), nil
+	}
+	if rootEntry.Mode()&os.ModeSymlink != 0 {
+		return dive.NewToolResultError(fmt.Sprintf("search root must not be a symlink: %s", searchPath)), nil
+	}
 	rootInfo, err := os.Stat(searchPath)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("cannot access search path %s: %v", searchPath, err)), nil
@@ -397,7 +404,7 @@ func (t *GrepTool) searchPureGo(ctx context.Context, input *GrepInput, root stri
 			return nil
 		}
 		lineNumber := 1
-		for start := 0; start <= len(content); {
+		for start := 0; start < len(content); {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -642,8 +649,10 @@ func (t *GrepTool) formatSearchResults(ctx context.Context, input *GrepInput, ro
 	}
 	result := dive.NewToolResultText(strings.TrimSpace(output.String())).WithDisplay(display)
 	var notes []string
-	if total > c.offset+selected || c.offset > 0 {
+	if total > c.offset+selected {
 		notes = append(notes, fmt.Sprintf("Showing entries %d-%d of %d; use offset %d to continue.", c.offset+1, c.offset+selected, total, c.offset+selected))
+	} else if c.offset > 0 {
+		notes = append(notes, fmt.Sprintf("Showing entries %d-%d of %d.", c.offset+1, c.offset+selected, total))
 	}
 	if c.warningCount > 0 {
 		notes = append(notes, fmt.Sprintf("Search incomplete: skipped %d paths (%s).", c.warningCount, strings.Join(c.warnings, "; ")))
