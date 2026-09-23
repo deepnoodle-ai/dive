@@ -201,6 +201,7 @@ type Usage struct {
 	CompletionTokens        int                      `json:"completion_tokens"`
 	TotalTokens             int                      `json:"total_tokens"`
 	Cost                    *float64                 `json:"cost,omitempty"`
+	EstimatedCost           *float64                 `json:"estimated_cost,omitempty"`
 	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
 	present                 bool

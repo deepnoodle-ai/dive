@@ -78,6 +78,17 @@ func WithSystemRole(systemRole string) Option {
 func WithReportedUsageCost(currency string) Option {
 	return func(p *Provider) {
 		p.reportedCostCurrency = currency
+		p.reportedCostField = "cost"
+	}
+}
+
+// WithReportedEstimatedUsageCost uses a provider's usage.estimated_cost field
+// as its cost estimate. Missing estimates remain unknown if catalog cost is
+// disabled. The amount is labeled as a provider estimate, not a final charge.
+func WithReportedEstimatedUsageCost(currency string) Option {
+	return func(p *Provider) {
+		p.reportedCostCurrency = currency
+		p.reportedCostField = "estimated_cost"
 	}
 }
 

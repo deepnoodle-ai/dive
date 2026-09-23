@@ -43,6 +43,7 @@ type StreamIterator struct {
 	thinkingIndex              int
 	textIndex                  int
 	reportedCostCurrency       string
+	reportedCostField          string
 	disableCatalogCost         bool
 	providerName               string
 	openRouterReasoningDetails []json.RawMessage
@@ -510,7 +511,7 @@ func (s *StreamIterator) endStream() []*llm.Event {
 
 func (s *StreamIterator) llmUsage() llm.Usage {
 	usage := s.usage.toLLMUsage()
-	applyReportedUsageCost(s.usage, &usage, s.responseModel, s.reportedCostCurrency)
+	applyReportedUsageCost(s.usage, &usage, s.responseModel, s.reportedCostCurrency, s.reportedCostField)
 	if s.disableCatalogCost && usage.Cost == nil {
 		usage.CostEstimateUnavailable = true
 	}

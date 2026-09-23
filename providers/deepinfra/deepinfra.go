@@ -50,10 +50,12 @@ func New(opts ...Option) *Provider {
 		openaic.WithAPIKey(c.apiKey),
 		openaic.WithEndpoint(c.endpoint),
 		openaic.WithModel(c.model),
+		openaic.WithSystemRole("system"),
 		openaic.WithClient(c.client),
 		openaic.WithMaxTokens(c.maxTokens),
 		openaic.WithMaxRetries(c.maxRetries),
 		openaic.WithBaseWait(c.baseWait),
+		openaic.WithReportedEstimatedUsageCost("USD"),
 		openaic.WithDisableCatalogCost(),
 	)}
 }

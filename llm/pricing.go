@@ -3,6 +3,7 @@ package llm
 const (
 	CostSourceListPriceEstimate = "list_price_estimate"
 	CostSourceProviderReported  = "provider_reported"
+	CostSourceProviderEstimate  = "provider_estimate"
 	CostSourceMixed             = "mixed"
 	CostModelMixed              = "mixed"
 )
@@ -51,8 +52,8 @@ type PricingInfo struct {
 }
 
 // Cost is a monetary cost broken out by token category. Source distinguishes a
-// provider-reported account charge from a list-price estimate. Some providers
-// report only an authoritative Total, in which case BreakdownUnavailable is
+// provider-reported account charge or estimate from a list-price estimate.
+// Some providers report only a Total, in which case BreakdownUnavailable is
 // true and the category fields must not be treated as measured zeroes.
 type Cost struct {
 	Input                float64 `json:"input"`

@@ -13,6 +13,8 @@ Get up and running with Dive in a few minutes.
 
 ## Your First Agent
 
+The Go examples below use Anthropic and require `ANTHROPIC_API_KEY`. To use another provider, change the import and `Model` as shown in the [LLM Guide](llm-guide.md).
+
 ### 1. Initialize Your Project
 
 ```bash
