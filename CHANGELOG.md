@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cancelling a run now stops it during tool calls.** `Glob` and `Grep`'s
+  pure-Go search stop walking when their context ends. A sequential batch starts
+  no further calls, and a parallel batch stops waiting for tools that ignore it.
+
 ## [1.31.0] - 2026-09-22
 
 ### Added

@@ -2196,8 +2196,19 @@ func (a *Agent) executeToolCallsSequential(
 ) (*toolBatchResult, error) {
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	for i, toolCall := range toolCalls {
+		// A tool that stops on cancellation hands its ctx error back inside
+		// the ToolCallResult, not as a Go error, so the loop has to look at
+		// ctx itself. Without these checks a cancelled batch went on to start
+		// the next call, running its side effects after the caller had
+		// stopped the run.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		result, err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback)
 		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if result != nil && result.Result != nil && result.Result.Suspend != nil {
@@ -2388,9 +2399,19 @@ func (a *Agent) executeToolCallsParallel(
 	// Drain results as they arrive (single-threaded: hooks + callbacks are safe).
 	// On a suspend, we do NOT cancel childCtx — still-running siblings must
 	// complete so their results can be recorded in the partial tool_result.
+	//
+	// The drain also watches ctx, so cancelling the run returns at once even
+	// if a tool ignores its context and keeps running. Waiting on ch alone
+	// held a cancelled run open until the slowest tool finished on its own.
+	// Stragglers can still send: ch is buffered for every call in the batch.
 	remaining := len(toolCalls)
 	for remaining > 0 {
-		ct := <-ch
+		var ct completedTool
+		select {
+		case ct = <-ch:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 		remaining--
 
 		if ct.err != nil {

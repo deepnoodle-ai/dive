@@ -541,7 +541,13 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 
 	var matches []grepMatch
 
+	// Checked per entry for the same reason as GlobTool's walk: an unbounded
+	// search must stop when the agent run is cancelled, not when it runs out
+	// of tree.
 	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return nil
 		}
@@ -620,6 +626,9 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 		return nil
 	})
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil && err != filepath.SkipAll {
 		return dive.NewToolResultError(fmt.Sprintf("Error walking directory: %v", err)), nil
 	}

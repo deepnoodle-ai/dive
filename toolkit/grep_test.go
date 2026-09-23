@@ -587,3 +587,16 @@ func TestGrepTool_Ripgrep_PaginationAndShowLines(t *testing.T) {
 	assert.Contains(t, result.Content[0].Text, "match c")
 	assert.NotContains(t, result.Content[0].Text, "3: match c")
 }
+
+func TestGrepTool_CancelledContextStopsWalk(t *testing.T) {
+	tempDir := t.TempDir()
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte("Hello World"), 0644))
+
+	tool := NewGrepTool(GrepToolOptions{WorkspaceDir: tempDir})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := tool.Call(ctx, &GrepInput{Pattern: "World", Path: tempDir})
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result)
+}

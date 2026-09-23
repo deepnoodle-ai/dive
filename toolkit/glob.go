@@ -259,7 +259,14 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 	}
 	var matches []fileEntry
 
+	// The walk checks ctx at every entry because a broad pattern over a large
+	// tree (a home directory) can run for minutes, and nothing else stops it:
+	// without the check, cancelling the agent run left the walk going and held
+	// the run open until it finished.
 	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return nil // Skip files we can't access
 		}
@@ -307,6 +314,9 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 		return nil
 	})
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil && err != filepath.SkipAll {
 		return dive.NewToolResultError(fmt.Sprintf("Error walking directory: %v", err)), nil
 	}
