@@ -1438,3 +1438,70 @@ func TestParallelToolStreaming_NoDataRace(t *testing.T) {
 	}
 	assert.Equal(t, streamItems, 2*chunksPerTool)
 }
+
+// A tool that ignores its context must not hold a cancelled run open: the
+// parallel drain returns on cancellation instead of waiting for every tool.
+func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			return &llm.Response{
+				ID:    "resp_1",
+				Model: "test-model",
+				Role:  llm.Assistant,
+				Content: []llm.Content{
+					&llm.ToolUseContent{ID: "t1", Name: "quick_tool", Input: []byte(`{}`)},
+					&llm.ToolUseContent{ID: "t2", Name: "stubborn_tool", Input: []byte(`{}`)},
+				},
+				Type:       "message",
+				StopReason: "tool_use",
+				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	started := make(chan struct{})
+
+	quickTool := &mockTool{
+		name: "quick_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewToolResultText("quick"), nil
+		},
+	}
+	stubbornTool := &mockTool{
+		name: "stubborn_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			close(started)
+			<-release // deliberately ignores ctx
+			return NewToolResultText("stubborn"), nil
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{quickTool, stubbornTool},
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := agent.CreateResponse(ctx, WithInput("Use tools"))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("CreateResponse did not return after cancellation; it is waiting on a tool that ignores ctx")
+	}
+}

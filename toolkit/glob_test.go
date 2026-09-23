@@ -392,3 +392,16 @@ func TestGlobTool_DefaultExcludesTopLevelDirs(t *testing.T) {
 	assert.Contains(t, output, "src/app.js")
 	assert.NotContains(t, output, "node_modules")
 }
+
+func TestGlobTool_CancelledContextStopsWalk(t *testing.T) {
+	tempDir := t.TempDir()
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "file.go"), []byte("package main"), 0644))
+
+	tool := NewGlobTool(GlobToolOptions{WorkspaceDir: tempDir})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := tool.Call(ctx, &GlobInput{Pattern: "**/*.go", Path: tempDir})
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result)
+}
