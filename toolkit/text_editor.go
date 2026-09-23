@@ -289,6 +289,9 @@ func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 // All paths must be absolute. Returns detailed feedback including
 // code snippets showing context around changes.
 func (t *TextEditorTool) Call(ctx context.Context, input *TextEditorToolInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -301,13 +304,13 @@ func (t *TextEditorTool) Call(ctx context.Context, input *TextEditorToolInput) (
 	}
 	switch input.Command {
 	case CommandView:
-		return t.handleView(input.Path, input.ViewRange)
+		return t.handleView(ctx, input.Path, input.ViewRange)
 	case CommandCreate:
-		return t.handleCreate(input.Path, input.FileText)
+		return t.handleCreate(ctx, input.Path, input.FileText)
 	case CommandStrReplace:
-		return t.handleStrReplace(input.Path, input.OldStr, input.NewStr)
+		return t.handleStrReplace(ctx, input.Path, input.OldStr, input.NewStr)
 	case CommandInsert:
-		return t.handleInsert(input.Path, input.InsertLine, input.NewStr)
+		return t.handleInsert(ctx, input.Path, input.InsertLine, input.NewStr)
 	default:
 		return dive.NewToolResultError(fmt.Sprintf("Unrecognized command %s. The allowed commands are: view, create, str_replace, insert", input.Command)), nil
 	}
@@ -349,13 +352,24 @@ func (t *TextEditorTool) validatePath(command Command, path string) error {
 	return nil
 }
 
-func (t *TextEditorTool) handleView(path string, viewRange []int) (*dive.ToolResult, error) {
+func (t *TextEditorTool) handleView(ctx context.Context, path string, viewRange []int) (*dive.ToolResult, error) {
 	if t.fs.IsDir(path) {
 		if len(viewRange) > 0 {
 			return dive.NewToolResultError("the `view_range` parameter is not allowed when `path` points to a directory"), nil
 		}
 
-		output, err := t.fs.ListDir(path)
+		var output string
+		var err error
+		if lister, ok := t.fs.(interface {
+			ListDirContext(context.Context, string) (string, error)
+		}); ok {
+			output, err = lister.ListDirContext(ctx, path)
+		} else {
+			output, err = t.fs.ListDir(path)
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err != nil {
 			return dive.NewToolResultError(fmt.Sprintf("error listing directory: %v", err)), nil
 		}
@@ -371,6 +385,9 @@ func (t *TextEditorTool) handleView(path string, viewRange []int) (*dive.ToolRes
 
 	// Handle file viewing
 	content, err := t.fs.ReadFile(path)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error reading file %s: %v", path, err)), nil
 	}
@@ -409,11 +426,14 @@ func (t *TextEditorTool) handleView(path string, viewRange []int) (*dive.ToolRes
 	return dive.NewToolResultText(output).WithDisplay(display), nil
 }
 
-func (t *TextEditorTool) handleCreate(path string, fileText *string) (*dive.ToolResult, error) {
+func (t *TextEditorTool) handleCreate(ctx context.Context, path string, fileText *string) (*dive.ToolResult, error) {
 	if fileText == nil {
 		return dive.NewToolResultError("parameter `file_text` is required for command: create"), nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := t.fs.WriteFile(path, *fileText); err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error writing file %s: %v", path, err)), nil
 	}
@@ -424,7 +444,7 @@ func (t *TextEditorTool) handleCreate(path string, fileText *string) (*dive.Tool
 	return dive.NewToolResultText(fmt.Sprintf("File created successfully at: %s", path)).WithDisplay(display), nil
 }
 
-func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (*dive.ToolResult, error) {
+func (t *TextEditorTool) handleStrReplace(ctx context.Context, path string, oldStr, newStr *string) (*dive.ToolResult, error) {
 	if oldStr == nil {
 		return dive.NewToolResultError("parameter `old_str` is required for command: str_replace"), nil
 	}
@@ -435,6 +455,9 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 	}
 
 	content, err := t.fs.ReadFile(path)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error reading file %s: %v", path, err)), nil
 	}
@@ -463,6 +486,9 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 	// Perform replacement
 	newContent := strings.Replace(content, *oldStr, newStrValue, 1)
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := t.fs.WriteFile(path, newContent); err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error writing file %s: %v", path, err)), nil
 	}
@@ -475,7 +501,7 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 	return dive.NewToolResultText(successMsg).WithDisplay(display), nil
 }
 
-func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *string) (*dive.ToolResult, error) {
+func (t *TextEditorTool) handleInsert(ctx context.Context, path string, insertLine *int, newStr *string) (*dive.ToolResult, error) {
 	if insertLine == nil {
 		return dive.NewToolResultError("parameter `insert_line` is required for command: insert"), nil
 	}
@@ -489,6 +515,9 @@ func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *stri
 	}
 
 	content, err := t.fs.ReadFile(path)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error reading file %s: %v", path, err)), nil
 	}
@@ -509,6 +538,9 @@ func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *stri
 
 	newContent := strings.Join(newLines, "\n")
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := t.fs.WriteFile(path, newContent); err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error writing file %s: %v", path, err)), nil
 	}

@@ -1461,8 +1461,11 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 	}
 
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	started := make(chan struct{})
+	finished := make(chan struct{})
+	var lateEvents atomic.Int32
 
 	quickTool := &mockTool{
 		name: "quick_tool",
@@ -1475,6 +1478,8 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
 			close(started)
 			<-release // deliberately ignores ctx
+			StreamOutput(ctx, "late output")
+			close(finished)
 			return NewToolResultText("stubborn"), nil
 		},
 	}
@@ -1494,7 +1499,12 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := agent.CreateResponse(ctx, WithInput("Use tools"))
+		_, err := agent.CreateResponse(ctx, WithInput("Use tools"), WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			if item.Type == ResponseItemTypeToolStream {
+				lateEvents.Add(1)
+			}
+			return nil
+		}))
 		done <- err
 	}()
 
@@ -1504,6 +1514,13 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("CreateResponse did not return after cancellation; it is waiting on a tool that ignores ctx")
 	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stubborn tool did not finish after release")
+	}
+	assert.Equal(t, int32(0), lateEvents.Load(), "ended run received a late tool stream event")
 }
 
 // Sequential execution is the default, so a cancelled batch must not go on to

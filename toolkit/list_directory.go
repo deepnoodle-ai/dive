@@ -168,6 +168,9 @@ func (t *ListDirectoryTool) PreviewCall(ctx context.Context, input *ListDirector
 // array of [DirectoryEntry] objects. If the entry count exceeds MaxEntries,
 // only the first MaxEntries items are returned with a note about the limit.
 func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -215,6 +218,9 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 
 	// Read directory entries
 	entries, err := os.ReadDir(resolvedPath)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("Failed to read directory %s. %s", dirPath, err.Error())), nil
 	}
@@ -227,6 +233,9 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 	// Convert to our structured format
 	result := make([]DirectoryEntry, 0, len(entries))
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		info, err := entry.Info()
 		if err != nil {
 			continue // Skip entries we can't get info for

@@ -199,6 +199,9 @@ func (t *EditTool) PreviewCall(ctx context.Context, input *EditInput) *dive.Tool
 // On success, returns the replacement count and a diff showing context
 // around the changes.
 func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -223,7 +226,12 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		}
 	}
 
-	// Open file first to avoid TOCTOU race conditions
+	// Reject special files before opening: opening a FIFO can block without
+	// giving the context another chance to stop this call.
+	if info, err := os.Stat(input.FilePath); err == nil && !info.IsDir() && !info.Mode().IsRegular() {
+		return dive.NewToolResultError(fmt.Sprintf("Path is not a regular file: %s", input.FilePath)), nil
+	}
+	// Open the file and check the handle again in case the path changed.
 	file, err := os.Open(input.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -242,6 +250,9 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 	if info.IsDir() {
 		return dive.NewToolResultError(fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)), nil
 	}
+	if !info.Mode().IsRegular() {
+		return dive.NewToolResultError(fmt.Sprintf("Path is not a regular file: %s", input.FilePath)), nil
+	}
 
 	if info.Size() > t.maxFileSize {
 		return dive.NewToolResultError(fmt.Sprintf("File too large: %d bytes (max %d bytes)", info.Size(), t.maxFileSize)), nil
@@ -249,6 +260,9 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 
 	// Read file from the already-open handle
 	content, err := io.ReadAll(file)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("Error reading file: %v", err)), nil
 	}
@@ -293,6 +307,9 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 	}
 
 	// Write file back
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := os.WriteFile(input.FilePath, []byte(newContent), info.Mode()); err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("Error writing file: %v", err)), nil
 	}

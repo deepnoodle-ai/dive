@@ -1,6 +1,7 @@
 package toolkit
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"os"
@@ -13,6 +14,73 @@ import (
 	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/gobwas/glob"
 )
+
+type globFileEntry struct {
+	path    string
+	modTime time.Time
+}
+
+const maxGlobOutputBytes = 1 << 20
+
+// globOldestFirst keeps the least useful result at the root. A path tie
+// breaker makes the selected set stable when files have equal timestamps.
+type globOldestFirst []globFileEntry
+
+func (h globOldestFirst) Len() int { return len(h) }
+func (h globOldestFirst) Less(i, j int) bool {
+	if h[i].modTime.Equal(h[j].modTime) {
+		return h[i].path > h[j].path
+	}
+	return h[i].modTime.Before(h[j].modTime)
+}
+func (h globOldestFirst) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *globOldestFirst) Push(x any)   { *h = append(*h, x.(globFileEntry)) }
+func (h *globOldestFirst) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
+}
+
+// compileGlobVariants gives **/ its usual zero-or-more-directories meaning.
+// gobwas/glob requires a separator for **/, so the zero-directory variants
+// must be compiled separately. Bound expansion for pathological patterns.
+func compileGlobVariants(pattern string) ([]*glob.Pattern, error) {
+	variants := []string{pattern}
+	for i := 0; i < len(variants); i++ {
+		if len(variants) > 32 {
+			return nil, fmt.Errorf("too many recursive segments in glob pattern")
+		}
+		for pos := 0; pos < len(variants[i]); {
+			idx := strings.Index(variants[i][pos:], "**/")
+			if idx < 0 {
+				break
+			}
+			idx += pos
+			candidate := variants[i][:idx] + variants[i][idx+3:]
+			found := false
+			for _, existing := range variants {
+				if existing == candidate {
+					found = true
+					break
+				}
+			}
+			if !found {
+				variants = append(variants, candidate)
+			}
+			pos = idx + 3
+		}
+	}
+	compiled := make([]*glob.Pattern, 0, len(variants))
+	for _, variant := range variants {
+		g, err := glob.Compile(variant, '/')
+		if err != nil {
+			return nil, err
+		}
+		compiled = append(compiled, g)
+	}
+	return compiled, nil
+}
 
 var (
 	_ dive.TypedTool[*GlobInput]          = &GlobTool{}
@@ -63,7 +131,7 @@ type GlobToolOptions struct {
 //   - Results sorted by modification time
 //   - Configurable result limit
 //
-// The tool only matches files, not directories.
+// The tool only matches regular files, not directories or symlinks.
 type GlobTool struct {
 	defaultExcludes []string
 	maxResults      int
@@ -97,12 +165,16 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 	}
 	var pathValidator *PathValidator
 	var configErr error
+	if resolvedOpts.MaxResults < 0 || resolvedOpts.MaxResults > 10000 {
+		configErr = fmt.Errorf("MaxResults must be between 1 and 10000")
+	}
 	if resolvedOpts.Validator != nil {
 		pathValidator = resolvedOpts.Validator
 	} else if resolvedOpts.WorkspaceDir != "" {
-		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
-		if configErr != nil {
-			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		var err error
+		pathValidator, err = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if err != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, err)
 		}
 	}
 	return dive.ToolAdapter(&GlobTool{
@@ -147,7 +219,9 @@ Examples:
 - "*.{js,ts}" - all JS or TS files in current directory
 - "test_*.py" - all Python test files in current directory
 
-Returns file paths sorted by modification time (most recent first).`
+Returns regular file paths sorted by modification time (most recent first).
+Directory symlinks are not followed. Results state when the file limit,
+inaccessible paths, or output limit make the answer incomplete.`
 }
 
 // Schema returns the JSON schema describing the tool's input parameters.
@@ -182,6 +256,9 @@ func (t *GlobTool) Annotations() *dive.ToolAnnotations {
 
 // PreviewCall returns a summary of the search operation for permission prompts.
 func (t *GlobTool) PreviewCall(ctx context.Context, input *GlobInput) *dive.ToolCallPreview {
+	if input == nil {
+		return nil
+	}
 	searchPath := input.Path
 	if searchPath == "" {
 		searchPath = "."
@@ -197,6 +274,12 @@ func (t *GlobTool) PreviewCall(ctx context.Context, input *GlobInput) *dive.Tool
 // modification time (most recent first). If no files match, returns
 // a message indicating no matches were found.
 func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if input == nil || input.Pattern == "" {
+		return dive.NewToolResultError("pattern must not be empty"), nil
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -232,14 +315,17 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 	// Check if path exists
 	info, err := os.Stat(searchPath)
 	if err != nil {
-		return dive.NewToolResultError(fmt.Sprintf("Path does not exist: %s", searchPath)), nil
+		if os.IsNotExist(err) {
+			return dive.NewToolResultError(fmt.Sprintf("Path does not exist: %s", searchPath)), nil
+		}
+		return dive.NewToolResultError(fmt.Sprintf("Cannot access path %s: %v", searchPath, err)), nil
 	}
 	if !info.IsDir() {
 		return dive.NewToolResultError(fmt.Sprintf("Path is not a directory: %s", searchPath)), nil
 	}
 
 	// Compile the glob pattern
-	g, err := glob.Compile(input.Pattern, '/')
+	patterns, err := compileGlobVariants(input.Pattern)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("Invalid glob pattern: %v", err)), nil
 	}
@@ -247,17 +333,19 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 	// Compile exclude patterns
 	excludeGlobs := make([]*glob.Pattern, 0, len(t.defaultExcludes))
 	for _, pattern := range t.defaultExcludes {
-		if eg, err := glob.Compile(pattern, '/'); err == nil {
-			excludeGlobs = append(excludeGlobs, eg)
+		compiled, err := compileGlobVariants(pattern)
+		if err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Invalid exclude pattern %q: %v", pattern, err)), nil
 		}
+		excludeGlobs = append(excludeGlobs, compiled...)
 	}
 
-	// Find matching files
-	type fileEntry struct {
-		path    string
-		modTime time.Time
-	}
-	var matches []fileEntry
+	// Keep only the newest files while scanning the whole tree. Stopping at
+	// MaxResults before sorting would return the first paths in walk order.
+	matches := &globOldestFirst{}
+	heap.Init(matches)
+	truncated := false
+	skipped := 0
 
 	// The walk checks ctx at every entry because a broad pattern over a large
 	// tree (a home directory) can run for minutes, and nothing else stops it:
@@ -268,12 +356,14 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 			return ctxErr
 		}
 		if err != nil {
-			return nil // Skip files we can't access
+			skipped++
+			return nil
 		}
 
 		// Get relative path for pattern matching
 		relPath, err := filepath.Rel(searchPath, path)
 		if err != nil {
+			skipped++
 			return nil
 		}
 
@@ -290,6 +380,9 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 			}
 			return nil
 		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 
 		// Check excludes
 		for _, eg := range excludeGlobs {
@@ -299,15 +392,24 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 		}
 
 		// Check if matches pattern
-		if g.Match(relPath) {
-			matches = append(matches, fileEntry{
-				path:    relPath,
-				modTime: info.ModTime(),
-			})
-
-			// Stop if we've reached max results
-			if len(matches) >= t.maxResults {
-				return filepath.SkipAll
+		matched := false
+		for _, pattern := range patterns {
+			if pattern.Match(relPath) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			entry := globFileEntry{path: relPath, modTime: info.ModTime()}
+			if matches.Len() < t.maxResults {
+				heap.Push(matches, entry)
+			} else {
+				truncated = true
+				oldest := (*matches)[0]
+				if entry.modTime.After(oldest.modTime) || (entry.modTime.Equal(oldest.modTime) && entry.path < oldest.path) {
+					heap.Pop(matches)
+					heap.Push(matches, entry)
+				}
 			}
 		}
 
@@ -321,27 +423,54 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 		return dive.NewToolResultError(fmt.Sprintf("Error walking directory: %v", err)), nil
 	}
 
-	if len(matches) == 0 {
+	if matches.Len() == 0 {
+		if skipped > 0 {
+			return dive.NewToolResultError(fmt.Sprintf("Search incomplete: skipped %d inaccessible paths; no matches were found in the paths searched", skipped)), nil
+		}
 		display := fmt.Sprintf("No files matching %q found in %s", input.Pattern, searchPath)
 		return dive.NewToolResultText("No matching files found").WithDisplay(display), nil
 	}
 
 	// Sort by modification time (most recent first)
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].modTime.After(matches[j].modTime)
+	sort.Slice(*matches, func(i, j int) bool {
+		a, b := (*matches)[i], (*matches)[j]
+		if a.modTime.Equal(b.modTime) {
+			return a.path < b.path
+		}
+		return a.modTime.After(b.modTime)
 	})
 
 	// Build result
 	var result strings.Builder
-	for _, m := range matches {
+	shown := 0
+	outputTruncated := false
+	for _, m := range *matches {
+		if result.Len()+len(m.path)+1 > maxGlobOutputBytes {
+			outputTruncated = true
+			break
+		}
 		result.WriteString(m.path)
 		result.WriteString("\n")
+		shown++
 	}
 
-	display := fmt.Sprintf("Found %d file(s) matching %q", len(matches), input.Pattern)
-	if len(matches) >= t.maxResults {
-		display += fmt.Sprintf(" (limited to %d results)", t.maxResults)
+	display := fmt.Sprintf("Found %d file(s) matching %q", shown, input.Pattern)
+	if truncated {
+		display += fmt.Sprintf(" (showing newest %d; more matches exist)", t.maxResults)
 	}
-
-	return dive.NewToolResultText(strings.TrimSpace(result.String())).WithDisplay(display), nil
+	toolResult := dive.NewToolResultText(strings.TrimSpace(result.String())).WithDisplay(display)
+	if truncated || skipped > 0 || outputTruncated {
+		var note strings.Builder
+		if truncated {
+			fmt.Fprintf(&note, "Search truncated: showing the newest %d matching files; more matches exist.", t.maxResults)
+		}
+		if skipped > 0 {
+			fmt.Fprintf(&note, " Search incomplete: skipped %d inaccessible paths.", skipped)
+		}
+		if outputTruncated {
+			fmt.Fprintf(&note, " Output text capped at 1 MiB: showing %d of %d selected paths; narrow the search.", shown, matches.Len())
+		}
+		toolResult.Content = append(toolResult.Content, &dive.ToolResultContent{Type: dive.ToolResultContentTypeText, Text: strings.TrimSpace(note.String())})
+	}
+	return toolResult, nil
 }

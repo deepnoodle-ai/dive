@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -92,6 +93,33 @@ func TestGlobTool_RecursivePattern(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, result2.IsError)
 	assert.Contains(t, result2.Content[0].Text, "root.go")
+}
+
+func TestGlobTool_RecursivePatternIncludesSearchRoot(t *testing.T) {
+	dir := t.TempDir()
+	assert.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0755))
+	assert.NoError(t, os.WriteFile(filepath.Join(dir, "root.go"), []byte("root"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "nested.go"), []byte("nested"), 0644))
+	tool := NewGlobTool(GlobToolOptions{WorkspaceDir: dir})
+	result, err := tool.Call(context.Background(), &GlobInput{Path: dir, Pattern: "**/*.go"})
+	assert.NoError(t, err)
+	assert.Contains(t, result.Content[0].Text, "root.go")
+	assert.Contains(t, result.Content[0].Text, "sub/nested.go")
+}
+
+func TestGlobTool_ResultLimitKeepsNewestFiles(t *testing.T) {
+	dir := t.TempDir()
+	older := filepath.Join(dir, "a.go")
+	newer := filepath.Join(dir, "z.go")
+	assert.NoError(t, os.WriteFile(older, []byte("older"), 0644))
+	assert.NoError(t, os.WriteFile(newer, []byte("newer"), 0644))
+	oldTime := time.Now().Add(-time.Hour)
+	assert.NoError(t, os.Chtimes(older, oldTime, oldTime))
+	tool := NewGlobTool(GlobToolOptions{WorkspaceDir: dir, MaxResults: 1})
+	result, err := tool.Call(context.Background(), &GlobInput{Path: dir, Pattern: "*.go"})
+	assert.NoError(t, err)
+	assert.Equal(t, "z.go", result.Content[0].Text)
+	assert.Contains(t, result.Content[1].Text, "more matches exist")
 }
 
 func TestGlobTool_NoMatches(t *testing.T) {
