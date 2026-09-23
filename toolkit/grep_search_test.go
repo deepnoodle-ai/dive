@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -73,6 +74,38 @@ func TestGrepSearch_MultilineCountsEachMatch(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, result.IsError)
 		assert.Equal(t, "matches.txt:2", result.Content[0].Text)
+	})
+}
+
+func TestGrepSearch_MultilineAnchorsMatchLineBoundaries(t *testing.T) {
+	grepBackends(t, func(t *testing.T, useRipgrep bool) {
+		dir := t.TempDir()
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "functions.go"), []byte("package main\nfunc first()\nother\nfunc second()\n"), 0644))
+		tool := NewGrepTool(GrepToolOptions{WorkspaceDir: dir, UseRipgrep: useRipgrep})
+		result, err := tool.Call(context.Background(), &GrepInput{Path: dir, Pattern: `^func [a-z]+\(\)$`, Multiline: true, OutputMode: GrepOutputCount})
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
+		assert.Equal(t, "functions.go:2", result.Content[0].Text)
+		result, err = tool.Call(context.Background(), &GrepInput{Path: dir, Pattern: `^func [a-z]+\(\)$`, Multiline: true, OutputMode: GrepOutputContent})
+		assert.NoError(t, err)
+		assert.Contains(t, result.Content[0].Text, "2: func first()")
+		assert.Contains(t, result.Content[0].Text, "4: func second()")
+	})
+}
+
+func TestGrepSearch_ContextPreservesTextAfterInvalidUTF8(t *testing.T) {
+	grepBackends(t, func(t *testing.T, useRipgrep bool) {
+		dir := t.TempDir()
+		line := append([]byte("before-"), 0xff)
+		line = append(line, []byte("kept-after-invalid"+strings.Repeat("x", 17*1024)+"\nnext\n")...)
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "invalid.txt"), line, 0644))
+		tool := NewGrepTool(GrepToolOptions{WorkspaceDir: dir, UseRipgrep: useRipgrep})
+		result, err := tool.Call(context.Background(), &GrepInput{Path: dir, Pattern: "kept-after-invalid", OutputMode: GrepOutputContent, Context: 1})
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
+		assert.True(t, utf8.ValidString(result.Content[0].Text))
+		assert.Contains(t, result.Content[0].Text, "kept-after-invalid")
+		assert.Contains(t, result.Content[0].Text, "[line truncated]")
 	})
 }
 

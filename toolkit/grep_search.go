@@ -273,18 +273,16 @@ func (t *GrepTool) search(ctx context.Context, input *GrepInput) (*dive.ToolResu
 }
 
 func grepRegex(input *GrepInput) (*regexp.Regexp, error) {
-	flags := ""
+	// Ripgrep treats ^ and $ as line anchors even when multiline matching is
+	// enabled. The flag is harmless for the per-line search path.
+	flags := "m"
 	if input.CaseInsens {
 		flags += "i"
 	}
 	if input.Multiline {
 		flags += "s"
 	}
-	pattern := input.Pattern
-	if flags != "" {
-		pattern = "(?" + flags + ")" + pattern
-	}
-	return regexp.Compile(pattern)
+	return regexp.Compile("(?" + flags + ")" + input.Pattern)
 }
 
 func grepMatchesType(path, typ string) bool {
@@ -382,21 +380,31 @@ func (t *GrepTool) searchPureGo(ctx context.Context, input *GrepInput, root stri
 			if len(locations) > maxMultilineMatchesPerFile {
 				return fmt.Errorf("%s: more than %d multiline matches; narrow the search", rel, maxMultilineMatchesPerFile)
 			}
-			lineNumber, previousStart := 1, 0
+			lineNumber, previousStart, lineStart := 1, 0, 0
 			for _, loc := range locations {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				lineNumber += bytes.Count(content[previousStart:loc[0]], []byte{'\n'})
-				previousStart = loc[0]
-				lineStart := bytes.LastIndexByte(content[:loc[0]], '\n') + 1
-				lineEnd := bytes.IndexByte(content[loc[1]:], '\n')
-				end := len(content)
-				if lineEnd >= 0 {
-					end = loc[1] + lineEnd
+				match := grepMatch{file: rel}
+				if c.mode == GrepOutputContent {
+					segment := content[previousStart:loc[0]]
+					lineNumber += bytes.Count(segment, []byte{'\n'})
+					if lastNewline := bytes.LastIndexByte(segment, '\n'); lastNewline >= 0 {
+						lineStart = previousStart + lastNewline + 1
+					}
+					previousStart = loc[0]
+					match.lineNumber = lineNumber
+					match.endLine = lineNumber + bytes.Count(content[loc[0]:loc[1]], []byte{'\n'})
 				}
-				match := grepMatch{file: rel, lineNumber: lineNumber}
 				if c.needsLine() {
+					// Only the displayed prefix is needed. Searching to the end
+					// of a long line for every match can be quadratic.
+					end := min(len(content), lineStart+maxGrepLineBytes+1)
+					if loc[1] <= end {
+						if nextNewline := bytes.IndexByte(content[loc[1]:end], '\n'); nextNewline >= 0 {
+							end = loc[1] + nextNewline
+						}
+					}
 					match.line = strings.TrimRight(string(content[lineStart:end]), "\r")
 				}
 				c.add(match)
@@ -555,20 +563,26 @@ func (t *GrepTool) searchRipgrep(ctx context.Context, input *GrepInput, root str
 			c.add(grepMatch{file: filepath.ToSlash(rel), lineNumber: record.Data.LineNumber, line: strings.TrimRight(line, "\r\n")})
 			continue
 		}
+		previousOffset, previousLine, lineStart := 0, record.Data.LineNumber, 0
 		for _, submatch := range record.Data.Submatches {
-			if submatch.Start < 0 || submatch.End < submatch.Start || submatch.End > len(line) {
+			if submatch.Start < previousOffset || submatch.End < submatch.Start || submatch.End > len(line) {
 				parseErr = fmt.Errorf("invalid ripgrep submatch offsets for %q", rel)
 				break
 			}
-			startLine := record.Data.LineNumber + strings.Count(line[:submatch.Start], "\n")
-			endLine := record.Data.LineNumber + strings.Count(line[:submatch.End], "\n")
+			segment := line[previousOffset:submatch.Start]
+			startLine := previousLine + strings.Count(segment, "\n")
+			if lastNewline := strings.LastIndex(segment, "\n"); lastNewline >= 0 {
+				lineStart = previousOffset + lastNewline + 1
+			}
+			endLine := startLine + strings.Count(line[submatch.Start:submatch.End], "\n")
+			previousOffset, previousLine = submatch.Start, startLine
 			match := grepMatch{file: filepath.ToSlash(rel), lineNumber: startLine, endLine: endLine}
 			if c.needsLine() {
-				lineStart := strings.LastIndex(line[:submatch.Start], "\n") + 1
-				lineEnd := strings.Index(line[submatch.End:], "\n")
-				end := len(line)
-				if lineEnd >= 0 {
-					end = submatch.End + lineEnd
+				end := min(len(line), lineStart+maxGrepLineBytes+1)
+				if submatch.End <= end {
+					if nextNewline := strings.Index(line[submatch.End:end], "\n"); nextNewline >= 0 {
+						end = submatch.End + nextNewline
+					}
 				}
 				match.line = strings.TrimRight(line[lineStart:end], "\r")
 			}
@@ -745,8 +759,12 @@ func (t *GrepTool) writeGrepContent(ctx context.Context, output io.Writer, root 
 			matched, keep := included[lineNumber]
 			if keep {
 				raw := bytes.TrimRight(content[:end], "\r")
-				text := strings.ToValidUTF8(string(validUTF8Prefix(raw, maxGrepLineBytes)), "�")
-				if len(raw) > maxGrepLineBytes {
+				text := strings.ToValidUTF8(string(raw[:min(len(raw), maxGrepLineBytes)]), "�")
+				truncated := len(raw) > maxGrepLineBytes || len(text) > maxGrepLineBytes
+				if len(text) > maxGrepLineBytes {
+					text = string(validUTF8Prefix([]byte(text), maxGrepLineBytes))
+				}
+				if truncated {
 					text += "... [line truncated]"
 				}
 				if showLines {
