@@ -175,6 +175,9 @@ func TestCostString(t *testing.T) {
 	assert.Equal(t, "—", costString(&llm.Usage{}), "unknown cost should render as a dash")
 	assert.Equal(t, "$0", costString(&llm.Usage{Cost: &llm.Cost{Total: 0}}), "known zero cost is $0, not a dash")
 	assert.Equal(t, "$1.27", costString(&llm.Usage{Cost: &llm.Cost{Total: 1.273}}))
+	assert.Equal(t, "~$0.043", costString(&llm.Usage{Cost: &llm.Cost{Total: 0.043, Source: llm.CostSourceProviderEstimate}}))
+	assert.Equal(t, "~$1.27", costString(&llm.Usage{Cost: &llm.Cost{Total: 1.273, Source: llm.CostSourceListPriceEstimate}}))
+	assert.Equal(t, "~$1.27", costString(&llm.Usage{Cost: &llm.Cost{Total: 1.273, Source: llm.CostSourceMixed}}))
 }
 
 func TestStatusLineShowsOnlySessionCostByDefault(t *testing.T) {
@@ -211,6 +214,8 @@ func TestSessionTotalCostFallsBackToCurrentTurn(t *testing.T) {
 
 	app.sessionUsage = &llm.Usage{Cost: &llm.Cost{Total: 1.273}}
 	assert.Equal(t, "$1.27", app.sessionTotalCostString())
+	app.sessionUsage.Cost.Source = llm.CostSourceProviderEstimate
+	assert.Equal(t, "~$1.27", app.sessionTotalCostString())
 }
 
 func TestTokensPanelView_ShowsCostWhenPresent(t *testing.T) {

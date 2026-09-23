@@ -47,7 +47,7 @@ dive --model deepinfra/zai-org/GLM-5.3-Flash
 # In an interactive Dive session: /model deepinfra/<publisher>/<model>
 ```
 
-The `deepinfra/` prefix selects Dive's provider; it is removed from the API request. Other DeepInfra model categories, such as embeddings and image generation, use different APIs. The built-in catalog supplies context windows for recommended models. Arbitrary chat models work without a catalog entry, but their context window is unknown to Dive. Dive uses DeepInfra's reported cost estimate when present and leaves cost unknown otherwise.
+The `deepinfra/` prefix selects Dive's provider; it is removed from the API request. Other DeepInfra model categories, such as embeddings and image generation, use different APIs. The built-in catalog supplies context windows for recommended models. Arbitrary chat models work without a catalog entry, but their context window is unknown to Dive. Dive uses DeepInfra's reported cost estimate when present (`Usage.Cost.Source` is `provider_estimate`) and leaves cost unknown otherwise.
 
 DeepInfra [caches repeated prompt prefixes automatically](https://docs.deepinfra.com/chat/prompt-caching). Library callers can pass a stable session key with `llm.WithPromptCacheKey("agent-session-123")` to improve reuse. Dive also forwards `llm.WithResponseFormat` for DeepInfra's `json_object` and `json_schema` modes on models that support structured output. For example:
 

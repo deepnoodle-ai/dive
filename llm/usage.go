@@ -57,9 +57,9 @@ type Usage struct {
 	// Speed indicates which inference speed served the request, either "fast"
 	// or "standard". Populated by Anthropic when fast mode is requested.
 	Speed string `json:"speed,omitempty"`
-	// Cost is the monetary cost of this usage. Providers attach an authoritative
-	// charge when they report one; otherwise Dive may estimate from cataloged
-	// list prices. Nil means cost is unknown, distinct from a known zero.
+	// Cost is a provider-reported charge, provider-reported estimate, or Dive
+	// list-price estimate. Inspect Cost.Source before treating it as a billed
+	// charge. Nil means cost is unknown, distinct from a known zero.
 	Cost *Cost `json:"cost,omitempty"`
 }
 
