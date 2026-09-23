@@ -64,6 +64,18 @@ func TestGrepSearch_ContextAndMultiline(t *testing.T) {
 	})
 }
 
+func TestGrepSearch_MultilineCountsEachMatch(t *testing.T) {
+	grepBackends(t, func(t *testing.T, useRipgrep bool) {
+		dir := t.TempDir()
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "matches.txt"), []byte("foo bar\n"), 0644))
+		tool := NewGrepTool(GrepToolOptions{WorkspaceDir: dir, UseRipgrep: useRipgrep})
+		result, err := tool.Call(context.Background(), &GrepInput{Path: dir, Pattern: "foo|bar", Multiline: true, OutputMode: GrepOutputCount})
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
+		assert.Equal(t, "matches.txt:2", result.Content[0].Text)
+	})
+}
+
 func TestGrepSearch_LongLineAndMissingRoot(t *testing.T) {
 	grepBackends(t, func(t *testing.T, useRipgrep bool) {
 		dir := t.TempDir()

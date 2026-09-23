@@ -467,6 +467,10 @@ type streamedGrepRecord struct {
 			Bytes string `json:"bytes"`
 		} `json:"lines"`
 		LineNumber int `json:"line_number"`
+		Submatches []struct {
+			Start int `json:"start"`
+			End   int `json:"end"`
+		} `json:"submatches"`
 	} `json:"data"`
 }
 
@@ -540,7 +544,32 @@ func (t *GrepTool) searchRipgrep(ctx context.Context, input *GrepInput, root str
 			}
 			line = string(decoded)
 		}
-		c.add(grepMatch{file: filepath.ToSlash(rel), lineNumber: record.Data.LineNumber, line: strings.TrimRight(line, "\r\n")})
+		if !input.Multiline {
+			c.add(grepMatch{file: filepath.ToSlash(rel), lineNumber: record.Data.LineNumber, line: strings.TrimRight(line, "\r\n")})
+			continue
+		}
+		for _, submatch := range record.Data.Submatches {
+			if submatch.Start < 0 || submatch.End < submatch.Start || submatch.End > len(line) {
+				parseErr = fmt.Errorf("invalid ripgrep submatch offsets for %q", rel)
+				break
+			}
+			startLine := record.Data.LineNumber + strings.Count(line[:submatch.Start], "\n")
+			endLine := record.Data.LineNumber + strings.Count(line[:submatch.End], "\n")
+			match := grepMatch{file: filepath.ToSlash(rel), lineNumber: startLine, endLine: endLine}
+			if c.needsLine() {
+				lineStart := strings.LastIndex(line[:submatch.Start], "\n") + 1
+				lineEnd := strings.Index(line[submatch.End:], "\n")
+				end := len(line)
+				if lineEnd >= 0 {
+					end = submatch.End + lineEnd
+				}
+				match.line = strings.TrimRight(line[lineStart:end], "\r")
+			}
+			c.add(match)
+		}
+		if parseErr != nil {
+			break
+		}
 	}
 	if err := scanner.Err(); err != nil && parseErr == nil {
 		parseErr = fmt.Errorf("ripgrep output exceeded the supported record size or could not be read: %w", err)
