@@ -247,6 +247,9 @@ func (t *BashTool) PreviewCall(ctx context.Context, input *BashInput) *dive.Tool
 //
 // The context can be used to cancel long-running commands.
 func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -277,6 +280,9 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 
 	// Execute command
 	output, exitCode, err := t.execute(ctx, input.Command, input.WorkingDirectory, timeout)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return dive.NewToolResultError(err.Error()), nil
 	}

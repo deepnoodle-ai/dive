@@ -1,21 +1,12 @@
 package toolkit
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/schema"
-	"github.com/gobwas/glob"
 )
 
 var (
@@ -80,8 +71,8 @@ type GrepInput struct {
 	// In this mode, . matches newlines and patterns can span multiple lines.
 	Multiline bool `json:"multiline,omitempty"`
 
-	// HeadLimit restricts output to the first N entries.
-	// Defaults to 0 (unlimited, up to MaxResults).
+	// HeadLimit restricts the page to N entries, up to MaxResults.
+	// Defaults to MaxResults when zero.
 	HeadLimit int `json:"head_limit,omitempty"`
 
 	// Offset skips the first N entries before applying HeadLimit.
@@ -94,13 +85,15 @@ type GrepToolOptions struct {
 	// Common defaults include node_modules, .git, vendor, etc.
 	DefaultExcludes []string
 
-	// MaxResults limits the total number of matches returned.
+	// MaxResults limits entries returned per call. Content mode counts matching
+	// lines; files_with_matches and count modes count files. Use Offset to page.
 	// Defaults to 1000 if not specified.
 	MaxResults int
 
 	// UseRipgrep enables using ripgrep (rg) when available.
 	// Ripgrep is significantly faster for large codebases.
 	// Falls back to Go regexp if ripgrep is not installed.
+	// Both paths search regular files up to 64 MiB each.
 	UseRipgrep bool
 
 	// WorkspaceDir restricts searches to paths within this directory.
@@ -148,7 +141,7 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 	if resolvedOpts.MaxResults == 0 {
 		resolvedOpts.MaxResults = 1000
 	}
-	if len(resolvedOpts.DefaultExcludes) == 0 {
+	if resolvedOpts.DefaultExcludes == nil {
 		resolvedOpts.DefaultExcludes = []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -170,12 +163,16 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 
 	var pathValidator *PathValidator
 	var configErr error
+	if resolvedOpts.MaxResults < 0 || resolvedOpts.MaxResults > 10000 {
+		configErr = fmt.Errorf("MaxResults must be between 1 and 10000")
+	}
 	if resolvedOpts.Validator != nil {
 		pathValidator = resolvedOpts.Validator
 	} else if resolvedOpts.WorkspaceDir != "" {
-		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
-		if configErr != nil {
-			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		var err error
+		pathValidator, err = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if err != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, err)
 		}
 	}
 
@@ -215,6 +212,10 @@ Parameters:
 - multiline: Enable multiline mode where . matches newlines
 - head_limit: Limit output to first N entries
 - offset: Skip first N entries
+
+Searches regular text files up to 64 MiB, including hidden and ignored files
+except configured exclusions. Missing paths are errors. Results state when
+pagination, skipped paths, or output limits make the answer incomplete.
 
 Examples:
 - Search for function definitions: {"pattern": "func\\s+\\w+", "type": "go"}
@@ -275,11 +276,11 @@ func (t *GrepTool) Schema() *schema.Schema {
 			},
 			"head_limit": {
 				Type:        "integer",
-				Description: "Limit output to first N lines/entries. Works across all output modes. Defaults to 0 (unlimited).",
+				Description: "Limit this page to N matching lines (content mode) or files (other modes), up to the configured MaxResults. Defaults to MaxResults.",
 			},
 			"offset": {
 				Type:        "integer",
-				Description: "Skip first N lines/entries before applying head_limit. Defaults to 0.",
+				Description: "Skip the first N matching lines (content mode) or files (other modes) before returning a page. Defaults to 0.",
 			},
 		},
 	}
@@ -299,6 +300,9 @@ func (t *GrepTool) Annotations() *dive.ToolAnnotations {
 
 // PreviewCall returns a summary of the search operation for permission prompts.
 func (t *GrepTool) PreviewCall(ctx context.Context, input *GrepInput) *dive.ToolCallPreview {
+	if input == nil {
+		return nil
+	}
 	searchPath := input.Path
 	if searchPath == "" {
 		searchPath = "."
@@ -320,6 +324,9 @@ func (t *GrepTool) PreviewCall(ctx context.Context, input *GrepInput) *dive.Tool
 // using Go's built-in regexp package. Results are formatted according to
 // the OutputMode setting.
 func (t *GrepTool) Call(ctx context.Context, input *GrepInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -327,449 +334,5 @@ func (t *GrepTool) Call(ctx context.Context, input *GrepInput) (*dive.ToolResult
 		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
 	}
 
-	// Use ripgrep if available
-	if t.ripgrepPath != "" {
-		return t.callRipgrep(ctx, input)
-	}
-	return t.callPureGo(ctx, input)
-}
-
-// callRipgrep uses ripgrep for searching
-func (t *GrepTool) callRipgrep(ctx context.Context, input *GrepInput) (*dive.ToolResult, error) {
-	searchPath := input.Path
-	if searchPath == "" {
-		var err error
-		searchPath, err = os.Getwd()
-		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error getting current directory: %v", err)), nil
-		}
-	}
-
-	// Validate path is within workspace (skip validation if no validator configured)
-	if t.pathValidator != nil {
-		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
-		}
-	}
-
-	args := []string{"--json"}
-
-	// Case sensitivity
-	if input.CaseInsens {
-		args = append(args, "--ignore-case")
-	}
-
-	// Multiline
-	if input.Multiline {
-		args = append(args, "--multiline", "--multiline-dotall")
-	}
-
-	// Context
-	if input.Context > 0 {
-		args = append(args, "-C", fmt.Sprintf("%d", input.Context))
-	}
-	if input.Before > 0 {
-		args = append(args, "-B", fmt.Sprintf("%d", input.Before))
-	}
-	if input.After > 0 {
-		args = append(args, "-A", fmt.Sprintf("%d", input.After))
-	}
-
-	// File filtering
-	if input.Glob != "" {
-		args = append(args, "--glob", input.Glob)
-	}
-	if input.Type != "" {
-		args = append(args, "--type", input.Type)
-	}
-
-	// Add default excludes
-	for _, exclude := range t.defaultExcludes {
-		args = append(args, "--glob", "!"+exclude)
-	}
-
-	// Pattern and path
-	args = append(args, "--regexp", input.Pattern)
-	args = append(args, searchPath)
-
-	cmd := exec.CommandContext(ctx, t.ripgrepPath, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			// Exit code 1 means no matches, which is fine
-			if exitError.ExitCode() == 1 {
-				return t.formatNoMatches(input), nil
-			}
-		}
-		return dive.NewToolResultError(fmt.Sprintf("ripgrep error: %v\n%s", err, stderr.String())), nil
-	}
-
-	return t.parseRipgrepOutput(stdout.String(), searchPath, input)
-}
-
-// ripgrepMatch represents a single match from ripgrep's JSON output format.
-// This struct maps to ripgrep's --json output for parsing results.
-type ripgrepMatch struct {
-	Type string `json:"type"`
-	Data struct {
-		Path struct {
-			Text string `json:"text"`
-		} `json:"path"`
-		Lines struct {
-			Text string `json:"text"`
-		} `json:"lines"`
-		LineNumber int `json:"line_number"`
-	} `json:"data"`
-}
-
-func (t *GrepTool) parseRipgrepOutput(output, basePath string, input *GrepInput) (*dive.ToolResult, error) {
-	var matches []grepMatch
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		var m ripgrepMatch
-		if err := json.Unmarshal([]byte(scanner.Text()), &m); err != nil {
-			continue
-		}
-		if m.Type != "match" {
-			continue
-		}
-		relPath, _ := filepath.Rel(basePath, m.Data.Path.Text)
-		if relPath == "" {
-			relPath = m.Data.Path.Text
-		}
-		matches = append(matches, grepMatch{
-			file:       relPath,
-			lineNumber: m.Data.LineNumber,
-			line:       strings.TrimRight(m.Data.Lines.Text, "\n\r"),
-		})
-
-		// Collect up to maxResults; offset/head_limit pagination is applied
-		// in formatResults so both search paths paginate identically.
-		if len(matches) >= t.maxResults {
-			break
-		}
-	}
-
-	return t.formatResults(matches, input)
-}
-
-// callPureGo uses Go's built-in regex for searching
-func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.ToolResult, error) {
-	searchPath := input.Path
-	if searchPath == "" {
-		var err error
-		searchPath, err = os.Getwd()
-		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error getting current directory: %v", err)), nil
-		}
-	}
-
-	// Resolve to absolute path
-	if !filepath.IsAbs(searchPath) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error getting current directory: %v", err)), nil
-		}
-		searchPath = filepath.Join(cwd, searchPath)
-	}
-
-	// Validate path is within workspace (skip validation if no validator configured)
-	if t.pathValidator != nil {
-		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
-		}
-	}
-
-	// Compile regex
-	pattern := input.Pattern
-	if input.CaseInsens {
-		pattern = "(?i)" + pattern
-	}
-	if input.Multiline {
-		pattern = "(?s)" + pattern
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return dive.NewToolResultError(fmt.Sprintf("Invalid regex pattern: %v", err)), nil
-	}
-
-	// Compile file filter
-	var fileFilter *glob.Pattern
-	if input.Glob != "" {
-		fileFilter, err = glob.Compile(input.Glob, '/')
-		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Invalid glob pattern: %v", err)), nil
-		}
-	}
-
-	// Type to extension mapping
-	typeToExt := map[string][]string{
-		"go":     {".go"},
-		"ts":     {".ts", ".tsx"},
-		"js":     {".js", ".jsx"},
-		"py":     {".py"},
-		"rust":   {".rs"},
-		"java":   {".java"},
-		"c":      {".c", ".h"},
-		"cpp":    {".cpp", ".cc", ".cxx", ".hpp", ".hh"},
-		"rb":     {".rb"},
-		"php":    {".php"},
-		"swift":  {".swift"},
-		"kotlin": {".kt", ".kts"},
-		"scala":  {".scala"},
-		"md":     {".md", ".markdown"},
-		"json":   {".json"},
-		"yaml":   {".yaml", ".yml"},
-		"xml":    {".xml"},
-		"html":   {".html", ".htm"},
-		"css":    {".css", ".scss", ".sass", ".less"},
-		"sql":    {".sql"},
-		"sh":     {".sh", ".bash"},
-	}
-
-	// Compile exclude patterns
-	excludeGlobs := make([]*glob.Pattern, 0, len(t.defaultExcludes))
-	for _, pattern := range t.defaultExcludes {
-		if eg, err := glob.Compile(pattern, '/'); err == nil {
-			excludeGlobs = append(excludeGlobs, eg)
-		}
-	}
-
-	var matches []grepMatch
-
-	// Checked per entry for the same reason as GlobTool's walk: an unbounded
-	// search must stop when the agent run is cancelled, not when it runs out
-	// of tree.
-	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if err != nil {
-			return nil
-		}
-
-		relPath, _ := filepath.Rel(searchPath, path)
-		relPath = filepath.ToSlash(relPath)
-
-		// Skip directories but check excludes
-		if info.IsDir() {
-			for _, eg := range excludeGlobs {
-				if matchesExclude(eg, relPath) || matchesExclude(eg, relPath+"/") {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-
-		// Check excludes
-		for _, eg := range excludeGlobs {
-			if matchesExclude(eg, relPath) {
-				return nil
-			}
-		}
-
-		// Check file filter
-		if fileFilter != nil && !fileFilter.Match(relPath) {
-			return nil
-		}
-
-		// Check type filter
-		if input.Type != "" {
-			exts, ok := typeToExt[input.Type]
-			if ok {
-				ext := filepath.Ext(path)
-				found := false
-				for _, e := range exts {
-					if strings.EqualFold(ext, e) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return nil
-				}
-			}
-		}
-
-		// Read and search file
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		// Skip binary files
-		if bytes.Contains(content[:min(len(content), 512)], []byte{0}) {
-			return nil
-		}
-
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			if re.MatchString(line) {
-				matches = append(matches, grepMatch{
-					file:       relPath,
-					lineNumber: i + 1,
-					line:       strings.TrimRight(line, "\r"),
-				})
-				// Collect up to maxResults; offset/head_limit pagination is
-				// applied in formatResults so both search paths paginate
-				// identically.
-				if len(matches) >= t.maxResults {
-					return filepath.SkipAll
-				}
-			}
-		}
-
-		return nil
-	})
-
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil && err != filepath.SkipAll {
-		return dive.NewToolResultError(fmt.Sprintf("Error walking directory: %v", err)), nil
-	}
-
-	return t.formatResults(matches, input)
-}
-
-// grepMatch represents a single match found during a search.
-type grepMatch struct {
-	file       string // Relative path to the file containing the match
-	lineNumber int    // 1-based line number of the match
-	line       string // Content of the matching line
-}
-
-// paginate applies offset and limit to a slice of entries.
-// A limit of 0 means no limit.
-func paginate[T any](entries []T, offset, limit int) []T {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(entries) {
-		return nil
-	}
-	entries = entries[offset:]
-	if limit > 0 && len(entries) > limit {
-		entries = entries[:limit]
-	}
-	return entries
-}
-
-// formatResults converts matches into the output format specified by OutputMode.
-// Pagination (offset + head_limit) is applied here, after the full result set
-// is grouped into entries, so both the ripgrep and pure-Go paths paginate
-// identically.
-func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.ToolResult, error) {
-	if len(matches) == 0 {
-		return t.formatNoMatches(input), nil
-	}
-
-	outputMode := input.OutputMode
-	if outputMode == "" {
-		outputMode = GrepOutputFilesWithMatches
-	}
-
-	offset := input.Offset
-	if offset < 0 {
-		offset = 0
-	}
-	limit := input.HeadLimit
-
-	showLines := true
-	if input.ShowLines != nil {
-		showLines = *input.ShowLines
-	}
-
-	var shown int
-	var result strings.Builder
-
-	switch outputMode {
-	case GrepOutputFilesWithMatches:
-		// Unique files only
-		seen := make(map[string]bool)
-		var files []string
-		for _, m := range matches {
-			if !seen[m.file] {
-				seen[m.file] = true
-				files = append(files, m.file)
-			}
-		}
-		sort.Strings(files)
-		files = paginate(files, offset, limit)
-		shown = len(files)
-		for _, f := range files {
-			result.WriteString(f)
-			result.WriteString("\n")
-		}
-
-	case GrepOutputCount:
-		// Count by file
-		counts := make(map[string]int)
-		for _, m := range matches {
-			counts[m.file]++
-		}
-		var files []string
-		for f := range counts {
-			files = append(files, f)
-		}
-		sort.Strings(files)
-		files = paginate(files, offset, limit)
-		shown = len(files)
-		for _, f := range files {
-			result.WriteString(fmt.Sprintf("%s:%d\n", f, counts[f]))
-		}
-
-	case GrepOutputContent:
-		// Paginate matches, then group by file
-		paged := paginate(matches, offset, limit)
-		shown = len(paged)
-		byFile := make(map[string][]grepMatch)
-		var files []string
-		for _, m := range paged {
-			if _, ok := byFile[m.file]; !ok {
-				files = append(files, m.file)
-			}
-			byFile[m.file] = append(byFile[m.file], m)
-		}
-		sort.Strings(files)
-
-		for _, f := range files {
-			result.WriteString(fmt.Sprintf("## %s\n", f))
-			for _, m := range byFile[f] {
-				if showLines {
-					result.WriteString(fmt.Sprintf("%d: %s\n", m.lineNumber, m.line))
-				} else {
-					result.WriteString(m.line)
-					result.WriteString("\n")
-				}
-			}
-			result.WriteString("\n")
-		}
-	}
-
-	if shown == 0 {
-		text := fmt.Sprintf("No results at offset %d (%d total match(es))", offset, len(matches))
-		display := fmt.Sprintf("No results for %q at offset %d", input.Pattern, offset)
-		return dive.NewToolResultText(text).WithDisplay(display), nil
-	}
-
-	display := fmt.Sprintf("Found %d match(es) for %q", len(matches), input.Pattern)
-	if len(matches) >= t.maxResults {
-		display += fmt.Sprintf(" (limited to %d)", t.maxResults)
-	}
-	if offset > 0 || limit > 0 {
-		display += fmt.Sprintf(" (showing %d)", shown)
-	}
-
-	return dive.NewToolResultText(strings.TrimSpace(result.String())).WithDisplay(display), nil
-}
-
-// formatNoMatches returns a result indicating no matches were found.
-func (t *GrepTool) formatNoMatches(input *GrepInput) *dive.ToolResult {
-	display := fmt.Sprintf("No matches found for %q", input.Pattern)
-	return dive.NewToolResultText("No matches found").WithDisplay(display)
+	return t.search(ctx, input)
 }

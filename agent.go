@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -2256,6 +2257,30 @@ func (a *Agent) executeToolCallsParallel(
 
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	deniedResults := make([]*ToolCallResult, len(toolCalls))
+	// Tool goroutines that ignore cancellation may outlive this batch. Route
+	// their stream/progress events through a gate so no new callback from an
+	// ended batch can reach the caller. A channel serializes callbacks, while
+	// closure stays independent of an in-flight user callback that may block.
+	callbackSlot := make(chan struct{}, 1)
+	callbackSlot <- struct{}{}
+	var callbackClosed atomic.Bool
+	originalCallback := callback
+	callback = func(ctx context.Context, item *ResponseItem) error {
+		if callbackClosed.Load() || ctx.Err() != nil || originalCallback == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-callbackSlot:
+		}
+		defer func() { callbackSlot <- struct{}{} }()
+		if callbackClosed.Load() || ctx.Err() != nil {
+			return nil
+		}
+		return originalCallback(ctx, item)
+	}
+	defer callbackClosed.Store(true)
 
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -2269,6 +2294,9 @@ func (a *Agent) executeToolCallsParallel(
 	// Phase 1: PreToolUse hooks (sequential)
 	preps := make([]toolCallPrep, len(toolCalls))
 	for i, toolCall := range toolCalls {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		tool, ok := toolsByName[toolCall.Name]
 		if !ok {
 			if err := callback(childCtx, &ResponseItem{
@@ -2367,6 +2395,9 @@ func (a *Agent) executeToolCallsParallel(
 
 	// Launch tool executions.
 	for i, prep := range preps {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if prep.denied {
 			continue
 		}
@@ -2396,7 +2427,8 @@ func (a *Agent) executeToolCallsParallel(
 		}()
 	}
 
-	// Drain results as they arrive (single-threaded: hooks + callbacks are safe).
+	// Drain completions on one goroutine so post hooks stay sequential. The
+	// callback gate above serializes these events with tool stream events.
 	// On a suspend, we do NOT cancel childCtx — still-running siblings must
 	// complete so their results can be recorded in the partial tool_result.
 	//
@@ -2406,6 +2438,9 @@ func (a *Agent) executeToolCallsParallel(
 	// Stragglers can still send: ch is buffered for every call in the batch.
 	remaining := len(toolCalls)
 	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var ct completedTool
 		select {
 		case ct = <-ch:
@@ -2413,6 +2448,9 @@ func (a *Agent) executeToolCallsParallel(
 			return nil, ctx.Err()
 		}
 		remaining--
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
 		if ct.err != nil {
 			cancel() // cancel remaining tools
@@ -2541,6 +2579,9 @@ func (a *Agent) executeToolCallsParallel(
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return batch, nil
 }
 
@@ -2630,6 +2671,9 @@ func (a *Agent) executeOneToolCall(
 	if denialErr != nil {
 		result = a.createDeniedResult(toolCall, denialErr.Error(), preview)
 	} else {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		input := toolCall.Input
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
@@ -2647,6 +2691,9 @@ func (a *Agent) executeOneToolCall(
 		} else {
 			toolSpan.End(nil)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Suspend path: emit the tool_call_result event but skip PostToolUse
@@ -2799,6 +2846,12 @@ func (a *Agent) executeTool(
 	}()
 
 	// Inject tool call ID and streaming function into context
+	if err := ctx.Err(); err != nil {
+		return &ToolCallResult{
+			ID: call.ID, Name: call.Name, Input: call.Input, Preview: preview,
+			Result: NewToolResultError(fmt.Sprintf("Tool execution cancelled: %v", err)), Error: err,
+		}
+	}
 	toolCtx := WithToolCallID(ctx, call.ID)
 	if callback != nil {
 		toolCtx = WithToolStreamFunc(toolCtx, func(toolCallID, text string) {

@@ -110,6 +110,14 @@ func TestTypedToolAdapter_ConvertInput_EmptyObject(t *testing.T) {
 	assert.False(t, result.IsError)
 }
 
+func TestTypedToolAdapter_ConvertInput_JSONNullIsError(t *testing.T) {
+	adapter := ToolAdapter(&mockTypedTool{name: "test"})
+	result, err := adapter.Call(context.Background(), json.RawMessage(`null`))
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "null input")
+}
+
 func TestToolAnnotations_MarshalSequentialOnlyHint(t *testing.T) {
 	// The key is omitted when false so existing serialized annotations are
 	// unchanged by the new hint.

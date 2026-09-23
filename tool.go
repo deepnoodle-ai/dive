@@ -1,9 +1,11 @@
 package dive
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/schema"
@@ -392,6 +394,10 @@ func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 
 	// Pass through if the input is already the correct type
 	if converted, ok := input.(T); ok {
+		value := reflect.ValueOf(converted)
+		if value.IsValid() && value.Kind() == reflect.Ptr && value.IsNil() {
+			return zero, fmt.Errorf("invalid null input for tool %s", t.Name())
+		}
 		return converted, nil
 	}
 
@@ -416,12 +422,19 @@ func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 	if len(data) == 0 {
 		data = []byte("{}")
 	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return zero, fmt.Errorf("invalid null input for tool %s", t.Name())
+	}
 
 	// Unmarshal into the typed input
 	var typedInput T
 	err = json.Unmarshal(data, &typedInput)
 	if err != nil {
 		return zero, fmt.Errorf("invalid json for tool %s: %w", t.Name(), err)
+	}
+	value := reflect.ValueOf(typedInput)
+	if value.IsValid() && value.Kind() == reflect.Ptr && value.IsNil() {
+		return zero, fmt.Errorf("invalid null input for tool %s", t.Name())
 	}
 	return typedInput, nil
 }

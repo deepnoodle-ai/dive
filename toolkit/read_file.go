@@ -151,6 +151,9 @@ func (t *ReadFileTool) PreviewCall(ctx context.Context, input *ReadFileInput) *d
 // Binary files are detected by checking for null bytes and control characters.
 // If detected, an error is returned instead of garbled content.
 func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -174,6 +177,9 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to resolve absolute path: %s", err.Error())), nil
 	}
+	if info, err := os.Stat(absPath); err == nil && !info.IsDir() && !info.Mode().IsRegular() {
+		return NewToolResultError(fmt.Sprintf("Error: Path is not a regular file: %s", filePath)), nil
+	}
 
 	// Open file first to avoid TOCTOU race conditions
 	file, err := os.Open(absPath)
@@ -196,6 +202,9 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 	if fileInfo.IsDir() {
 		return NewToolResultError(fmt.Sprintf("Error: Path is a directory, not a file: %s", filePath)), nil
 	}
+	if !fileInfo.Mode().IsRegular() {
+		return NewToolResultError(fmt.Sprintf("Error: Path is not a regular file: %s", filePath)), nil
+	}
 
 	// If no offset/limit, read the whole file (with size check)
 	if input.Offset == 0 && input.Limit == 0 {
@@ -204,9 +213,15 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 				filePath, fileInfo.Size(), t.maxSize)), nil
 		}
 
-		content, err := io.ReadAll(file)
+		content, err := io.ReadAll(io.LimitReader(file, int64(t.maxSize)+1))
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err != nil {
 			return NewToolResultError(fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error())), nil
+		}
+		if len(content) > t.maxSize {
+			return NewToolResultError(fmt.Sprintf("Error: File %s grew beyond the maximum allowed size of %d bytes while reading.", filePath, t.maxSize)), nil
 		}
 
 		if isBinaryContent(content) {
@@ -234,6 +249,9 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 	}
 
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		lineNum++
 		if lineNum < startLine {
 			continue
@@ -246,6 +264,9 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 
 	if err := scanner.Err(); err != nil {
 		return NewToolResultError(fmt.Sprintf("Error reading file: %s", err.Error())), nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Format with line numbers like cat -n

@@ -1461,8 +1461,11 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 	}
 
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	started := make(chan struct{})
+	finished := make(chan struct{})
+	var lateEvents atomic.Int32
 
 	quickTool := &mockTool{
 		name: "quick_tool",
@@ -1475,6 +1478,8 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
 			close(started)
 			<-release // deliberately ignores ctx
+			StreamOutput(ctx, "late output")
+			close(finished)
 			return NewToolResultText("stubborn"), nil
 		},
 	}
@@ -1494,7 +1499,12 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := agent.CreateResponse(ctx, WithInput("Use tools"))
+		_, err := agent.CreateResponse(ctx, WithInput("Use tools"), WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			if item.Type == ResponseItemTypeToolStream {
+				lateEvents.Add(1)
+			}
+			return nil
+		}))
 		done <- err
 	}()
 
@@ -1503,6 +1513,88 @@ func TestParallelToolExecution_CancelDoesNotWaitForStubbornTool(t *testing.T) {
 		assert.ErrorIs(t, err, context.Canceled)
 	case <-time.After(5 * time.Second):
 		t.Fatal("CreateResponse did not return after cancellation; it is waiting on a tool that ignores ctx")
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stubborn tool did not finish after release")
+	}
+	assert.Equal(t, int32(0), lateEvents.Load(), "ended run received a late tool stream event")
+}
+
+func TestParallelToolExecution_CancelDoesNotWaitForBlockedStreamCallback(t *testing.T) {
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			return &llm.Response{
+				ID:    "resp_1",
+				Model: "test-model",
+				Role:  llm.Assistant,
+				Content: []llm.Content{
+					&llm.ToolUseContent{ID: "t1", Name: "stream_tool", Input: []byte(`{}`)},
+					&llm.ToolUseContent{ID: "t2", Name: "quick_tool", Input: []byte(`{}`)},
+				},
+				Type:       "message",
+				StopReason: "tool_use",
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+	releaseCallback := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseCallback) }) })
+	callbackStarted := make(chan struct{})
+	callbackFinished := make(chan struct{})
+	streamTool := &mockTool{
+		name: "stream_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			StreamOutput(ctx, "first chunk")
+			return NewToolResultText("streamed"), nil
+		},
+	}
+	quickTool := &mockTool{
+		name: "quick_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewToolResultText("quick"), nil
+		},
+	}
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{streamTool, quickTool},
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := agent.CreateResponse(ctx, WithInput("Use tools"), WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			if item.Type == ResponseItemTypeToolStream {
+				close(callbackStarted)
+				<-releaseCallback
+				close(callbackFinished)
+			}
+			return nil
+		}))
+		done <- err
+	}()
+	select {
+	case <-callbackStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream callback did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("CreateResponse waited for a blocked stream callback after cancellation")
+	}
+	releaseOnce.Do(func() { close(releaseCallback) })
+	select {
+	case <-callbackFinished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream callback did not finish after release")
 	}
 }
 

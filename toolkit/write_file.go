@@ -116,6 +116,9 @@ func (t *WriteFileTool) PreviewCall(ctx context.Context, input *WriteFileInput) 
 // Creates parent directories as needed. Overwrites existing files.
 // Returns the number of bytes written on success.
 func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.configErr != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
 	}
@@ -142,10 +145,19 @@ func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.
 	}
 
 	dir := filepath.Dir(absPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("Error: Failed to create directory structure for %s. %s", filePath, err.Error())), nil
 	}
 
+	if info, err := os.Stat(absPath); err == nil && !info.Mode().IsRegular() {
+		return dive.NewToolResultError(fmt.Sprintf("Error: Path is not a regular file: %s", filePath)), nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	err = os.WriteFile(absPath, []byte(input.Content), 0644)
 	if err != nil {
 		if os.IsPermission(err) {

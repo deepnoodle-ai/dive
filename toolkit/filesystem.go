@@ -1,6 +1,8 @@
 package toolkit
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +45,13 @@ type RealFileSystem struct{}
 
 // ReadFile reads the entire file and returns its contents as a string.
 func (fs *RealFileSystem) ReadFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("path is not a regular file: %s", path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -57,6 +66,9 @@ func (fs *RealFileSystem) WriteFile(path string, content string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
+	}
+	if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("path is not a regular file: %s", path)
 	}
 	return os.WriteFile(path, []byte(content), 0644)
 }
@@ -84,12 +96,22 @@ func (fs *RealFileSystem) IsAbs(path string) bool {
 // ListDir returns a newline-separated list of paths in the directory,
 // walking up to 2 levels deep and excluding hidden files (starting with ".").
 func (fs *RealFileSystem) ListDir(path string) (string, error) {
+	return fs.ListDirContext(context.Background(), path)
+}
+
+// ListDirContext is the cancellable form used by TextEditorTool when its file
+// system implementation supports it. The FileSystem interface stays small for
+// existing custom implementations.
+func (fs *RealFileSystem) ListDirContext(ctx context.Context, path string) (string, error) {
 	var result strings.Builder
 
 	// Walk directory up to 2 levels deep, excluding hidden files
 	err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
-			return nil // Skip entries we can't access
+			return err
 		}
 
 		// Get relative path for depth calculation
