@@ -63,6 +63,13 @@ TARGETS: dict[str, Target] = {
         "anthropic",
         (TEXT, FAST_TEXT),
     ),
+    "deepinfra": Target(
+        "deepinfra",
+        "deepinfra",
+        REPO_ROOT / "providers" / "deepinfra",
+        "deepinfra",
+        (TEXT,),
+    ),
     "google": Target(
         "google",
         "google",

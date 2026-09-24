@@ -78,5 +78,36 @@ func WithSystemRole(systemRole string) Option {
 func WithReportedUsageCost(currency string) Option {
 	return func(p *Provider) {
 		p.reportedCostCurrency = currency
+		p.reportedCostField = "cost"
 	}
+}
+
+// WithReportedEstimatedUsageCost uses a provider's usage.estimated_cost field
+// as its cost estimate. Missing estimates remain unknown if catalog cost is
+// disabled. The amount is labeled as a provider estimate, not a final charge.
+func WithReportedEstimatedUsageCost(currency string) Option {
+	return func(p *Provider) {
+		p.reportedCostCurrency = currency
+		p.reportedCostField = "estimated_cost"
+	}
+}
+
+// WithDisableCatalogCost leaves cost unknown when this endpoint may charge
+// differently from another provider serving the same native model ID.
+func WithDisableCatalogCost() Option {
+	return func(p *Provider) {
+		p.disableCatalogCost = true
+	}
+}
+
+// WithPromptCacheKeySupport forwards llm.WithPromptCacheKey to compatible
+// Chat Completions endpoints.
+func WithPromptCacheKeySupport() Option {
+	return func(p *Provider) { p.supportsPromptCacheKey = true }
+}
+
+// WithResponseFormatSupport enables llm.WithResponseFormat for endpoints that
+// support the OpenAI Chat Completions response_format request shape.
+func WithResponseFormatSupport() Option {
+	return func(p *Provider) { p.supportsResponseFormat = true }
 }

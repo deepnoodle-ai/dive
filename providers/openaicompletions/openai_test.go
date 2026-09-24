@@ -130,7 +130,7 @@ func TestApplyRequestConfig_ForcedSingleToolCall(t *testing.T) {
 func TestApplyReportedUsageCostRejectsNegativeCharge(t *testing.T) {
 	reported := -0.01
 	usage := llm.Usage{}
-	applyReportedUsageCost(Usage{Cost: &reported}, &usage, "model", "USD")
+	applyReportedUsageCost(Usage{Cost: &reported}, &usage, "model", "USD", "cost")
 	assert.Nil(t, usage.Cost)
 	assert.True(t, usage.CostEstimateUnavailable)
 }

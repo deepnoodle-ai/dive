@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "provider": "deepinfra",
+  "sources": [
+    {
+      "name": "model-catalog",
+      "url": "https://deepinfra.com/models"
+    },
+    {
+      "name": "models-api",
+      "url": "https://api.deepinfra.com/v1/openai/models"
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelGLM53Flash",
+      "id": "zai-org/GLM-5.3-Flash",
+      "kind": "text",
+      "display_name": "GLM-5.3 Flash",
+      "description": "Efficient coding and agents",
+      "context_window": 1048576,
+      "default": true,
+      "recommended": true,
+      "cli_order": 1
+    },
+    {
+      "go_name": "ModelGLM53",
+      "id": "zai-org/GLM-5.3",
+      "kind": "text",
+      "display_name": "GLM-5.3",
+      "description": "Long-horizon engineering",
+      "context_window": 1048576,
+      "recommended": true,
+      "cli_order": 2
+    },
+    {
+      "go_name": "ModelQwen38Flash",
+      "id": "Qwen/Qwen3.8-Flash",
+      "kind": "text",
+      "display_name": "Qwen3.8 Flash",
+      "description": "Fast, low-cost chat and tools",
+      "context_window": 1000000,
+      "recommended": true,
+      "cli_order": 3
+    },
+    {
+      "go_name": "ModelQwen38Max",
+      "id": "Qwen/Qwen3.8-Max",
+      "kind": "text",
+      "display_name": "Qwen3.8 Max",
+      "description": "Flagship Qwen reasoning",
+      "context_window": 256000,
+      "recommended": true,
+      "cli_order": 4
+    },
+    {
+      "go_name": "ModelQwen38A95B",
+      "id": "Qwen/Qwen3.8-2.4T-A95B",
+      "kind": "text",
+      "display_name": "Qwen3.8 A95B",
+      "description": "Open-weight flagship Qwen",
+      "context_window": 262144,
+      "recommended": true,
+      "cli_order": 5
+    },
+    {
+      "go_name": "ModelQwen3827B",
+      "id": "Qwen/Qwen3.8-27B",
+      "kind": "text",
+      "display_name": "Qwen3.8 27B",
+      "description": "Smaller Qwen reasoning model",
+      "context_window": 262144,
+      "recommended": true,
+      "cli_order": 6
+    },
+    {
+      "go_name": "ModelKimiK3",
+      "id": "moonshotai/Kimi-K3",
+      "kind": "text",
+      "display_name": "Kimi K3",
+      "description": "Long-horizon agent tasks",
+      "context_window": 1048576,
+      "recommended": true,
+      "cli_order": 7
+    },
+    {
+      "go_name": "ModelDeepSeekV4Flash",
+      "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "kind": "text",
+      "display_name": "DeepSeek V4 Flash",
+      "description": "Low-cost coding and agents",
+      "context_window": 1048576,
+      "recommended": true,
+      "cli_order": 8
+    }
+  ]
+}

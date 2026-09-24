@@ -43,6 +43,8 @@ type StreamIterator struct {
 	thinkingIndex              int
 	textIndex                  int
 	reportedCostCurrency       string
+	reportedCostField          string
+	disableCatalogCost         bool
 	providerName               string
 	openRouterReasoningDetails []json.RawMessage
 	// toolCallIndices maps OpenAI tool call indices to sequential block indices.
@@ -509,7 +511,10 @@ func (s *StreamIterator) endStream() []*llm.Event {
 
 func (s *StreamIterator) llmUsage() llm.Usage {
 	usage := s.usage.toLLMUsage()
-	applyReportedUsageCost(s.usage, &usage, s.responseModel, s.reportedCostCurrency)
+	applyReportedUsageCost(s.usage, &usage, s.responseModel, s.reportedCostCurrency, s.reportedCostField)
+	if s.disableCatalogCost && usage.Cost == nil {
+		usage.CostEstimateUnavailable = true
+	}
 	if s.reportedCostCurrency != "" && !s.usage.present {
 		usage.Cost = nil
 		usage.CostEstimateUnavailable = true

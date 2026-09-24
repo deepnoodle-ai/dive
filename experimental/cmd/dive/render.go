@@ -166,10 +166,10 @@ func (a *App) statusLineView() tui.View {
 // no cost has been reported yet.
 func (a *App) sessionTotalCostString() string {
 	if a.sessionUsage != nil && a.sessionUsage.Cost != nil {
-		return formatCost(a.sessionUsage.Cost.Total)
+		return costString(a.sessionUsage)
 	}
 	if a.interactionUsage != nil && a.interactionUsage.Cost != nil {
-		return formatCost(a.interactionUsage.Cost.Total)
+		return costString(a.interactionUsage)
 	}
 	return ""
 }
@@ -328,12 +328,18 @@ func cacheHitStyle(u *llm.Usage, ok bool) tui.Style {
 }
 
 // costString renders a usage's total cost, or an em dash when cost is unknown.
-// This keeps an unknown distinct from a known $0 provider charge.
+// Estimates are prefixed with ~ so they are not mistaken for billed charges.
 func costString(u *llm.Usage) string {
 	if u.Cost == nil {
 		return "—"
 	}
-	return formatCost(u.Cost.Total)
+	value := formatCost(u.Cost.Total)
+	switch u.Cost.Source {
+	case llm.CostSourceProviderEstimate, llm.CostSourceListPriceEstimate, llm.CostSourceMixed:
+		return "~" + value
+	default:
+		return value
+	}
 }
 
 // formatCost formats a USD amount with precision that scales to the magnitude,

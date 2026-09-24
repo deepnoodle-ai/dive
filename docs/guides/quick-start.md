@@ -8,9 +8,12 @@ Get up and running with Dive in a few minutes.
 - An API key from at least one LLM provider:
   - [Anthropic](https://console.anthropic.com/) (`ANTHROPIC_API_KEY`)
   - [OpenAI](https://platform.openai.com/api-keys) (`OPENAI_API_KEY`)
+  - [DeepInfra](https://deepinfra.com/dash/api_keys) (`DEEP_INFRA_API_KEY`)
   - Or [Ollama](https://ollama.ai/) running locally (no key needed)
 
 ## Your First Agent
+
+The Go examples below use Anthropic and require `ANTHROPIC_API_KEY`. To use another provider, change the import and `Model` as shown in the [LLM Guide](llm-guide.md).
 
 ### 1. Initialize Your Project
 

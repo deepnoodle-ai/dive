@@ -77,9 +77,16 @@ type Provider struct {
 	maxRetries    int
 	retryBaseWait time.Duration
 	systemRole    string
-	// reportedCostCurrency opts an OpenAI-compatible provider into trusting the
-	// authoritative usage.cost value it returns on every response.
+	// reportedCostCurrency opts an OpenAI-compatible provider into using its
+	// reported usage cost. reportedCostField selects cost or estimated_cost.
 	reportedCostCurrency string
+	reportedCostField    string
+	// disableCatalogCost prevents a different provider's price for the same
+	// native model ID from being attributed to this endpoint.
+	disableCatalogCost bool
+	// Provider wrappers opt into these compatible endpoint capabilities.
+	supportsPromptCacheKey bool
+	supportsResponseFormat bool
 }
 
 // New creates a new OpenAI Completions provider with the given options.
@@ -228,6 +235,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		Usage:   result.Usage.toLLMUsage(),
 	}
 	p.applyReportedUsageCost(result.Usage, &response.Usage, response.Model)
+	if p.disableCatalogCost && response.Usage.Cost == nil {
+		response.Usage.CostEstimateUnavailable = true
+	}
 
 	llm.PopulateCost(response.Model, response.Usage.Speed == string(llm.SpeedFast), &response.Usage)
 	p.markReportedCostUnavailable(result.Usage, &response.Usage)
@@ -327,6 +337,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			thinkingIndex:        -1,
 			textIndex:            -1,
 			reportedCostCurrency: p.reportedCostCurrency,
+			reportedCostField:    p.reportedCostField,
+			disableCatalogCost:   p.disableCatalogCost,
 			providerName:         p.Name(),
 		}, nil
 	})
@@ -334,7 +346,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 }
 
 func (p *Provider) applyReportedUsageCost(wire Usage, usage *llm.Usage, model string) {
-	applyReportedUsageCost(wire, usage, model, p.reportedCostCurrency)
+	applyReportedUsageCost(wire, usage, model, p.reportedCostCurrency, p.reportedCostField)
 }
 
 func (p *Provider) markReportedCostUnavailable(wire Usage, usage *llm.Usage) {
@@ -349,20 +361,29 @@ func (p *Provider) markReportedCostUnavailable(wire Usage, usage *llm.Usage) {
 	}
 }
 
-func applyReportedUsageCost(wire Usage, usage *llm.Usage, model, currency string) {
-	if usage == nil || currency == "" || wire.Cost == nil {
+func applyReportedUsageCost(wire Usage, usage *llm.Usage, model, currency, field string) {
+	if usage == nil || currency == "" {
 		return
 	}
-	if *wire.Cost < 0 {
+	cost := wire.Cost
+	source := llm.CostSourceProviderReported
+	if field == "estimated_cost" {
+		cost = wire.EstimatedCost
+		source = llm.CostSourceProviderEstimate
+	}
+	if cost == nil {
+		return
+	}
+	if *cost < 0 {
 		usage.Cost = nil
 		usage.CostEstimateUnavailable = true
 		return
 	}
 	usage.Cost = &llm.Cost{
-		Total:                *wire.Cost,
+		Total:                *cost,
 		Currency:             currency,
 		Model:                model,
-		Source:               llm.CostSourceProviderReported,
+		Source:               source,
 		BreakdownUnavailable: true,
 	}
 }
@@ -460,6 +481,9 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 				parts = append(parts, part)
 				hasMedia = true
 			case *llm.DocumentContent:
+				if providerName == "deepinfra" && c.Source != nil && c.Source.Type != llm.ContentSourceTypeText {
+					return nil, fmt.Errorf("DeepInfra Chat Completions supports text documents only; send rendered page images for visual document input")
+				}
 				part, err := encodeDocumentContentPart(c)
 				if err != nil {
 					return nil, err
@@ -784,8 +808,15 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	} else {
 		req.Model = p.model
 	}
-	if config.PromptCacheKey != "" && isDefaultOpenAICompletionsEndpoint(p.Name(), p.endpoint) {
+	if config.PromptCacheKey != "" && (p.supportsPromptCacheKey || isDefaultOpenAICompletionsEndpoint(p.Name(), p.endpoint)) {
 		req.PromptCacheKey = config.PromptCacheKey
+	}
+	if config.ResponseFormat != nil && p.supportsResponseFormat {
+		format, err := chatResponseFormat(config.ResponseFormat)
+		if err != nil {
+			return err
+		}
+		req.ResponseFormat = format
 	}
 
 	var maxTokens int
