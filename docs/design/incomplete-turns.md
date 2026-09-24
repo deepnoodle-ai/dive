@@ -3,7 +3,7 @@
 _Last updated: 2026-09-24_
 _Status: proposal, no code written. Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
-revision, after four reviews: the pull-request review (a running call must
+revision, after six reviews: the pull-request review (a running call must
 not be recorded as "not run"; the partial-resume rule; the error contract;
 outcome metadata), an independent review of how turns end today (the loop
 never reads a stop reason; retrying a resume reruns tools; the background
@@ -14,7 +14,12 @@ one status axis for what can happen next and a reason axis for what happened;
 checkpoints). A fourth round of notes moved a refusal to a completed turn,
 kept PostGeneration's existing scope, added an unknown persistence state and
 the protocol-end rule for streams, and split Phase 2 into recoverable turns
-and per-step durability. Section references to `agent.go` are against
+and per-step durability. A fifth revision, after the pull-request reviews of
+the third and fourth, made persistence honest about what a save error proves,
+defined what an append-only session stores for a continuation and a resume,
+fixed stop-reason precedence in the adapters, stopped a cancellation from
+overriding a suspension whose work may already be dispatched, and specified
+the late-result handle. Section references to `agent.go` are against
 v1.33.1._
 
 A turn that does not finish is recorded the way a turn that finishes is: what
@@ -94,7 +99,10 @@ used below so that neither promises what the other delivers.
 - **`WithContinue()`** runs another invocation with no new input, which is
   how a stopped or failed turn is picked up without rerunning any tool.
 - **Session writes at the end of an invocation use a salvage context**, and
-  after a cancellation the agent never persists a suspension.
+  a suspension is persisted even when the context has been cancelled, since
+  the tool may already have dispatched the external work. `Persistence` says
+  `failed` only when the store rejected the write before writing; any other
+  error is `unknown`, and the session resyncs from its store.
 - **`OnIncompleteTurn` hook**, **`WithSoftCancel`**, an **encoder backstop**
   for unanswered calls, and **`IncompleteTurns{Discard, DropPartialText,
   SaveTimeout}`** as before.
@@ -275,6 +283,7 @@ const (
     TurnReasonError             TurnReason = "error"              // any other error; Error says which
     TurnReasonOutputLimit       TurnReason = "output_limit"       // the model stopped at max_tokens
     TurnReasonIterationLimit    TurnReason = "iteration_limit"    // ToolIterationLimit reached with calls still requested
+    TurnReasonProviderStopped   TurnReason = "provider_stopped"   // the provider ended the response early for a reason of its own
     TurnReasonPause             TurnReason = "pause"              // a server tool loop paused more than the agent continues
     TurnReasonProcessExit       TurnReason = "process_exit"       // Phase 2: the process ended with the turn open
 )
@@ -318,14 +327,16 @@ the default `Next`.
 | `error`              | non-nil | `input`        |                                                                                            |
 | `output_limit`       | nil     | `continue`     | the model's own stop; the answer is valid as far as it goes                                |
 | `iteration_limit`    | nil     | `continue`     | the requested calls were not run                                                           |
+| `provider_stopped`   | nil     | `continue`     | the provider reported an early end it did not name as a limit or refusal; `Error` carries the raw stop reason; no call runs |
 | `pause`              | nil     | `continue`     | only after the agent's own pause continuations were spent                                  |
 | `process_exit`       | none    | `continue`     | Phase 2, set on load; no invocation returned it                                            |
 
 Whatever the reason, `Next` is `reconcile` when any call in `ToolCalls` is
-`unknown`: something may have happened that the record cannot confirm, and
-the application should deliver the late result or check the effect before
-the model repeats the call. The value is advisory; `WithContinue` works in
-every state.
+`unknown` and its tool is not annotated `ReadOnlyHint`: something may have
+happened that the record cannot confirm, and the application should deliver
+the late result or check the effect before the model repeats the call. The
+annotation changes the advice, not the record: a started read-only call is
+still `unknown`. The value is advisory; `WithContinue` works in every state.
 
 ### 2. The turn boundary
 
@@ -340,8 +351,8 @@ One exit after the boundary is not an incomplete turn. A partial resume,
 where the caller supplied some pending results and others are still
 outstanding, never calls the model. If it fails in a post-tool hook, in the
 event callback, in PostGeneration or in `SaveSuspendedTurn`, the session is
-left exactly as it was and `(nil, err)` is returned; the caller resubmits the
-same results. Section 9 has the rule.
+left as it was in memory, resyncs from its store, and `(nil, err)` is
+returned; the caller reloads and resubmits. Section 9 has the rule.
 
 ### 3. Closing the turn
 
@@ -377,10 +388,10 @@ provider accepts. The rules, in order:
      blocking, the results that have already landed in the batch channel,
      keeps those, and answers the rest as unknown: the tool may take effect
      after the turn is saved, so the text says the result is unknown and
-     never that the call had no effect. State `unknown`. One exception: a
-     started call to a tool whose annotations say `ReadOnlyHint` is answered
-     "not run", since redoing it is harmless and its lost result is the only
-     casualty.
+     never that the call had no effect. State `unknown`, for a read-only
+     tool as for any other: `ReadOnlyHint` says repeating the call is
+     harmless, not that it never ran, so it softens the advice (section 1)
+     and leaves the record alone.
 
    ```go
    // ToolCallNotRunText answers a tool call the turn ended before it
@@ -399,17 +410,26 @@ provider accepts. The rules, in order:
    )
    ```
 
-   **An unknown call's late result is not lost.** Its goroutine finishes on
-   its own, with its late stream events suppressed by the existing callback
-   gate, but its final result is routed to a `BackgroundTaskHandle` on
-   `Response.BackgroundTasks`, one per unknown call, with `ToolUseID` set and
-   a description naming the call. That is the mechanism Dive already has for
-   a result that arrives after its turn: `AwaitBackgroundTasks`, with
-   whatever deadline the application chooses, and `WithBackgroundResults` on
-   the next invocation deliver the real result to the model through the
-   existing `background-tasks` reminder, and `PostBackgroundToolUse` hooks
-   fire for it using the PreToolUse hook context the handle carries. This is
-   what `Next == reconcile` points at.
+   **An unknown call's late result is not lost.** The existing background
+   path creates a handle only when a tool returns `BackgroundResult`, so an
+   in-flight synchronous call needs its own registration. When the batch
+   ends with calls still running, the agent registers a
+   `BackgroundTaskHandle` for each before returning: a fresh task ID, the
+   call's `ToolUseID`, a description naming the call, and the PreToolUse hook
+   context. A forwarder that outlives the batch moves each goroutine's
+   eventual completion from the batch channel to that handle's `Done`
+   channel; a panic is already an error result by the time it reaches the
+   channel, as `executeTool` recovers it, and the late stream events stay
+   suppressed by the existing callback gate. The handles are attached to
+   `Response.BackgroundTasks` next to any from tools that returned
+   `BackgroundResult`. From there the mechanism Dive already has for a result
+   that arrives after its turn applies: `AwaitBackgroundTasks`, with whatever
+   deadline the application chooses, and `WithBackgroundResults` on the next
+   invocation deliver the result to the model through the existing
+   `background-tasks` reminder, which gains the tool-use ID of the call each
+   result settles so that two calls with the same description stay distinct,
+   and `PostBackgroundToolUse` hooks fire for it. This is what
+   `Next == reconcile` points at.
 
    The two texts split by what the call did, not by why the turn ended; the
    outcome reminder says why. Results appear in call order, with
@@ -468,6 +488,7 @@ const (
     StopKindOutputLimit StopKind = "output_limit" // max_tokens, length
     StopKindRefusal     StopKind = "refusal"      // refusal, content_filter
     StopKindPause       StopKind = "pause"        // pause_turn
+    StopKindIncomplete  StopKind = "incomplete"   // the provider ended early for a reason it did not name as a limit or refusal
     StopKindOther       StopKind = "other"        // anything else, treated as finished
 )
 
@@ -479,8 +500,28 @@ func ClassifyStopReason(reason string) StopKind
 Providers keep their raw values (Anthropic `end_turn`/`max_tokens`/`refusal`/
 `pause_turn`, Gemini `stop`/`max_tokens`/`other`, chat completions
 `stop`/`length`/`content_filter`, the Responses API's mapped set), and
-`Response.StopReason` exposes the raw value of the last model response. The
-agent's rules:
+`Response.StopReason` exposes the raw value of the last model response.
+
+**Precedence in the adapters.** A stop reason reports why the response
+ended, not whether it contains tool calls. An adapter reports `tool_use`
+only when the response ended because of its tool calls; an output-limit,
+refusal or other early termination takes precedence over the calls the
+response also carries, which the agent then answers "not run". Today the
+Responses adapter reports `tool_use` as soon as it sees a call item, before
+it checks `status == incomplete` and `max_output_tokens`, so a cut-off
+response that carries a call would run it; that order is reversed, and its
+`incomplete` without a named reason, `cancelled`, `timeout` and `error`
+values classify as `StopKindIncomplete`. The Google adapter maps every finish
+reason other than stop and max-tokens to `other`, which loses the safety
+reasons; it maps `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`
+and `SPII` to their lowercase names, which classify as the refusal kind, and
+`MALFORMED_FUNCTION_CALL` to `malformed_function_call`, which classifies as
+`incomplete`. The raw value is always kept on `Response.StopReason`. A value
+Dive does not know is `other` and is treated as finished, with its tool
+calls run: the classification table is the checklist an adapter satisfies,
+not a guess the agent makes about an unfamiliar value.
+
+The agent's rules:
 
 - **Output limit.** None of the response's tool calls run. A truncated
   `tool_use` is dropped from the message; a complete one is answered "not
@@ -501,6 +542,9 @@ agent's rules:
   call is dropped from the saved message so the history stays valid, and the
   next invocation starts the server loop again. The limit is a constant, not
   an option, until someone needs to tune it.
+- **Provider stopped.** A response of `StopKindIncomplete` runs none of
+  its tool calls. Incomplete with `provider_stopped`, `err == nil`,
+  `Next == continue`, and `Error` carrying the raw stop reason.
 - **Iteration limit.** Today the last allowed iteration sends `tool_choice:
   none` and a nudge; if the model still requests tools, the calls run and
   the loop ends with their results unseen. They no longer run: the turn is
@@ -628,15 +672,24 @@ type Response struct {
 // Turn is the record of one turn as the last invocation left it: the unit a
 // session saves and a stateless caller appends to its history.
 type Turn struct {
-    // Messages is what a session saves for the turn: the input and every
-    // output message across all of the turn's invocations (a suspension and
-    // its resumes are one turn), closed so it can be sent again. It
-    // includes the synthetic background-results message, which
-    // OutputMessages has never carried.
+    // Messages is what a session saves for this invocation, closed so it
+    // can be sent again. For a fresh turn it is the input and the output.
+    // For a resume it is the whole suspended turn merged with this
+    // invocation's output, since the session replaces the suspended event.
+    // For a continuation it is this invocation's output alone, since in
+    // v1.34 a continuation is saved as its own event; Phase 2 folds it into
+    // the turn it continues. It includes the synthetic background-results
+    // message, which OutputMessages has never carried.
     Messages []*llm.Message `json:"messages"`
 
-    // Usage is the turn's cumulative usage across its invocations.
-    // Response.Usage is this invocation's alone.
+    // Usage is the turn's usage as far as the agent can know it: this
+    // invocation's, plus, on a resume, what the suspended turn had already
+    // accumulated, which SuspensionState.Usage now carries (session.Session
+    // fills it from the suspended event; a session that does not track it
+    // leaves it nil, and Usage is then this invocation's). The session is
+    // always handed the invocation's own usage and sums on SaveResumedTurn,
+    // as today, so TotalUsage never double-counts. Response.Usage is this
+    // invocation's alone.
     Usage *llm.Usage `json:"usage,omitempty"`
 
     // Outcome is set when Status is ResponseStatusIncomplete.
@@ -656,21 +709,42 @@ type PersistenceState string
 
 const (
     PersistenceNone    PersistenceState = "none"    // no session
-    PersistenceSaved   PersistenceState = "saved"
-    PersistenceFailed  PersistenceState = "failed"  // the store refused the write; the returned error wraps its error
-    PersistenceUnknown PersistenceState = "unknown" // the write timed out or was cut off; it may or may not have landed
+    PersistenceSaved   PersistenceState = "saved"   // the store acknowledged the write
+    PersistenceFailed  PersistenceState = "failed"  // the store rejected the write before writing anything
+    PersistenceUnknown PersistenceState = "unknown" // any other error, or a timeout; the write may have landed
 )
+
+// ErrSaveRejected is wrapped by a Session's write when it is refused before
+// anything is written, so the agent can report PersistenceFailed. Any error
+// that does not wrap it, or one of session.Session's own pre-write
+// sentinels (ErrSuspendedSession, ErrNotSuspended), is PersistenceUnknown.
+var ErrSaveRejected = errors.New("dive: session rejected the write before writing")
 ```
 
 `Response.Usage` and `FinishedAt` keep their invocation scope: `FinishedAt`
 is when the invocation ended, even when the turn is suspended or incomplete.
 `Response.OutputMessages` is the new output of this invocation, which for an
 incomplete invocation includes the closing messages. A stateless caller has
-one recipe for every status: `history = append(preTurn, resp.Turn.Messages...)`,
-replacing the turn's messages on each further invocation of the same turn (a
-resume, a continuation), and keeping `resp.Suspension` while a turn is
-suspended for `WithResume`. That replaces the three recipes in use today,
-and the background-results message is no longer lost.
+one recipe for every status: append `resp.Turn.Messages` to the history it
+held before the call, where on a resume "before the call" means before the
+suspended turn, since the caller replaces that turn exactly as the session
+does, and keep `resp.Suspension` while a turn is suspended for `WithResume`.
+That replaces the three recipes in use today, and the background-results
+message is no longer lost.
+
+**A save error proves less than it seems.** `Persistence` is what the store
+said, not what the store holds. `session.Session` on a `FileStore` can
+return an error after `os.Rename` has replaced the file (the parent
+directory's sync or close), and an append can fail on `Sync` after its bytes
+are written; today `withRollback` then restores the in-memory state, so the
+cached session and a fresh `Open` disagree. Hence the rule above: `failed`
+only for a write the store rejected before writing, `unknown` for everything
+else. After `unknown`, `session.Session` re-reads its state from the store
+before it serves another call, instead of trusting its rollback, and a
+custom session does the same or documents that it does not. A caller treats
+`resp.Turn` as what the agent produced and `Persistence` as whether the
+session holds it, and reloads before acting on the session when it is not
+`saved`.
 
 **The contract by exit class.** The `Response` is created before
 PreGeneration hooks run (today it is created after them), and every exit
@@ -689,7 +763,7 @@ that state is spread over four slices and reassembled on the error path.
 | Suspended                                                             | `(resp, nil)`                             | `suspended`  | `saved` or `none`  |
 | A new suspension whose `SaveSuspendedTurn` failed                     | `(resp, err)` (today `(nil, err)`), so the caller can persist `resp.Suspension` itself | `suspended`  | `failed`           |
 | Incomplete, error reason                                              | `(resp, err)`, `err` wraps `*GenerationError{Response: resp}` | `incomplete` | `saved`, `none`, or `failed`/`unknown` with `errors.Join` |
-| Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `pause`) | `(resp, nil)`                        | `incomplete` | `saved` or `none`  |
+| Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `provider_stopped`, `pause`) | `(resp, nil)`    | `incomplete` | `saved` or `none`  |
 | Partial resume failed                                                 | `(nil, err)`, `err` wraps `*GenerationError` with the items so far and `Response == nil` | | unchanged |
 
 The error reasons cover every exit that used to `return nil, err` on its own:
@@ -729,8 +803,10 @@ Session-backed callers pass it alone. Stateless callers already have the
 means, `WithMessages(history...)` with a history that ends in the closed
 turn, and may add `WithContinue` for the reminder. An input-less call on a
 session-backed agent runs today by accident; `WithContinue` makes it a
-contract, and Phase 2 makes the continuation an invocation of the same turn
-rather than a new event.
+contract. In v1.34 the continuation is saved as its own event with no input:
+`SaveTurn` appends its output and its usage, nothing already saved is
+written again, `resp.Turn.Messages` is that output, and the stateless recipe
+appends it. Phase 2 folds the continuation into the turn it continues.
 
 This is also the answer to the retried resume that reruns tools: after a
 full resume fails, the caller-supplied results and everything the resume ran
@@ -792,10 +868,15 @@ meaning, and the incomplete path needs no "an abort here is only logged"
 special case. For a turn the model finished, a PostGeneration abort makes
 the turn incomplete with `hook_abort`, the model's complete output saved,
 and `OnIncompleteTurn` runs. An **OnSuspend** abort is the same kind of
-exit: the turn is incomplete with `hook_abort`, the completed
-siblings keep their results, and the suspending calls are answered "not
-run", since the external work the hook was to dispatch never started. Stop
-hooks never run on an incomplete turn.
+exit: the turn is incomplete with `hook_abort`, the completed siblings keep
+their results, and the suspending calls are recorded as `unknown`, answered
+with `ToolCallUnknownText`, with `Next == reconcile`. "Never started" cannot
+be claimed for them: the tool may have dispatched its request before it
+suspended (the suspend-resume guide's own example does), and an earlier
+OnSuspend hook may have dispatched before a later one aborted. OnSuspend
+hooks run with the salvage context, since a hook that dispatches work must
+not fail on a cancellation that is ending the run. Stop hooks never run on
+an incomplete turn.
 
 ```text
 SessionLoad → SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration → SessionSave
@@ -817,18 +898,22 @@ use it too closes the save-error row in the table above. A store error is
 `Persistence == failed`; a write that hit `SaveTimeout` is `unknown`, since
 it may have landed, and an error never implies that nothing was saved.
 
-**Cancellation versus suspension.** A new suspension is never persisted
-after a cancellation (a partial resume follows its own rule below and leaves
-the earlier suspension standing). `finishSuspended` checks the context before
-the OnSuspend hooks and again before `SaveSuspendedTurn`; if it is cancelled,
-the turn is closed
-as incomplete with `canceled` instead: the completed siblings keep their
-results, the suspending calls are answered "not run", since their external
-work was never dispatched, and the session is not suspended. That removes
-the confirmed race where an A2A `Cancel` cancels the run and calls
-`CancelSuspension` before the run's suspension write lands. The remaining
-window, between the agent's check and its write, is closed by taking the
-per-session lock around external mutations:
+**Cancellation versus suspension.** A suspension is persisted even when the
+context has been cancelled by the time the agent reaches it. A tool that
+returns `SuspendResult` has usually dispatched its request already, and an
+OnSuspend hook may dispatch before the cancellation is observed; closing the
+turn as cancelled with those calls "not run" would be false, and would leave
+the external result with no suspended session to land in. So
+`finishSuspended` runs its hooks and `SaveSuspendedTurn` with the salvage
+context and the invocation returns `Suspended` with a nil error: the
+cancellation changed nothing about the outcome. What the application does
+with a suspension it no longer wants is its own explicit act, taken under
+the lock: `CancelSuspension` today, `CancelSuspendedTurn` in Phase 2, which
+records the outcome and answers the pending calls as `unknown`. This
+replaces the earlier rule that a suspension is never persisted after a
+cancellation, and it settles the confirmed race with A2A's `Cancel` in the
+honest direction: the suspension is written, and `Cancel`, taking the lock
+after the run's write, removes it. The only remaining need is that lock:
 
 ```go
 // LockSession takes the per-session lock CreateResponse uses, so a caller
@@ -839,17 +924,19 @@ func LockSession(ctx context.Context, id string) (unlock func(), err error)
 ```
 
 With it, A2A's `Cancel` cancels the run, takes the lock (which waits for the
-run's salvage write), then cancels the suspension, in that order.
+run's write), then cancels the suspension, in that order.
 
 **Plain sessions.** An incomplete turn is saved with `SaveTurn`, the same call
 as a completed turn; the messages carry the outcome reminder, so any
 `Session` implementation works unchanged and can read the outcome back with
-`FindTurnOutcome`. `session.Session.SaveTurn` additionally records
-`Metadata["outcome"]` with the reason when the turn carries an outcome
-reminder anywhere in its messages, next to the existing `"suspended"`
-metadata. The agent keeps the outcome reminder last, but the session does
-not depend on that. Phase 2's checkpoint receives the outcome as a value and
-needs no scan.
+`FindTurnOutcome`. `session.Session` additionally records
+`Metadata["outcome"]` with the reason on the event it writes, whether
+`SaveTurn` appends it or `SaveResumedTurn` replaces the suspended event with
+a closed full resume, when the turn carries an outcome reminder anywhere in
+its messages, next to the existing `"suspended"` metadata. The agent keeps
+the outcome reminder last, but the session does not depend on that. The
+metadata's consumers are the Phase 2 hidden-turn view and store listings;
+Phase 2's checkpoint receives the outcome as a value and needs no scan.
 
 **Resumed turns.** Two cases, split by whether external work is still
 outstanding.
@@ -874,15 +961,27 @@ PostToolUse or PostToolUseFailure hook aborting for a supplied result
 item that announces it, a PostGeneration hook aborting inside
 `finishSuspended`, or `SaveSuspendedTurn` failing. None of those closes the
 turn: external work is outstanding, and a closed turn could never accept it.
-The session is left exactly as it was before the call, with the earlier
-suspension and the earlier pending set, nothing is saved, and `(nil, err)` is
-returned, as today; a new test pins the invariant at each of the four points.
-The caller still holds the results it just supplied and resubmits them; a
-stream consumer sees their `tool_call_result` items again on the retry,
-which is the existing behaviour of a failed resume. Saving the supplied
-results alongside the still-pending calls would need a session write that
-half-advances a suspension; Phase 2's revisions provide exactly that, with
-idempotent redelivery, and v1.34 does not.
+In memory the session is left as it was before the call, with the earlier
+suspension and the earlier pending set, and `(nil, err)` is returned, as
+today; a new test pins the invariant at each of the four points. The store
+may still have taken the write when the failure was `SaveSuspendedTurn`
+itself, since a rename can land before a later error, so the session
+resyncs from its store and the caller reloads before resubmitting: if the
+resync shows the results were accepted, the resubmission returns
+`ErrUnknownPendingToolCall` for them, which is the existing signal to move
+on. Otherwise the caller still holds the results it just supplied and
+resubmits them; a stream consumer sees their `tool_call_result` items again
+on the retry, which is the existing behaviour of a failed resume.
+
+One thing a failed attempt does not undo: the PostToolUse and
+PostToolUseFailure hooks for the supplied results have already run, and the
+retry runs them again. Hook delivery on a partial resume is at-least-once. A
+hook with an external side effect deduplicates on the tool-call ID, which is
+stable across attempts, and `IdempotentHint` says nothing about hooks.
+Saving the supplied results alongside the still-pending calls would need a
+session write that half-advances a suspension; Phase 2's revisions provide
+exactly that, and narrow the hook window to the gap between a hook's effect
+and the checkpoint that follows it.
 
 **Stateless callers** get the closed turn on `Turn.Messages` and append it to
 their own history like any other turn.
@@ -977,8 +1076,8 @@ type IncompleteTurnOptions struct {
     // and leaves a failed resume suspended. CreateResponse still returns the
     // response alongside the error, with the raw partial messages
     // GenerationError carries today and Turn.Persistence none. Turns the
-    // model itself stopped short (output limit, iteration limit, pause) were
-    // saved before v1.34 and still are. For
+    // model itself stopped short (output limit, iteration limit, provider
+    // stop, pause) were saved before v1.34 and still are. For
     // applications that keep incomplete turns themselves and are not ready
     // to remove that code.
     Discard bool
@@ -1039,8 +1138,13 @@ Each of these is independent of the rest and can ship first:
   `Message.Copy` and a result clone, as `copyMessages` already does for
   events.
 - **Stop reason plumbing.** `Response.StopReason` and
-  `llm.ClassifyStopReason`, and the chat-completions iterator reporting a
-  bare EOF, without `[DONE]` or a finish reason, as an error (section 4).
+  `llm.ClassifyStopReason`, the precedence fix in the Responses adapter and
+  the finish-reason mapping in the Google adapter, and the chat-completions
+  iterator reporting a bare EOF, without `[DONE]` or a finish reason, as an
+  error (section 4).
+- **Session resync after a write error.** `session.Session` re-reads its
+  state from the store after any failed write instead of restoring its
+  in-memory copy, since the write may have landed (section 6).
 - **`LockSession`** (section 9).
 - **The CLI** compares the error with `!=`; it should use `errors.Is`, and
   render the outcome reminder as a transcript marker on resume. It gets
@@ -1060,13 +1164,15 @@ Everything new or changed in v1.34, in one place:
 const ResponseStatusIncomplete ResponseStatus
 type  TurnReason string; const TurnReasonCanceled, TurnReasonDeadline, TurnReasonProviderError, TurnReasonStreamInterrupted,
       TurnReasonHookAbort, TurnReasonCallbackError, TurnReasonError, TurnReasonOutputLimit, TurnReasonIterationLimit,
-      TurnReasonPause, TurnReasonProcessExit TurnReason
+      TurnReasonProviderStopped, TurnReasonPause, TurnReasonProcessExit TurnReason
 type  TurnNext string; const TurnNextContinue, TurnNextReconcile, TurnNextInput TurnNext
 type  ToolCallState string; const ToolCallStateCompleted, ToolCallStateNotStarted, ToolCallStateUnknown, ToolCallStateWaiting ToolCallState
 type  ToolCallRecord struct{ ID, Name string; State ToolCallState }
 type  TurnOutcome struct{ Reason TurnReason; Error, Hook string; UsageUnknown bool; ToolCalls []ToolCallRecord; Next TurnNext }
 type  Turn struct{ Messages []*llm.Message; Usage *llm.Usage; Outcome *TurnOutcome; Suspension *SuspensionState; Persistence PersistenceState }
 type  PersistenceState string; const PersistenceNone, PersistenceSaved, PersistenceFailed, PersistenceUnknown PersistenceState
+var   ErrSaveRejected error                                                 // a Session wraps it for a pre-write refusal
+type  SuspensionState struct{ ...; Usage *llm.Usage }                       // new field, filled by session.Session
 type  Response struct{ ...; StopReason string; StopDetails *llm.StopDetails; Turn *Turn } // new fields
 type  GenerationError struct{ ...; Response *Response }                    // new field
 const ToolCallNotRunText, ToolCallUnknownText = llm.ToolCallNotRunText, llm.ToolCallUnknownText
@@ -1092,15 +1198,16 @@ const ResponseItemTypeTurnEnded ResponseItemType; ResponseItem.Turn *Turn   // R
 
 // llm
 type  ReminderContent struct{ ...; Details map[string]any }
-type  StopKind string; func ClassifyStopReason(reason string) StopKind
+type  StopKind string; func ClassifyStopReason(reason string) StopKind   // finished, tool_use, output_limit, refusal, pause, incomplete, other
 const ToolCallNotRunText, ToolCallUnknownText string
 func  AnswerUnansweredToolCalls(messages []*Message) []*Message
 // ResponseAccumulator: a way to get the partial response with per-block completeness
 
 // providers: each encoder calls llm.AnswerUnansweredToolCalls; the
 // chat-completions iterator reports a bare EOF, without [DONE] or a finish reason, as an error
-// session: SaveTurn records Metadata["outcome"] when the turn carries an outcome reminder anywhere;
-// cloneSuspensionState and cloneCompletedToolCall deep-copy
+// session: SaveTurn and SaveResumedTurn record Metadata["outcome"] when the turn carries an outcome
+// reminder anywhere; LoadSuspension fills SuspensionState.Usage; the session resyncs from its store after
+// a failed write; cloneSuspensionState and cloneCompletedToolCall deep-copy
 ```
 
 ### The cases
@@ -1118,8 +1225,8 @@ From the proposal and the reviews:
   their hooks applied. Results that finished but were still in the channel
   are picked up with a non-blocking drain and kept, without PostToolUse
   hooks, which would otherwise run with a cancelled context; documented.
-  Calls still running are answered "unknown", never "not run", except calls
-  to read-only tools; their late results come back as handles for the
+  Calls still running are answered "unknown", never "not run", read-only
+  tools included; their late results come back as handles for the
   application to deliver or drop. Sequential execution waits for the running
   call, as today, so it records that call's own result, and only the calls
   after it are "not run".
@@ -1143,8 +1250,9 @@ From the proposal and the reviews:
 - **Suspension.** A suspended turn is not incomplete; it is paused with
   external work outstanding, and stays as it is. A full resume that stops is
   closed (section 9). A cancellation that arrives while the agent is
-  suspending closes the turn as cancelled instead of persisting the
-  suspension. Closing a suspended turn without a model call is Phase 2.
+  suspending does not stop the suspension from being persisted, since the
+  work may be dispatched. Closing a suspended turn without a model call is
+  Phase 2.
 - **Mid-turn compaction.** The saved turn comes from the output accumulator,
   never from the compacted working set, as for a completed turn.
 - **Hook aborts.** `TurnOutcome.Hook` names the hook type and `Error` carries
@@ -1224,13 +1332,16 @@ What each of the three applications does after upgrading:
   Parallel, with the second tool still running: the same shape with an
   unknown-result error, the call `unknown`, `Next == reconcile`, and a
   handle for it on `Response.BackgroundTasks`; a read-only tool in the same
-  position is `not_started`. Both histories encode without error on the
+  position is `unknown` too, with `Next` left at `input`. Both histories
+  encode without error on the
   Anthropic, OpenAI Responses, Gemini and Chat Completions encoders.
 - A parallel tool that ignores cancellation and commits after the turn is
   saved: recorded as unknown, never as not run; the reminder does not say it
   had no effect; its handle delivers the commit's result once the tool
   returns; `WithBackgroundResults` on the next invocation shows a scripted
-  model the real result and fires `PostBackgroundToolUse`.
+  model the real result and fires `PostBackgroundToolUse`. Two unknown calls
+  with the same description: the completion reminder names each by its
+  tool-use ID, and a panic in one arrives as an error result.
 - Cancelled while text is streaming: the partial text is the last assistant
   message; with `DropPartialText` it is absent; a half-written `tool_use`
   block and an unsigned thinking block are dropped.
@@ -1249,6 +1360,12 @@ What each of the three applications does after upgrading:
 - A refusal with a tool call present: no tool runs, the call is answered
   "not run", `Status == Completed`, `Response.StopReason` is the refusal
   value, `StopDetails` is carried, and no reminder is recorded.
+- Adapter precedence: a Responses API response carrying a call with
+  `incomplete`/`max_output_tokens` is reported as `max_tokens` and the call
+  is not run; the same for a Gemini `SAFETY` finish with a function call
+  (completed, call not run) and a chat-completions `length` with
+  `tool_calls`; a Responses `incomplete` without a named reason gives
+  `provider_stopped` with no call run.
 - `pause_turn`: a scripted model that pauses twice then finishes is called
   three times with no user message between; one that pauses eleven times
   ends `Incomplete` with `pause` and no trailing server tool call in the
@@ -1261,10 +1378,12 @@ What each of the three applications does after upgrading:
   `[DONE]` without a finish reason is a normal end.
 - Hook aborts in PreToolUse, Stop, PostGeneration and OnSuspend:
   `Outcome.Hook` names the hook; Stop and PostGeneration save the model's
-  complete output; OnSuspend saves the completed siblings and answers the
-  suspending call "not run", and the session is not suspended.
-- A cancellation arriving while the agent is suspending: the turn is closed
-  as cancelled and the session is not suspended.
+  complete output; OnSuspend saves the completed siblings, records the
+  suspending call as `unknown`, and the session is not suspended.
+- A cancellation arriving while the agent is suspending, after the tool
+  recorded that it dispatched its request: the suspension is persisted, the
+  response is `Suspended` with a nil error, the OnSuspend hooks saw an
+  uncancelled context, and `WithToolResults` later succeeds.
 - PreGeneration hook error: the input and the outcome are saved, nothing
   else.
 - Soft cancel requested during a tool batch and during a model call: the
@@ -1275,9 +1394,19 @@ What each of the three applications does after upgrading:
   and `resp.Turn.Messages` is the closed turn. The existing
   `TestResumeContextCancelMidExecution` is this case and its expectation
   flips; its old expectation moves under `IncompleteTurns.Discard`.
-- A partial resume failing at each of its four points: the session's
-  suspension and pending set are unchanged, nothing is saved, `resp == nil`,
-  and resubmitting the same results succeeds.
+- A partial resume failing at each of its four points: the cached session's
+  suspension and pending set are unchanged, `resp == nil`, and resubmitting
+  the same results succeeds. With a failure injected after the rename in
+  `SaveSuspendedTurn`: a fresh `Open` shows the advanced pending set, the
+  cached session resyncs to match, and the resubmission returns
+  `ErrUnknownPendingToolCall`. A side-effecting PostToolUse hook records
+  its effect on the failed attempt and again on the retry: at-least-once, as
+  documented.
+- Two continuations after a stopped turn: the session holds three events
+  with no message saved twice, `TotalUsage` is the sum of the three
+  invocations, and each continuation's `resp.Turn.Usage` is its own. A full
+  resume: `resp.Turn.Usage` equals the suspended event's usage plus the
+  resume's, and `TotalUsage` equals the same.
 - `(resp, err)`, `errors.As`, `genErr.Response == resp` and the status on
   every exit class: PreGeneration error, PreIteration error, tool resolution
   error, model error, event callback error, hook aborts in PreToolUse,
@@ -1285,7 +1414,13 @@ What each of the three applications does after upgrading:
   before the model call, and a salvage save failure with `Persistence ==
   failed`.
 - A completed turn whose save fails: `(resp, err)`, `Status == Completed`,
-  `Persistence == failed`; the same for a suspension whose save fails.
+  `Persistence == failed` for a pre-write rejection and `unknown` for any
+  other error; the same for a suspension whose save fails. For each of
+  `SaveTurn`, `SaveSuspendedTurn` and `SaveResumedTurn`, a failure injected
+  before the write leaves a fresh `Open` unchanged, and one injected after
+  the rename or the append shows the new state on a fresh `Open` and on the
+  resynced cached session; the closed full resume's replacement event
+  carries `Metadata["outcome"]`.
 - `IncompleteTurns.Discard`: nothing saved, no not-run, unknown or
   `turn_ended` items on an error exit, the session stays suspended on a
   failed resume; a `max_tokens` answer is still saved. The existing
@@ -1305,9 +1440,9 @@ What each of the three applications does after upgrading:
   at the tail encodes on all four encoders with the inserted unknown-result
   block, and the caller's messages are unchanged.
 - Salvage context: a session whose `SaveTurn` returns `ctx.Err()` still
-  saves; a session that returns an error gives `Persistence == failed`; a
-  session that blocks trips `SaveTimeout`, the error is joined, and
-  `Persistence == unknown`.
+  saves; a session that wraps `ErrSaveRejected` gives `Persistence ==
+  failed`; one that returns any other error, or blocks until `SaveTimeout`,
+  gives `unknown` with the error joined.
 - Snapshot isolation: mutating a returned `SuspensionState` or its messages
   does not change the session.
 - Reminder details round-trip through `Message.Copy` and `FileStore`, and a
@@ -1337,7 +1472,7 @@ Changelog, under Changed:
 > `AgentOptions.IncompleteTurns.Discard` to keep the old error behaviour, or
 > if your application saves incomplete turns itself.
 
-Under Added: `Response.Turn`, `Response.StopReason` and `StopDetails`, `WithContinue`,
+Under Added: `Response.Turn`, `Response.StopReason` and `StopDetails`, `SuspensionState.Usage`, `ErrSaveRejected`, `WithContinue`,
 `WithSoftCancel`, `OnIncompleteTurn`, `TurnOutcome` and `FindTurnOutcome`,
 `Reminder.Details`, `LockSession`, `turn_ended` items,
 `llm.AnswerUnansweredToolCalls` in every encoder, `llm.ClassifyStopReason`.
@@ -1466,11 +1601,14 @@ type ResumeRequest struct {
 }
 ```
 
-Supplied results are checkpointed as they are accepted, so a partial resume
-that fails after accepting some results keeps them, which v1.34 cannot do,
-and resubmitting an already-accepted result is idempotent: it runs no hook
-twice and emits no item twice. A conflicting second result for the same
-call fails clearly. Importing a caller-held `Turn` into a session, the
+A supplied result is accepted, its post-tool hooks run, and it is
+checkpointed, in that order, so a partial resume that fails after the
+checkpoint keeps the result, which v1.34 cannot do, and resubmitting an
+already-accepted result is idempotent: the agent sees it checkpointed, runs
+no hook twice and emits no item twice. The window between a hook's effect
+and its checkpoint remains: a failure inside it means the hook runs again on
+the retry, the same at-least-once contract as v1.34, narrowed to that gap.
+A conflicting second result for the same call fails clearly. Importing a caller-held `Turn` into a session, the
 stateless cross-process handoff, becomes an explicit operation with the
 same conflict check, instead of `WithResume` silently replacing the stored
 state. A stale revision also covers the single-process case, where two
@@ -1496,9 +1634,10 @@ reminder, as in v1.34.
 **Closing, deleting, forking, hiding.**
 
 - **`Agent.CancelSuspendedTurn(ctx, opts...)`** closes a suspended turn
-  without a model call: the pending calls are answered "not run", the
-  completed siblings keep their results, a `canceled` outcome is recorded,
-  and the session is no longer suspended. It returns `Incomplete` with a nil
+  without a model call: the pending calls are recorded as `unknown`, since
+  their requests may be out in the world, the completed siblings keep their
+  results, a `canceled` outcome is recorded with `Next == reconcile`, and
+  the session is no longer suspended. It returns `Incomplete` with a nil
   error, the one place a cancelled turn comes without one, because nothing
   failed. Stateless callers pass `WithMessages` and `WithResume(state, nil)`
   and read the closed turn from `Response.Turn.Messages`.
@@ -1526,8 +1665,9 @@ crash, or that run several processes against one session:
   response before its tools run; each tool call marked `running` before the
   tool is called; each result as it arrives, parallel results independently;
   and the final status. On load, a call recorded `running` is potentially
-  executed: it becomes `unknown` (or `not_started` for a read-only tool), the
-  turn is closed with `process_exit`, and `Next` is `reconcile`. The window
+  executed: it becomes `unknown`, read-only tools included, the turn is
+  closed with `process_exit`, and `Next` is `reconcile` unless every unknown
+  call is read-only. The window
   between a tool's external effect and the checkpoint of its result remains;
   it stays honest through the unknown state and the turn ID as an
   idempotency key. A store that supports this appends step records rather
@@ -1594,6 +1734,10 @@ the contracts into them. Candidates, each independent:
 | `[DONE]` without a finish reason is a valid end (round 4)   | adopted                                                              | protocol end versus transport end                                                                   |
 | A fourth persistence state for an uncertain commit (round 4) | adopted, `unknown`                                                  | an error must not imply that nothing was saved                                                      |
 | Stages: defects, envelope, recoverable turns, durability (round 4) | adopted as the ordering of Phase 2                            | keeps the default storage cost where it is                                                          |
+| A started read-only call answered "not run" (rev. 3)          | `unknown`; the annotation softens `Next` only                        | repeatability is a replay policy, not evidence (two reviews)                                        |
+| A suspension is never persisted after a cancellation (rev. 3) | the suspension is persisted; cancelling it is the application's explicit act | the tool or a hook may already have dispatched the work (review)                              |
+| A store error means the write did not land (rev. 3, 4)         | `failed` only for a pre-write rejection, `unknown` otherwise; the session resyncs | a rename can land before a later error (review)                                           |
+| `Turn.Messages` cumulative for every invocation (rev. 3)       | cumulative on a resume, this invocation's on a continuation           | v1.34 sessions append; only a resume replaces (review)                                              |
 
 ## Open questions
 
