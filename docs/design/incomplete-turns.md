@@ -2,8 +2,12 @@
 
 _Last updated: 2026-09-24_
 _Status: proposal, no code written. Answers the Noodle team's request "Dive:
-keep turns that don't finish" (24 September 2026, against v1.33.0). Section
-references to `agent.go` are against v1.33.1, the current release._
+keep turns that don't finish" (24 September 2026, against v1.33.0). Revised
+after the first review round on the pull request: a call that was running when
+the turn ended is no longer recorded as "not run", the partial-resume failure
+rule is explicit, the error contract covers every exit, and the session's
+outcome metadata no longer depends on message order. Section references to
+`agent.go` are against v1.33.1, the current release._
 
 A turn that is stopped or fails partway is recorded the same way a turn that
 finishes is: what happened is saved, the saved history is valid to send again,
@@ -26,20 +30,24 @@ The design has three parts:
 
 - A turn **begins** when the agent has loaded history, resolved any resume,
   and accepted the input, which is the moment PreGeneration hooks run. From
-  then on every exit saves. Failures before that point return `(nil, err)`
-  and save nothing, as today.
+  then on every exit saves, with one exception: a partial resume, which still
+  has external work outstanding, stays suspended and unchanged. Failures
+  before the boundary return `(nil, err)` and save nothing, as today.
 - Two new terminal statuses: `ResponseStatusCanceled` and
   `ResponseStatusFailed`. Cancelled means the context was cancelled or a
   soft cancel was requested; everything else that ends a turn early is a
   failure, including a deadline and a hook abort.
 - `CreateResponse` returns **both** a non-nil `*Response` and a non-nil
-  error for a cancelled or failed turn. Completed and suspended turns return
-  `err == nil`; cancelled and failed turns never do. `GenerationError` stays
-  and gains a `Response` field.
-- The saved turn is **closed** before it is written: every tool call without
-  a result gets an error result with one standard text, a half-written tool
-  call and an unfinished thinking block are dropped, and text the model was
-  still writing is kept as an assistant message.
+  error for a cancelled or failed turn, on every exit after the turn begins.
+  Completed and suspended turns return `err == nil`; cancelled and failed
+  turns never do. The error always wraps a `*GenerationError`, which gains a
+  `Response` field.
+- The saved turn is **closed** before it is written: a tool call that never
+  started is answered "not run, no effect", a call that was still running is
+  answered "interrupted, result unknown" and its late result is handed back
+  on `Response.BackgroundTasks`, a half-written tool call and an unfinished
+  thinking block are dropped, and text the model was still writing is kept
+  as an assistant message.
 - The outcome is recorded as a **typed reminder with structured details**:
   `dive.Reminder` gains `Details`, rendered to the model as
   `<system-reminder name="turn-canceled">` or `turn-failed` with wording Dive
@@ -82,6 +90,8 @@ case resp == nil:
     return err // the turn never started: bad input, session failed to load
 case resp.Status == dive.ResponseStatusCanceled:
     notice("Stopped.") // resp.OutputMessages is saved; the next turn continues from it
+    // resp.BackgroundTasks: late results of calls that were still running,
+    // to deliver on the next turn with WithBackgroundResults, or to drop.
 default:
     notice("The turn failed: " + resp.Outcome.Error)
 }
@@ -159,6 +169,13 @@ point (`ErrNoSuspendedTurn`, `ErrInputOnSuspendedSession`, a session load
 error, a SessionStart hook error, the session lock lost to cancellation) are
 the caller's problem and change nothing in the session, exactly as today.
 
+One exit after the boundary is not an incomplete turn. A partial resume, where
+the caller supplied some of the pending results and others are still
+outstanding, never calls the model. If it fails in a post-tool hook, in the
+event callback, in PostGeneration or in `SaveSuspendedTurn`, the session is
+left exactly as it was, nothing is saved, and `(nil, err)` is returned; the
+caller resubmits the same results. Section 6 has the rule.
+
 From the turn's start, every exit is one of four outcomes:
 
 ```go
@@ -201,9 +218,16 @@ type TurnOutcome struct {
     // HookAbortError ended the turn.
     Hook string `json:"hook,omitempty"`
 
-    // NotRun lists the IDs of the tool calls the agent answered with
-    // ToolCallNotRunText because the turn ended before they finished.
+    // NotRun lists the IDs of the tool calls answered with
+    // ToolCallNotRunText: the turn ended before they started, and they had
+    // no effect.
     NotRun []string `json:"not_run,omitempty"`
+
+    // Interrupted lists the IDs of the tool calls answered with
+    // ToolCallInterruptedText: they were running when the turn ended and
+    // their result is unknown. Their late results, if any, arrive on
+    // Response.BackgroundTasks.
+    Interrupted []string `json:"interrupted,omitempty"`
 }
 ```
 
@@ -223,30 +247,68 @@ accepts. The rules, in order:
    is kept as it stood.** Mid-turn compaction rewrites only the model-facing
    working set; the saved turn comes from the output accumulator, exactly as
    for a completed turn.
-3. **The batch in flight when the turn ended becomes a tool-result message.**
-   A call keeps the result its tool returned, even an error result the tool
-   produced because its context was cancelled, since that is what happened
-   and may carry partial output. A call with no result at all, whether never
-   started, still running, or refused by the agent because the context was
-   already cancelled, is answered with:
+3. **The batch in flight when the turn ended becomes a tool-result message,
+   and every call in it is answered by what is actually known about it.**
+   There are three kinds of call:
+
+   - **A call whose tool returned a result keeps it**, even an error result
+     the tool produced because its context was cancelled, since that is what
+     happened and may carry partial output.
+   - **A call that never started** is answered "not run": a later call in a
+     sequential batch, every call in a batch whose PreToolUse phase aborted,
+     a call in a partial streamed message, or one the agent refused to start
+     because the context was already cancelled. It had no effect, and the
+     text says so.
+   - **A call that had started and had not reported when the turn ended** is
+     answered "interrupted". Only a parallel batch can leave a call in this
+     state: sequential execution waits for the running call, as it does
+     today, so that call always records its own result. The agent does not
+     wait for a running parallel tool (the proposal's requirement, and the
+     1.32.0 decision that cancelling stops waiting). It does a non-blocking
+     drain of results that have already landed in the batch channel, keeps
+     those, and answers the rest as interrupted: the tool may have taken
+     effect after the turn was saved, so the text says the result is unknown
+     and never that the call had no effect.
 
    ```go
-   // ToolCallNotRunText is the text of the error result the agent records
-   // for a tool call the turn ended before it finished. Exported so
-   // applications can recognize it in history.
-   const ToolCallNotRunText = "Not run: the turn ended before this call finished."
+   // ToolCallNotRunText answers a tool call the turn ended before it
+   // started. The call had no effect. Exported so applications can
+   // recognize it in history.
+   const ToolCallNotRunText = "Not run: the turn ended before this call started. It had no effect."
 
-   // ErrToolCallNotRun is the ToolCallResult.Error of such a call, as
-   // ErrBatchHalted is for a halted call.
-   var ErrToolCallNotRun = errors.New("dive: not run because the turn ended")
+   // ToolCallInterruptedText answers a tool call that was running when the
+   // turn ended and had not reported a result. Whether it took effect is
+   // unknown.
+   const ToolCallInterruptedText = "Interrupted: the turn ended while this call was running. Its result was not recorded; it may have taken effect, so check before repeating it."
+
+   // ErrToolCallNotRun and ErrToolCallInterrupted are the
+   // ToolCallResult.Error of such calls, as ErrBatchHalted is for a halted
+   // call.
+   var (
+       ErrToolCallNotRun      = errors.New("dive: not run because the turn ended")
+       ErrToolCallInterrupted = errors.New("dive: interrupted because the turn ended")
+   )
    ```
 
-   One text for both outcomes: the outcome record that follows says why the
-   turn ended, so the per-call text does not have to. Results appear in the
-   original call order, with `AdditionalContext` text after them, the same
-   shape as any batch. A still-running tool is not waited for; its goroutine
-   finishes on its own, as today, and its late events are suppressed by the
-   existing callback gate.
+   **An interrupted call's late result is not lost.** Its goroutine finishes
+   on its own, as today, with its late stream events suppressed by the
+   existing callback gate; but its final result is routed to a
+   `BackgroundTaskHandle` on `Response.BackgroundTasks`, one per interrupted
+   call, with `ToolUseID` set and a description naming the call. That is the
+   mechanism Dive already has for a result that arrives after its turn:
+   `AwaitBackgroundTasks` (with whatever timeout the application chooses)
+   and `WithBackgroundResults` on the next turn deliver the real result to
+   the model through the existing `background-tasks` reminder, and
+   `PostBackgroundToolUse` hooks fire for it, using the PreToolUse hook
+   context the handle carries. An application that wants to wait a moment
+   for stragglers before its next turn does so with its own deadline; one
+   that does not simply drops the handles. Either way the saved turn is
+   honest about what was known when it was written.
+
+   The two texts split by what the call did, not by why the turn ended; the
+   outcome record that follows says why. Results appear in the original call
+   order, with `AdditionalContext` text after them, the same shape as any
+   batch. A soft cancel (section 7) never leaves a call interrupted.
 4. **Text the model was still writing is kept** as the last assistant
    message, with `DropPartialText` to leave it out. `generateStreaming`
    returns the accumulator's partial response with the error, and
@@ -257,16 +319,20 @@ accepts. The rules, in order:
    server tool call whose result never arrived is dropped by the existing
    `dropServerToolCalls` rule. A partial message with nothing left is not
    recorded. Non-streaming `Generate` has no partial content.
-5. **The outcome reminder is appended** last, as a user-role message (section
-   3), followed by any `Recorded` reminders hooks queued during the turn's end.
+5. **The outcome reminder is appended last**, as a user-role message (section
+   3). `Recorded` reminders that hooks queue while the turn ends are recorded
+   before it, so the outcome reminder is always the final message of a closed
+   turn.
 
 The closing rules are one exported function so a session (Phase 2) or an
 application with its own persistence can apply them to messages it holds:
 
 ```go
 // CloseTurn returns turn with every tool call that has no result answered
-// with ToolCallNotRunText and the outcome recorded as a reminder at the end.
-// It fills outcome.NotRun. It does not modify turn.
+// and the outcome recorded as a reminder at the end. Calls listed in
+// outcome.Interrupted are answered with ToolCallInterruptedText; every
+// other unanswered call with ToolCallNotRunText, and outcome.NotRun is
+// filled with their IDs. It does not modify turn.
 func CloseTurn(turn []*llm.Message, outcome *TurnOutcome) []*llm.Message
 ```
 
@@ -336,11 +402,13 @@ implementation may tune it, and the names are the stable part:
 ```text
 <system-reminder name="turn-canceled">
 The previous turn was stopped before it finished. Everything above this note,
-including every tool result, happened as shown. A tool result that reads "Not
-run: the turn ended before this call finished." means that call was never run
-and had no effect. Continue from the completed work: do not repeat steps that
-completed, and do not assume steps that were not run have happened. If the
-user now asks for something else, do that instead.
+including every tool result, happened as shown. A tool result that begins
+"Not run:" is a call that never started and had no effect. A tool result that
+begins "Interrupted:" is a call that was running when the turn ended; whether
+it took effect is unknown, so check before repeating it. Continue from the
+completed work: do not repeat steps that completed, and do not assume steps
+that did not complete have happened. If the user now asks for something else,
+do that instead.
 </system-reminder>
 ```
 
@@ -348,9 +416,11 @@ user now asks for something else, do that instead.
 <system-reminder name="turn-failed">
 The previous turn failed before it finished. Error: <error>. Everything above
 this note, including every tool result, happened as shown. A tool result that
-reads "Not run: the turn ended before this call finished." means that call was
-never run and had no effect. Continue from the completed work: do not repeat
-steps that completed, and do not assume steps that were not run have happened.
+begins "Not run:" is a call that never started and had no effect. A tool
+result that begins "Interrupted:" is a call that was running when the turn
+ended; whether it took effect is unknown, so check before repeating it.
+Continue from the completed work: do not repeat steps that completed, and do
+not assume steps that did not complete have happened.
 </system-reminder>
 ```
 
@@ -406,12 +476,28 @@ proposal offers, `errors.As` into a wrapper, is what `GenerationError`
 already is, and it is the clumsier path; keeping it as a second route costs
 nothing.
 
+**The contract holds for every exit after the turn begins**, not only for
+failures inside `generate`: a PreGeneration hook error, a PreIteration hook
+error, a tool resolution error, a model call error, an event callback error,
+a hook abort in any tool hook, in Stop or in PostGeneration, a full-resume
+failure before the model call, and a failed salvage save all return the same
+shape, with the same `*Response` reachable both directly and through
+`GenerationError.Response`. Today the `Response` is created after
+PreGeneration hooks run and most of these sites `return nil, err` on their
+own; the implementation creates it before the hooks and routes every exit
+through one function that closes the turn, saves, and builds the error. The
+one exception is the partial-resume failure of section 1: no turn ended, so
+it returns `(nil, err)`; that error keeps wrapping a `*GenerationError`
+carrying the items emitted so far, as it does today, with `Response == nil`.
+The test plan asserts `errors.As` and the status on each class.
+
 Other fields on an incomplete response: `Usage` is the usage so far; `Items`
-is everything emitted, including the synthesized not-run results and the
-terminal outcome item (section 10); `BackgroundTasks` carries the handles of
-background tasks started before the end, so the caller can await or cancel
-them; `Suspension` is set on a cancelled or failed resume with the merged
-turn and `PendingToolCalls == nil`, so stateless callers flush it the way they
+is everything emitted, including the synthesized not-run and interrupted
+results and the terminal outcome item (section 10); `BackgroundTasks` carries
+the handles of background tasks started before the end and one handle per
+interrupted call (section 2), so the caller can await, deliver or drop them;
+`Suspension` is set on a cancelled or failed full resume with the merged turn
+and `PendingToolCalls == nil`, so stateless callers flush it the way they
 flush a completed resume.
 
 If the salvage save itself fails, the returned error is
@@ -501,20 +587,48 @@ completed-turn save use it too closes the save-error row in the table above.
 call as a completed turn; the messages carry the outcome reminder, so any
 `Session` implementation works unchanged and can read the outcome back with
 `FindTurnOutcome`. `session.Session.SaveTurn` additionally records
-`Metadata["outcome"]` on the event when the last message carries one, next to
-the existing `"suspended"` metadata.
+`Metadata["outcome"]` on the event when the turn carries an outcome reminder
+anywhere in its messages (`FindLatestTurnOutcome` over the turn), next to the
+existing `"suspended"` metadata. The agent keeps the outcome reminder as the
+last message of a closed turn, but the session does not depend on that: a
+custom arrangement, or a reminder recorded after it, still yields the metadata
+that the Phase 2 hidden-turn view reads. Phase 2's `TurnRecorder.EndTurn`
+receives the outcome as a value and needs no scan.
 
-**Resumed turns.** A resume that is cancelled or fails after its pending
-calls were all supplied is closed and written with `SaveResumedTurn`
+**Resumed turns.** Two cases, split by whether external work is still
+outstanding.
+
+A *full* resume, where every pending call has a result (caller-supplied, or
+produced by re-running the calls that were not started before the
+suspension), that is cancelled or fails at any point after the boundary,
+before or after the model call, is closed and written with `SaveResumedTurn`
 (`rs.TurnMessages` + output + closing), which replaces the suspended event and
-clears the suspension. This is a behaviour change: today a failed resume
-leaves the session suspended so the resume can be retried, but the retry also
-requires the caller to supply the external results again, and the results
-just supplied are exactly the part worth keeping. With the outcome recorded,
-"retry" becomes "send the next turn". A partial resume (some pending calls
-still unsupplied) never reaches a model call, so it cannot end this way; a
-turn with outstanding external work stays suspended. `Discard` restores the
-old resume behaviour with the rest.
+clears the suspension. The caller-supplied results are kept, not-started calls
+the agent had not reached are answered "not run", and re-run calls still
+executing in a parallel batch are answered "interrupted". This is a behaviour
+change: today a failed resume leaves the session suspended so the resume can
+be retried, but the retry requires the caller to supply the external results
+again, and the results just supplied are exactly the part worth keeping. With
+the outcome recorded, "retry" becomes "send the next turn". `Discard` restores
+the old behaviour with the rest.
+
+A *partial* resume, where the caller supplied some results and others are
+still pending, never calls the model. It can still fail, at four points: a
+PostToolUse or PostToolUseFailure hook aborting for a supplied result
+(`fireResumePostHooks`), the event callback rejecting the `tool_call_result`
+item that announces it, a PostGeneration hook aborting inside
+`finishSuspended`, or `SaveSuspendedTurn` failing. None of those closes the
+turn: external work is outstanding, and a closed turn could never accept it.
+The session is left exactly as it was before the call, with the earlier
+suspension and the earlier pending set, nothing is saved, and `(nil, err)` is
+returned, as today; a new test pins the invariant at each of the four points.
+The caller still holds
+the results it just supplied and resubmits them; a stream consumer sees their
+`tool_call_result` items again on the retry, which is the existing behaviour
+of a failed resume. The alternative, saving the supplied results alongside the
+still-pending calls, would need a session write that half-advances a
+suspension and a resume path that tolerates one, for results the caller
+already has in hand; not worth it.
 
 **Stateless callers** get the closed turn on `OutputMessages` and append it
 to their own history like any other turn.
@@ -553,6 +667,8 @@ The natural escalation for a UI is one context of each: press stop once for
 `softCancel()`, again for `cancel()`. A soft-cancelled turn in which the
 model's last message requested tool calls has those calls answered as not run,
 which is the outcome the person pressing stop wants: nothing more happens.
+Because a running batch is allowed to finish, a soft cancel never produces an
+interrupted call; every recorded result is the tool's own.
 
 ### 8. Encoder backstop
 
@@ -563,16 +679,22 @@ request after it:
 
 ```go
 // llm
-// ToolCallNotRunText is the text of the error result recorded for a tool
-// call that was never answered. dive.ToolCallNotRunText is the same value.
-const ToolCallNotRunText = "Not run: the turn ended before this call finished."
+// ToolCallNotRunText and ToolCallInterruptedText are the texts of the error
+// results recorded for a tool call that was never answered. The dive
+// constants of the same names are these values.
+const (
+    ToolCallNotRunText      = "Not run: the turn ended before this call started. It had no effect."
+    ToolCallInterruptedText = "Interrupted: the turn ended while this call was running. Its result was not recorded; it may have taken effect, so check before repeating it."
+)
 
 // AnswerUnansweredToolCalls returns messages in which every tool_use block
 // is followed by a tool_result for its ID. A missing result is inserted as
-// an error result with ToolCallNotRunText, into the next user message when
-// there is one and otherwise as a new tool-result message after the
-// assistant message. Server tool calls are left alone. Copy-on-write:
-// messages is returned as is when nothing is missing.
+// an error result with ToolCallInterruptedText, into the next user message
+// when there is one and otherwise as a new tool-result message after the
+// assistant message. The interrupted text is used because history alone
+// cannot say whether the call ran, and "unknown" is the safe claim. Server
+// tool calls are left alone. Copy-on-write: messages is returned as is
+// when nothing is missing.
 func AnswerUnansweredToolCalls(messages []*Message) []*Message
 ```
 
@@ -597,8 +719,8 @@ type AgentOptions struct {
 type IncompleteTurnOptions struct {
     // Discard restores the behaviour before v1.34: an incomplete turn is not
     // closed, not saved, and no OnIncompleteTurn or PostGeneration hook runs
-    // for it; no not-run results or outcome item are emitted; a failed
-    // resume leaves the session suspended. CreateResponse still returns the
+    // for it; no not-run or interrupted results and no outcome item are
+    // emitted; a failed resume leaves the session suspended. CreateResponse still returns the
     // partial response alongside the error, with the raw partial messages
     // GenerationError carries today. For applications that keep incomplete
     // turns themselves and are not ready to remove that code.
@@ -622,9 +744,10 @@ each call twice.
 
 ### 10. Streaming items
 
-Every tool call the agent answers as not run emits a `tool_call_result` item
-with `Error == ErrToolCallNotRun`, as `haltToolCall` does for a halted call, so
-every `tool_call` item has a result item. After a successful save (or the
+Every tool call the agent answers as not run or interrupted emits a
+`tool_call_result` item with `Error == ErrToolCallNotRun` or
+`ErrToolCallInterrupted`, as `haltToolCall` does for a halted call, so every
+`tool_call` item has a result item. After a successful save (or the
 decision not to save) the agent emits one terminal item:
 
 ```go
@@ -651,11 +774,12 @@ Everything new or changed in v1.34, in one place:
 ```go
 // dive
 const ResponseStatusCanceled, ResponseStatusFailed ResponseStatus
-type  TurnOutcome struct{ Status ResponseStatus; Error, Hook string; NotRun []string }
+type  TurnOutcome struct{ Status ResponseStatus; Error, Hook string; NotRun, Interrupted []string }
 type  Response struct{ ...; Outcome *TurnOutcome }       // new field
 type  GenerationError struct{ ...; Response *Response }  // new field
-const ToolCallNotRunText = llm.ToolCallNotRunText
-var   ErrToolCallNotRun error
+const ToolCallNotRunText, ToolCallInterruptedText = llm.ToolCallNotRunText, llm.ToolCallInterruptedText
+var   ErrToolCallNotRun, ErrToolCallInterrupted error
+// Response.BackgroundTasks also carries one handle per interrupted call
 func  CloseTurn(turn []*llm.Message, outcome *TurnOutcome) []*llm.Message
 const ReminderNameTurnCanceled, ReminderNameTurnFailed string
 func  NewTurnOutcomeReminder(outcome *TurnOutcome) Reminder
@@ -674,12 +798,12 @@ const ResponseItemTypeTurnOutcome ResponseItemType; ResponseItem.Outcome *TurnOu
 
 // llm
 type  ReminderContent struct{ ...; Details map[string]any }
-const ToolCallNotRunText string
+const ToolCallNotRunText, ToolCallInterruptedText string
 func  AnswerUnansweredToolCalls(messages []*Message) []*Message
 // ResponseAccumulator: a way to get the partial response with per-block completeness
 
 // providers: each encoder calls llm.AnswerUnansweredToolCalls
-// session: SaveTurn records Metadata["outcome"] when the turn carries one
+// session: SaveTurn records Metadata["outcome"] when the turn carries an outcome reminder anywhere
 ```
 
 ### The cases from the proposal
@@ -695,7 +819,11 @@ func  AnswerUnansweredToolCalls(messages []*Message) []*Message
   their hooks applied. Results that finished but were still in the channel
   are picked up with a non-blocking drain and kept, without PostToolUse
   hooks, which would otherwise run with a cancelled context; documented.
-  Calls still running are answered as not run and are not waited for.
+  Calls still running are answered as interrupted, never as not run, and
+  are not waited for; their late results come back as handles on
+  `Response.BackgroundTasks` for the application to deliver on the next turn
+  or drop. Sequential execution waits for the running call, as today, so it
+  records that call's own result, and only the calls after it are not run.
 - **Suspension.** A suspended turn is not incomplete; it is paused with
   external work outstanding, and stays as it is. A resume with everything
   supplied that then fails is closed (section 6). Closing a suspended turn
@@ -737,8 +865,8 @@ What changes for an application that upgrades and changes nothing:
 6. Session writes at the end of a turn use an uncancelled context bounded by
    a timeout. A custom session that relied on the cancellation to skip the
    write will now write.
-7. Event callbacks receive not-run result items and a `turn_outcome` item
-   after cancellation, with an uncancelled context.
+7. Event callbacks receive not-run and interrupted result items and a
+   `turn_outcome` item after cancellation, with an uncancelled context.
 
 Item 2 is the only one `Discard` does not undo, and it cannot break a caller.
 
@@ -771,12 +899,30 @@ small and separate.
 
 The proposal's list, plus the cases the design added:
 
-- Cancelled mid-batch, one call finished and one not (sequential and
-  parallel): saved messages are the input, the assistant message, a
-  tool-result message with the finished result and a not-run error for the
-  other, then the `turn-canceled` reminder whose details decode to a
-  `TurnOutcome` listing the not-run ID. The history encodes without error on
-  the Anthropic, OpenAI Responses, Gemini and Chat Completions encoders.
+- Cancelled mid-batch, one call finished and one not. Sequential: the saved
+  messages are the input, the assistant message, a tool-result message with
+  the finished result and a not-run error for the call that was never
+  started, then the `turn-canceled` reminder whose details decode to a
+  `TurnOutcome` listing that ID under `NotRun`. Parallel, with the second
+  tool still running: the same shape with an interrupted error instead, the
+  ID under `Interrupted`, and a handle for it on `Response.BackgroundTasks`.
+  Both histories encode without error on the Anthropic, OpenAI Responses,
+  Gemini and Chat Completions encoders.
+- A parallel tool that ignores cancellation and commits after the turn is
+  saved: the saved turn answers it "interrupted", never "not run"; the
+  reminder does not say it had no effect; its handle delivers the commit's
+  result once the tool returns; `WithBackgroundResults` on the next turn
+  shows a scripted model the real result and fires `PostBackgroundToolUse`.
+- A partial resume failing at each of its four points (a PostToolUse abort
+  for a supplied result, an event callback error, a PostGeneration abort, a
+  `SaveSuspendedTurn` error): the session's suspension and pending set are
+  unchanged, nothing is saved, `resp == nil`, and resubmitting the same
+  results succeeds.
+- `errors.As(err, &genErr)` holds, `genErr.Response == resp`, and the status
+  is as expected on every exit class: PreGeneration error, PreIteration
+  error, tool resolution error, model error, event callback error, hook
+  aborts in PreToolUse, PostToolUse, Stop and PostGeneration, a full-resume
+  failure before the model call, and a salvage save failure.
 - Cancelled while text is streaming: the partial text is the last assistant
   message; with `DropPartialText` it is absent; a half-written `tool_use`
   block and an unsigned thinking block are dropped.
@@ -794,13 +940,19 @@ The proposal's list, plus the cases the design added:
   is made, status is cancelled, `errors.Is(err, context.Canceled)`.
 - Resume cancelled after all pending calls were supplied: the session is no
   longer suspended, the caller-supplied results are in the saved turn, and
-  `resp.Suspension.TurnMessages` is the closed turn.
-- `IncompleteTurns.Discard`: nothing saved, no not-run or outcome items, the
-  session stays suspended on a failed resume; the existing
+  `resp.Suspension.TurnMessages` is the closed turn. The existing
+  `TestResumeContextCancelMidExecution` is this case (A supplied, B and C
+  re-run in parallel and cancelled mid-execution) and its expectation flips:
+  A's result saved, B and C interrupted with handles, the session no longer
+  suspended; its old expectation moves under `IncompleteTurns.Discard`.
+- `IncompleteTurns.Discard`: nothing saved, no not-run, interrupted or
+  outcome items, the session stays suspended on a failed resume; the existing
   `TestGenerationErrorExposesPartialWork` becomes this test with the option
   set, and a new version of it without the option asserts the save.
 - `OnIncompleteTurn`: rewriting `hctx.OutputMessages` changes what is saved;
-  `Discard: true` saves nothing; the hook sees an uncancelled context.
+  `Discard: true` saves nothing; the hook sees an uncancelled context; a
+  reminder it records lands before the outcome reminder, which stays the last
+  message, and the event still carries `Metadata["outcome"]`.
 - Resumed session after each of the above: the next `CreateResponse` sends
   the saved turn, and a scripted model receives the reminder.
 - Encoder backstop: a history with an unanswered call in the middle and one
@@ -879,7 +1031,9 @@ Decisions this carries:
 - **An open turn is closed on load.** A session opened with a turn that was
   never ended (the process died) closes it with `CloseTurn` and a new status,
   `ResponseStatusInterrupted` ("the process ended before the turn
-  finished"), before returning from `Open`. The agent applies the same check
+  finished"), before returning from `Open`. Every unanswered call in the
+  last recorded batch is listed as interrupted, never as not run, because the
+  process may have run it. The agent applies the same check
   at the start of `CreateResponse` for a session it constructed in memory.
   The reminder name is `turn-interrupted`. This is why `TurnOutcome.Status`
   reuses `ResponseStatus`: the third value joins the same enum even though
@@ -990,7 +1144,8 @@ Where this design departs from the request, and why:
 | Proposal                                          | Here                                                   | Reason                                                                                 |
 | ------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | `turn-stopped` / `turn-failed`                    | `turn-canceled` / `turn-failed`                        | one word for the status, the reminder and the error (`context.Canceled`)               |
-| Two not-run texts (stopped / failed)              | one text                                               | the outcome reminder says why; one string to match                                     |
+| Two not-run texts, by why the turn ended          | two texts, by what the call did (not run / interrupted) | the outcome reminder says why the turn ended; whether a call ran is the fact that matters |
+| A call still running answered as not run          | answered as interrupted, result unknown; late result on `Response.BackgroundTasks` | a tool that ignores cancellation can commit after the save, so "no effect" would be false (review finding) |
 | `TurnOutcomeContent` or reminder details          | reminder details                                       | older Dive versions must still open the session (rollbacks)                            |
 | `OnIncompleteTurn func(msgs, err) msgs`           | a hook in `Hooks` with a decision                      | also covers notification and per-turn discard; composes through `Extension`            |
 | `DiscardIncompleteTurns` on `AgentOptions`        | `IncompleteTurns.Discard` plus two more knobs           | the partial-text choice the applications differ on needs a home                        |
@@ -1009,6 +1164,15 @@ Where this design departs from the request, and why:
    here, since they would run with a cancelled context and their effects
    (`AdditionalContext`, reminders) are advisory. An application that needs
    them can watch `tool_call_result` items instead.
+5. **A grace period after cancellation.** A parallel tool that honours its
+   context returns within milliseconds of a cancel with its own "cancelled"
+   result, but the drain loop returns at once, so that call is recorded as
+   interrupted and its honest result only arrives through the handle. A
+   short fixed wait, tens of milliseconds, after the cancel would record the
+   tool's own result in most cases at the cost of that much stop latency.
+   Not in this design, which keeps the 1.32.0 rule that cancelling stops
+   waiting and leaves any wait to the application's `AwaitBackgroundTasks`
+   deadline; worth measuring during implementation.
 3. **Should `ResponseTimeout` be cancelled rather than failed?** Failed, in
    this design, with wording that says the time limit was reached. If an
    application uses a deadline as its stop button, it can treat
