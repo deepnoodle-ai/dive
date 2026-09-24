@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,48 +13,20 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
-const guardTimeout = 9 * time.Second
+const (
+	guardTimeout              = 9 * time.Second
+	guardCommandSchemaVersion = 2
+)
 
-var nonAuthoritativeReasonCodes = map[string]struct{}{
-	"native_hook_disabled":                                {},
-	"native_shadow_diagnostic_disabled":                   {},
-	"native_policy_not_ready":                             {},
-	"native_hook_event_unavailable":                       {},
-	"native_pre_tool_unavailable":                         {},
-	"native_post_tool_unavailable":                        {},
-	"native_overloaded":                                   {},
-	"native_hook_worker_unavailable":                      {},
-	"native_hook_worker_unavailable_before_compatibility": {},
-	"native_hook_worker_unsupported":                      {},
-	"native_hook_worker_exception":                        {},
-	"native_hook_compatibility_disabled":                  {},
-	"native_hook_edge_invalid_response":                   {},
-	"native_hook_edge_unavailable":                        {},
-	"python_hook_oracle_unavailable":                      {},
-	"python_oracle_exception":                             {},
-	"watch_recording_only":                                {},
-	"daemon_hook_queue_capacity":                          {},
-	"daemon_hook_deadline_exhausted":                      {},
-	"daemon_hook_process_deadline_exhausted":              {},
-	"daemon_hook_process_not_ready":                       {},
-	"daemon_hook_process_failed":                          {},
-	"daemon_hook_process_invalid_request":                 {},
-	"daemon_hook_process_guard_home_mismatch":             {},
-	"daemon_worker_exception":                             {},
-	"harness_not_managed":                                 {},
-	"native_degraded_emergency_safe":                      {},
-}
-
-type guardRunner func(context.Context, []byte) ([]byte, error)
+type guardRunner func(context.Context, string) ([]byte, error)
 
 type guardResponse struct {
-	PolicyAction string `json:"policy_action"`
-	ReasonCode   string `json:"reason_code"`
-	Reason       string `json:"reason"`
-	HookSpecificOutput struct {
-		PermissionDecision       string `json:"permissionDecision"`
-		PermissionDecisionReason string `json:"permissionDecisionReason"`
-	} `json:"hookSpecificOutput"`
+	SchemaVersion  int    `json:"schema_version"`
+	Status         string `json:"status"`
+	MinimumAction  string `json:"minimum_action"`
+	Classification struct {
+		Reason string `json:"reason"`
+	} `json:"classification"`
 }
 
 func holGuardPreToolUse(run guardRunner) dive.PreToolUseHook {
@@ -70,24 +41,14 @@ func holGuardPreToolUse(run guardRunner) dive.PreToolUseHook {
 		if err := json.Unmarshal(hctx.Call.Input, &input); err != nil {
 			return fmt.Errorf("HOL Guard: invalid run_shell input: %w", err)
 		}
-		if strings.TrimSpace(input.Command) == "" {
+		command := strings.TrimSpace(input.Command)
+		if command == "" {
 			return errors.New("HOL Guard: run_shell command is empty")
 		}
 
-		payload, err := json.Marshal(map[string]any{
-			"hook_event_name": "PreToolUse",
-			"tool_name":       "Bash",
-			"tool_input": map[string]string{
-				"command": input.Command,
-			},
-		})
+		out, err := run(ctx, command)
 		if err != nil {
-			return fmt.Errorf("HOL Guard: encode request: %w", err)
-		}
-
-		out, err := run(ctx, payload)
-		if err != nil {
-			return fmt.Errorf("HOL Guard: command review failed: %w", err)
+			return fmt.Errorf("HOL Guard: command inspection failed: %w", err)
 		}
 		response, err := parseGuardResponse(out)
 		if err != nil {
@@ -97,27 +58,26 @@ func holGuardPreToolUse(run guardRunner) dive.PreToolUseHook {
 			return nil
 		}
 
-		reason := strings.TrimSpace(response.Reason)
-		if reason == "" {
-			reason = strings.TrimSpace(response.HookSpecificOutput.PermissionDecisionReason)
+		reason := strings.TrimSpace(response.Classification.Reason)
+		if reason == "" && response.MinimumAction != "" {
+			reason = fmt.Sprintf("command requires Guard action %q", response.MinimumAction)
 		}
-		if reason == "" && response.ReasonCode != "" {
-			reason = fmt.Sprintf("command blocked (%s)", response.ReasonCode)
+		if reason == "" && response.Status != "" {
+			reason = fmt.Sprintf("command inspection returned status %q", response.Status)
 		}
 		if reason == "" {
-			reason = "command did not receive an authoritative allow decision"
+			reason = "command did not receive a Guard allow decision"
 		}
 		return fmt.Errorf("HOL Guard: %s", reason)
 	}
 }
 
-func runHOLGuard(ctx context.Context, payload []byte) ([]byte, error) {
+func runHOLGuard(ctx context.Context, command string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, guardTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "hol-guard", "hook", "--harness", "dive", "--json")
-	cmd.Stdin = bytes.NewReader(append(payload, '\n'))
-	out, err := cmd.CombinedOutput()
+	cmd := exec.CommandContext(ctx, "hol-guard", "command", "test", "--json", command)
+	out, err := cmd.Output()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -129,36 +89,24 @@ func runHOLGuard(ctx context.Context, payload []byte) ([]byte, error) {
 
 func parseGuardResponse(out []byte) (guardResponse, error) {
 	var response guardResponse
-	if err := json.Unmarshal(bytes.TrimSpace(out), &response); err == nil {
-		return response, nil
+	payload := bytes.TrimSpace(out)
+	if len(payload) == 0 {
+		return guardResponse{}, errors.New("empty JSON response")
 	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	var last []byte
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) > 0 {
-			last = append(last[:0], line...)
-		}
+	if err := json.Unmarshal(payload, &response); err != nil {
+		return guardResponse{}, fmt.Errorf("invalid JSON response: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		return guardResponse{}, err
+	if response.SchemaVersion != guardCommandSchemaVersion {
+		return guardResponse{}, fmt.Errorf("unsupported command inspection schema %d", response.SchemaVersion)
 	}
-	if len(last) == 0 || json.Unmarshal(last, &response) != nil {
-		return guardResponse{}, errors.New("invalid JSON response")
+	if response.Status == "" || response.MinimumAction == "" {
+		return guardResponse{}, errors.New("incomplete command inspection response")
 	}
 	return response, nil
 }
 
 func allowedGuardResponse(response guardResponse) bool {
-	if response.HookSpecificOutput.PermissionDecision != "allow" || response.ReasonCode == "" {
-		return false
-	}
-	if _, unavailable := nonAuthoritativeReasonCodes[response.ReasonCode]; unavailable {
-		return false
-	}
-	if response.PolicyAction == "allow" {
-		return true
-	}
-	return response.PolicyAction == "warn" && response.ReasonCode == "native_policy_warning"
+	return response.SchemaVersion == guardCommandSchemaVersion &&
+		response.Status == "no_match" &&
+		response.MinimumAction == "allow"
 }
