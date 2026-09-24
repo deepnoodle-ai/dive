@@ -5,12 +5,12 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/deepnoodle-ai/dive v1.32.0
-	github.com/deepnoodle-ai/dive/experimental/mcp v1.9.0
-	github.com/deepnoodle-ai/dive/providers/google v1.32.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.32.0
-	github.com/deepnoodle-ai/dive/providers/meta v1.32.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.32.0
+	github.com/deepnoodle-ai/dive v1.33.0
+	github.com/deepnoodle-ai/dive/experimental/mcp v1.33.0
+	github.com/deepnoodle-ai/dive/providers/google v1.33.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.33.0
+	github.com/deepnoodle-ai/dive/providers/meta v1.33.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.33.0
 	github.com/deepnoodle-ai/wonton v0.2.1
 	golang.org/x/term v0.45.0
 	google.golang.org/genai v1.71.0

@@ -6,8 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-09-24
+
 ### Added
 
+- **DeepInfra chat provider.** Use `deepinfra.New` or `deepinfra/<model>` in the
+  CLI for Chat Completions models. Reported cost estimates carry
+  `provider_estimate` provenance; missing estimates remain unknown.
 - **Provider-defined toolsets declare their members.** `dive.ToolDeclarer`;
   `anthropic.ComputerToolset` implements it. Member tools are left out of the
   request while the toolset is present and sent as ordinary tools without it.
