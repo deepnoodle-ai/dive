@@ -13,20 +13,17 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
-const (
-	guardTimeout              = 9 * time.Second
-	guardCommandSchemaVersion = 2
-)
+const guardTimeout = 9 * time.Second
 
-type guardRunner func(context.Context, string) ([]byte, error)
+type guardRunner func(context.Context, []byte) ([]byte, error)
 
-type guardResponse struct {
-	SchemaVersion  int    `json:"schema_version"`
-	Status         string `json:"status"`
-	MinimumAction  string `json:"minimum_action"`
-	Classification struct {
-		Reason string `json:"reason"`
-	} `json:"classification"`
+type guardHookResponse struct {
+	SystemMessage       string `json:"systemMessage"`
+	HookSpecificOutput struct {
+		HookEventName            string `json:"hookEventName"`
+		PermissionDecision       string `json:"permissionDecision"`
+		PermissionDecisionReason string `json:"permissionDecisionReason"`
+	} `json:"hookSpecificOutput"`
 }
 
 func holGuardPreToolUse(run guardRunner) dive.PreToolUseHook {
@@ -46,37 +43,49 @@ func holGuardPreToolUse(run guardRunner) dive.PreToolUseHook {
 			return errors.New("HOL Guard: run_shell command is empty")
 		}
 
-		out, err := run(ctx, command)
+		payload, err := guardPreToolPayload(command)
 		if err != nil {
-			return fmt.Errorf("HOL Guard: command inspection failed: %w", err)
+			return fmt.Errorf("HOL Guard: could not build hook payload: %w", err)
 		}
-		response, err := parseGuardResponse(out)
+		out, err := run(ctx, payload)
+		if err != nil {
+			return fmt.Errorf("HOL Guard: policy check failed: %w", err)
+		}
+		response, err := parseGuardHookResponse(out)
 		if err != nil {
 			return fmt.Errorf("HOL Guard: %w", err)
 		}
-		if allowedGuardResponse(response) {
+		if response.HookSpecificOutput.PermissionDecision == "allow" {
 			return nil
 		}
 
-		reason := strings.TrimSpace(response.Classification.Reason)
-		if reason == "" && response.MinimumAction != "" {
-			reason = fmt.Sprintf("command requires Guard action %q", response.MinimumAction)
-		}
-		if reason == "" && response.Status != "" {
-			reason = fmt.Sprintf("command inspection returned status %q", response.Status)
+		reason := strings.TrimSpace(response.HookSpecificOutput.PermissionDecisionReason)
+		if reason == "" {
+			reason = strings.TrimSpace(response.SystemMessage)
 		}
 		if reason == "" {
-			reason = "command did not receive a Guard allow decision"
+			reason = fmt.Sprintf("policy decision was %q", response.HookSpecificOutput.PermissionDecision)
 		}
 		return fmt.Errorf("HOL Guard: %s", reason)
 	}
 }
 
-func runHOLGuard(ctx context.Context, command string) ([]byte, error) {
+func guardPreToolPayload(command string) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Bash",
+		"tool_input": map[string]string{
+			"command": command,
+		},
+	})
+}
+
+func runHOLGuard(ctx context.Context, payload []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, guardTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "hol-guard", "command", "test", "--json", command)
+	cmd := exec.CommandContext(ctx, "hol-guard", "hook", "--harness", "claude-code", "--json")
+	cmd.Stdin = bytes.NewReader(payload)
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -87,26 +96,20 @@ func runHOLGuard(ctx context.Context, command string) ([]byte, error) {
 	return out, nil
 }
 
-func parseGuardResponse(out []byte) (guardResponse, error) {
-	var response guardResponse
+func parseGuardHookResponse(out []byte) (guardHookResponse, error) {
+	var response guardHookResponse
 	payload := bytes.TrimSpace(out)
 	if len(payload) == 0 {
-		return guardResponse{}, errors.New("empty JSON response")
+		return guardHookResponse{}, errors.New("empty hook response")
 	}
 	if err := json.Unmarshal(payload, &response); err != nil {
-		return guardResponse{}, fmt.Errorf("invalid JSON response: %w", err)
+		return guardHookResponse{}, fmt.Errorf("invalid hook JSON: %w", err)
 	}
-	if response.SchemaVersion != guardCommandSchemaVersion {
-		return guardResponse{}, fmt.Errorf("unsupported command inspection schema %d", response.SchemaVersion)
+	if response.HookSpecificOutput.HookEventName != "PreToolUse" {
+		return guardHookResponse{}, errors.New("unexpected hook response event")
 	}
-	if response.Status == "" || response.MinimumAction == "" {
-		return guardResponse{}, errors.New("incomplete command inspection response")
+	if strings.TrimSpace(response.HookSpecificOutput.PermissionDecision) == "" {
+		return guardHookResponse{}, errors.New("hook response has no permission decision")
 	}
 	return response, nil
-}
-
-func allowedGuardResponse(response guardResponse) bool {
-	return response.SchemaVersion == guardCommandSchemaVersion &&
-		response.Status == "no_match" &&
-		response.MinimumAction == "allow"
 }
