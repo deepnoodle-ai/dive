@@ -190,8 +190,8 @@ ignore non-text content.
   turn's final message.
 - `Text()` joins every text block with a blank line. Use it for messages built
   from separate passages, such as a system reminder followed by a prompt.
-- `LastText()` returns only the last text block, which for a split answer is
-  just its last fragment.
+- `LastText()` returns only the last non-empty text block, which for a split
+  answer is just its last fragment.
 
 ## Provider Options
 
@@ -327,10 +327,11 @@ tools := []dive.Tool{
     dive.FuncTool("type", "Type text.", screen.Type, member),
     // ... one per member you run
 }
-// Add the toolset only for a model that takes it. The anthropic.ComputerToolset
-// doc lists the supported models (Opus 4.8 and later, Sonnet 5, Fable 5 and
-// 5.1, Mythos 5 and 5.1).
-if modelName == anthropic.ModelClaudeOpus55 {
+// Add the toolset only for a model that takes it (see anthropic.ComputerToolset).
+switch modelName {
+case anthropic.ModelClaudeOpus55, anthropic.ModelClaudeOpus5, anthropic.ModelClaudeOpus48,
+    anthropic.ModelClaudeSonnet5, anthropic.ModelClaudeFable51, anthropic.ModelClaudeFable5,
+    anthropic.ModelClaudeMythos51, anthropic.ModelClaudeMythos5:
     tools = append(tools, anthropic.NewComputerToolset(anthropic.ComputerToolsetOptions{}))
 }
 agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Tools: tools})
