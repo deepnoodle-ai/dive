@@ -2,6 +2,7 @@ package dive
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -302,30 +303,54 @@ type Response struct {
 	BackgroundTasks []*BackgroundTaskHandle `json:"-"`
 }
 
-// OutputText returns the text content from the last message in the response.
-// If there are no messages or no text content, returns an empty string.
+// OutputText returns the answer text of the response: all of the text in the
+// final message, or "" when there is no message or it has no text.
+//
+// Empty text blocks are skipped. Providers can split one answer into several
+// text blocks (Anthropic splits text at citation boundaries; Gemini gives a
+// part carrying a thought signature its own block). Text blocks that directly
+// follow one another are therefore concatenated with no separator, which
+// reproduces the text as the model wrote it. Text blocks with other content
+// between them, such as reasoning, are separate passages and are joined with
+// a blank line ("\n\n").
+//
+// Text from earlier messages in the turn, such as "Let me check..." before a
+// tool call, is not included. Read OutputMessages for the full turn.
 func (r *Response) OutputText() string {
-	// Find the last message
 	var lastMessage *llm.Message
 	for _, item := range r.Items {
 		if item.Type == ResponseItemTypeMessage && item.Message != nil {
 			lastMessage = item.Message
 		}
 	}
-
 	if lastMessage == nil {
 		return ""
 	}
+	return answerText(lastMessage)
+}
 
-	// Find the last text content
-	for i := len(lastMessage.Content) - 1; i >= 0; i-- {
-		content := lastMessage.Content[i]
-		if textContent, ok := content.(*llm.TextContent); ok {
-			return textContent.Text
+// answerText joins the non-empty text blocks of a model-written message.
+// Adjacent text blocks are fragments of one passage and are concatenated
+// as-is. Any other content between two text blocks marks a passage break.
+func answerText(m *llm.Message) string {
+	var sb strings.Builder
+	separated := false
+	for _, content := range m.Content {
+		text, ok := content.(*llm.TextContent)
+		if !ok {
+			separated = true
+			continue
 		}
+		if text.Text == "" {
+			continue
+		}
+		if separated && sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(text.Text)
+		separated = false
 	}
-
-	return ""
+	return sb.String()
 }
 
 // ToolCallResults returns all tool call results from the response.

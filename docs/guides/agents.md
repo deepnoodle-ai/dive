@@ -40,6 +40,14 @@ func main() {
 }
 ```
 
+`OutputText` returns all the text of the turn's final assistant message. A
+provider can split one answer into several text blocks, for example at
+Anthropic citation boundaries or where Gemini attaches a thought signature.
+`OutputText` joins adjacent blocks with no separator and skips empty ones, so
+you get the answer as the model wrote it. Text from earlier messages in the
+turn, such as "Let me check..." before a tool call, is not included. Read
+`response.OutputMessages` for the full turn.
+
 ## AgentOptions
 
 | Field                   | Type             | Description                                      |

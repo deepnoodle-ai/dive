@@ -35,31 +35,42 @@ type Message struct {
 	Effort ReasoningEffort `json:"effort,omitempty"`
 }
 
-// LastText returns the last text content in the message.
+// LastText returns the text of the last non-empty text block in the message,
+// or "" when there is none. Empty text blocks, such as the empty Gemini part
+// that only carries a thought signature, are skipped.
+//
+// A provider can split one reply into several text blocks (Anthropic splits
+// text at citation boundaries). LastText then returns only the last fragment.
+// To get the whole answer of an agent response, use dive.Response.OutputText.
 func (m *Message) LastText() string {
 	for i := len(m.Content) - 1; i >= 0; i-- {
-		switch content := m.Content[i].(type) {
-		case *TextContent:
+		if content, ok := m.Content[i].(*TextContent); ok && content.Text != "" {
 			return content.Text
 		}
 	}
 	return ""
 }
 
-// Text returns a concatenated text from all message content. If there
-// were multiple text contents, they are separated by two newlines.
+// Text returns the text of all non-empty text blocks in the message, in
+// order, separated by two newlines. Empty text blocks, such as the empty
+// Gemini part that only carries a thought signature, are skipped and add no
+// separator. Non-text content is ignored.
+//
+// The separator suits messages built from separate passages, such as a
+// system reminder followed by a user prompt. For a model answer that a
+// provider split into fragments (Anthropic citations), use
+// dive.Response.OutputText, which joins adjacent fragments with no separator.
 func (m *Message) Text() string {
-	var textCount int
 	var sb strings.Builder
 	for _, content := range m.Content {
-		switch content := content.(type) {
-		case *TextContent:
-			if textCount > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString(content.Text)
-			textCount++
+		text, ok := content.(*TextContent)
+		if !ok || text.Text == "" {
+			continue
 		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(text.Text)
 	}
 	return sb.String()
 }
