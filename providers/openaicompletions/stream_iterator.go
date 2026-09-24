@@ -107,6 +107,11 @@ func (s *StreamIterator) Event() *llm.Event {
 // next processes a single line from the stream and returns events if any are ready
 func (s *StreamIterator) next() ([]*llm.Event, error) {
 	line, err := s.reader.ReadBytes('\n')
+	// A last line without its newline arrives together with io.EOF. Process
+	// it like any other line; the next read reports the EOF alone.
+	if err == io.EOF && len(bytes.TrimSpace(line)) > 0 {
+		err = nil
+	}
 	if err != nil {
 		// If the stream ends after its finish_reason but before a trailing
 		// usage chunk or [DONE] marker arrives, terminate the message here

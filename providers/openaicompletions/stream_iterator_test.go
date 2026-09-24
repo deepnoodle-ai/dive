@@ -452,3 +452,24 @@ func TestStreamIteratorFinishReasonThenEOF(t *testing.T) {
 	assert.True(t, accumulator.IsComplete())
 	assert.Equal(t, "tool_use", accumulator.Response().StopReason)
 }
+
+// TestStreamIteratorFinalLineWithoutNewline verifies that a final chunk the
+// server sent without a trailing newline is still processed: a finish_reason
+// or [DONE] on that line ends the stream normally instead of being lost.
+func TestStreamIteratorFinalLineWithoutNewline(t *testing.T) {
+	text := `data: {"id":"chatcmpl-9","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`
+	finish := `data: {"id":"chatcmpl-9","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	for name, body := range map[string]string{
+		"finish_reason": text + "\n\n" + finish,
+		"[DONE]":        text + "\n\n" + finish + "\n\ndata: [DONE]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			iterator := newTestStreamIterator(body)
+			defer iterator.Close()
+			_, accumulator := collectEvents(t, iterator)
+			assert.True(t, accumulator.IsComplete())
+			assert.Equal(t, "stop", accumulator.Response().StopReason)
+			assert.Equal(t, "Hi", accumulator.Response().Message().Text())
+		})
+	}
+}

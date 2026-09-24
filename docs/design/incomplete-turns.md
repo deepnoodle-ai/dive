@@ -507,7 +507,7 @@ const (
     StopKindFinished    StopKind = "finished"     // end_turn, stop, stop_sequence
     StopKindToolUse     StopKind = "tool_use"
     StopKindOutputLimit StopKind = "output_limit" // max_tokens, length
-    StopKindContextLimit StopKind = "context_limit" // model_context_window_exceeded
+    StopKindContextLimit StopKind = "context_limit" // model_context_window_exceeded, model_length
     StopKindRefusal     StopKind = "refusal"      // refusal, content_filter
     StopKindPause       StopKind = "pause"        // pause_turn
     StopKindIncomplete  StopKind = "incomplete"   // the provider ended early for a reason it did not name as a limit or refusal
@@ -523,7 +523,8 @@ func ClassifyStopReason(reason string) StopKind
 
 The classifier's table covers every provider Dive ships, not only the four
 adapters named below: Anthropic's `model_context_window_exceeded` (the
-context window, not `max_tokens`, cut the response) is its own kind, and
+context window, not `max_tokens`, cut the response) is its own kind, as is
+Mistral's `model_length`, which means the same, and
 Ollama, Mistral, Grok and OpenRouter spellings are listed from their
 adapters. Providers keep their raw values (Anthropic `end_turn`/`max_tokens`/`refusal`/
 `pause_turn`, Gemini `stop`/`max_tokens`/`other`, chat completions

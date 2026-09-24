@@ -21,7 +21,8 @@ const (
 	StopKindOutputLimit StopKind = "output_limit"
 
 	// StopKindContextLimit is a response cut off because the conversation
-	// filled the model's context window (model_context_window_exceeded).
+	// filled the model's context window (Anthropic's
+	// model_context_window_exceeded, Mistral's model_length).
 	// Unlike an output limit, the same history cannot be sent again as is.
 	StopKindContextLimit StopKind = "context_limit"
 
@@ -62,7 +63,7 @@ var stopKinds = map[string]StopKind{
 	// reports tool_calls and function_call as tool_use.
 	"stop":           StopKindFinished,
 	"length":         StopKindOutputLimit,
-	"model_length":   StopKindOutputLimit, // Mistral: the model's context length
+	"model_length":   StopKindContextLimit, // Mistral: the model's context length was reached
 	"content_filter": StopKindRefusal,
 	"tool_calls":     StopKindToolUse,
 	"function_call":  StopKindToolUse,

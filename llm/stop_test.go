@@ -15,7 +15,7 @@ func TestClassifyStopReason(t *testing.T) {
 		"tool_calls":                    StopKindToolUse,
 		"max_tokens":                    StopKindOutputLimit,
 		"length":                        StopKindOutputLimit,
-		"model_length":                  StopKindOutputLimit,
+		"model_length":                  StopKindContextLimit,
 		"model_context_window_exceeded": StopKindContextLimit,
 		"refusal":                       StopKindRefusal,
 		"content_filter":                StopKindRefusal,
