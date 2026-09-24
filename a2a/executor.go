@@ -429,23 +429,33 @@ func contentFromPart(p *a2asdk.Part) llm.Content {
 // partsFromContent converts Dive LLM content to a2a parts. Internal content
 // types (tool use, tool result, thinking) are skipped.
 //
-// Text blocks that directly follow one another are fragments of one passage
-// (Anthropic splits text at citation boundaries), so they become one text
-// part, as Response.OutputText joins them. Any other content between text
-// blocks, even content that is skipped, starts a new part. A client can then
-// join an artifact's text parts with a blank line and get OutputText.
+// Each text passage becomes one text part, by the rule of
+// llm.Message.AnswerText (which Response.OutputText uses): adjacent text
+// blocks are fragments of one passage (Anthropic splits text at citation
+// boundaries) unless their phases differ (OpenAI commentary, then the final
+// answer), and any other content between text blocks, even content that is
+// skipped, starts a new passage. A client that joins an artifact's text parts
+// with a blank line therefore gets OutputText.
 func partsFromContent(content []llm.Content) []*a2asdk.Part {
 	var parts []*a2asdk.Part
-	var passage strings.Builder
+	var passage []llm.Content
+	var phase string
 	flush := func() {
-		if passage.Len() > 0 {
-			parts = append(parts, a2asdk.NewTextPart(passage.String()))
-			passage.Reset()
+		if len(passage) > 0 {
+			parts = append(parts, a2asdk.NewTextPart((&llm.Message{Content: passage}).AnswerText()))
+			passage = nil
 		}
 	}
 	for _, c := range content {
 		if v, ok := c.(*llm.TextContent); ok {
-			passage.WriteString(v.Text)
+			if v.Text == "" {
+				continue
+			}
+			if textPhase := v.Metadata[llm.TextPhaseMetadataKey]; textPhase != phase {
+				flush()
+				phase = textPhase
+			}
+			passage = append(passage, v)
 			continue
 		}
 		flush()
@@ -513,7 +523,7 @@ func streamEventFromItem(execCtx *a2asrv.ExecutorContext, item *dive.ResponseIte
 		if item.Message == nil || item.Message.Role != llm.Assistant {
 			return nil
 		}
-		text := item.Message.LastText()
+		text := item.Message.AnswerText()
 		if text == "" {
 			return nil
 		}

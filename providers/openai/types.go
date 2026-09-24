@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
@@ -25,8 +26,9 @@ const (
 	// updates, "final_answer" for the answer). Callers that replay history
 	// manually must resend it unchanged; dropping it degrades gpt-5.3-codex and
 	// later. Absent means OpenAI did not label the message, and Dive never
-	// infers one.
-	openAIPhaseMetadataKey = "openai.phase"
+	// infers one. It is llm.TextPhaseMetadataKey, which llm.Message.AnswerText
+	// reads to separate commentary from the final answer.
+	openAIPhaseMetadataKey = llm.TextPhaseMetadataKey
 )
 
 // // Request represents the OpenAI Responses API request structure

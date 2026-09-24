@@ -2,7 +2,6 @@ package dive
 
 import (
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -304,15 +303,11 @@ type Response struct {
 }
 
 // OutputText returns the answer text of the response: all of the text in the
-// final message, or "" when there is no message or it has no text.
-//
-// Empty text blocks are skipped. Providers can split one answer into several
-// text blocks (Anthropic splits text at citation boundaries; Gemini gives a
-// part carrying a thought signature its own block). Text blocks that directly
-// follow one another are therefore concatenated with no separator, which
-// reproduces the text as the model wrote it. Text blocks with other content
-// between them, such as reasoning, are separate passages and are joined with
-// a blank line ("\n\n").
+// final message, or "" when there is no message or it has no text. It is
+// llm.Message.AnswerText of that message: fragments of one passage (adjacent
+// text blocks, such as Anthropic citation splits) are concatenated, and
+// separate passages (text blocks with other content between them, or with
+// different OpenAI phases) are joined with a blank line ("\n\n").
 //
 // Text from earlier messages in the turn, such as "Let me check..." before a
 // tool call, is not included. Read OutputMessages for the full turn.
@@ -326,31 +321,7 @@ func (r *Response) OutputText() string {
 	if lastMessage == nil {
 		return ""
 	}
-	return answerText(lastMessage)
-}
-
-// answerText joins the non-empty text blocks of a model-written message.
-// Adjacent text blocks are fragments of one passage and are concatenated
-// as-is. Any other content between two text blocks marks a passage break.
-func answerText(m *llm.Message) string {
-	var sb strings.Builder
-	separated := false
-	for _, content := range m.Content {
-		text, ok := content.(*llm.TextContent)
-		if !ok {
-			separated = true
-			continue
-		}
-		if text.Text == "" {
-			continue
-		}
-		if separated && sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(text.Text)
-		separated = false
-	}
-	return sb.String()
+	return lastMessage.AnswerText()
 }
 
 // ToolCallResults returns all tool call results from the response.

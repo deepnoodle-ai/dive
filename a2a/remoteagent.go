@@ -148,6 +148,11 @@ func (r *RemoteAgent) SendTextOnTask(ctx context.Context, taskID string, prompt 
 // StreamText sends a text prompt and calls onChunk for each text chunk as it
 // arrives. Returns the final TaskResult when the stream ends. Cancellation is
 // handled via the context.
+//
+// Each text part of an artifact is a separate passage (see
+// TaskResult.Text), so a chunk that follows an earlier chunk of the same
+// artifact begins with a blank line ("\n\n"). Concatenating the chunks of
+// the final artifact then gives TaskResult.Text.
 func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk func(string)) (*TaskResult, error) {
 	if prompt == "" {
 		return nil, fmt.Errorf("a2a: StreamText: empty prompt")
@@ -157,6 +162,7 @@ func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk fun
 	stream := r.client.SendStreamingMessage(ctx, &a2asdk.SendMessageRequest{Message: msg})
 
 	var lastTask *a2asdk.Task
+	streamed := map[a2asdk.ArtifactID]bool{}
 	for event, err := range stream {
 		if err != nil {
 			return nil, err
@@ -171,9 +177,15 @@ func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk fun
 		case *a2asdk.TaskArtifactUpdateEvent:
 			if onChunk != nil {
 				for _, p := range v.Artifact.Parts {
-					if t := p.Text(); t != "" {
-						onChunk(t)
+					t := p.Text()
+					if t == "" {
+						continue
 					}
+					if streamed[v.Artifact.ID] {
+						t = "\n\n" + t
+					}
+					streamed[v.Artifact.ID] = true
+					onChunk(t)
 				}
 			}
 		case *a2asdk.Task:
