@@ -18,7 +18,7 @@ const guardTimeout = 9 * time.Second
 type guardRunner func(context.Context, []byte) ([]byte, error)
 
 type guardHookResponse struct {
-	SystemMessage       string `json:"systemMessage"`
+	SystemMessage      string `json:"systemMessage"`
 	HookSpecificOutput struct {
 		HookEventName            string `json:"hookEventName"`
 		PermissionDecision       string `json:"permissionDecision"`
