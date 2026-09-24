@@ -238,16 +238,33 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 
 // isForeignServerToolContent reports whether content is a tool call or result
 // that another provider ran on its own servers (for example Anthropic web
-// search). The Responses API cannot replay it, so it is skipped; the assistant
-// text around it still carries what the model concluded. OpenAI's own web
-// search is decoded as a ServerToolUseContent named "web_search_call".
+// search or an Anthropic MCP connector call). The Responses API cannot replay
+// it, and its IDs are not OpenAI item IDs, so it is skipped; the assistant
+// text around it still carries what the model concluded. OpenAI's own server
+// tool items are replayed (see isOpenAIServerToolContent).
 func isForeignServerToolContent(content llm.Content) bool {
+	return providers.IsServerToolContent(content) && !isOpenAIServerToolContent(content)
+}
+
+// openAIMCPCallIDPrefix starts the item ID of every OpenAI mcp_call. Anthropic
+// MCP connector calls use "mcptoolu_" IDs instead.
+const openAIMCPCallIDPrefix = "mcp_"
+
+// isOpenAIServerToolContent reports whether server tool content was decoded
+// from an OpenAI response, and so can be sent back as the item it came from.
+// The decoder marks OpenAI web search as a ServerToolUseContent named
+// "web_search_call" (Anthropic names its calls after the tool, such as
+// "web_search"). An mcp_call decodes to an MCPToolUseContent and, when it has
+// output, an MCPToolResultContent, both keyed by the item ID, which OpenAI
+// starts with "mcp_".
+func isOpenAIServerToolContent(content llm.Content) bool {
 	switch c := content.(type) {
 	case *llm.ServerToolUseContent:
-		return c.Name != "web_search_call"
-	case *llm.WebSearchToolResultContent, *llm.CodeExecutionToolResultContent,
-		*llm.BashCodeExecutionToolResultContent, *llm.TextEditorCodeExecutionToolResultContent:
-		return true
+		return c.Name == "web_search_call"
+	case *llm.MCPToolUseContent:
+		return strings.HasPrefix(c.ID, openAIMCPCallIDPrefix)
+	case *llm.MCPToolResultContent:
+		return strings.HasPrefix(c.ToolUseID, openAIMCPCallIDPrefix)
 	}
 	return false
 }

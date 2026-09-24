@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 )
 
 // Generate sends the request to Ollama's Anthropic-compatible endpoint, after
@@ -37,7 +38,7 @@ func withoutServerTools(opts []llm.Option) []llm.Option {
 		}
 		var kept []llm.Content
 		for _, content := range message.Content {
-			if isServerToolContent(content) {
+			if providers.IsServerToolContent(content) {
 				changed = true
 				continue
 			}
@@ -47,6 +48,10 @@ func withoutServerTools(opts []llm.Option) []llm.Option {
 			filtered = append(filtered, message)
 			continue
 		}
+		// A message left empty is dropped, except an effort message
+		// (llm.NewEffortMessage), which never had content: its Effort is
+		// what it carries, and the anthropic encoder decides whether the
+		// model takes it.
 		if len(kept) == 0 && message.Effort == "" {
 			continue
 		}
@@ -58,15 +63,4 @@ func withoutServerTools(opts []llm.Option) []llm.Option {
 		return opts
 	}
 	return append(opts[:len(opts):len(opts)], llm.WithMessages(filtered...))
-}
-
-func isServerToolContent(content llm.Content) bool {
-	switch content.(type) {
-	case *llm.ServerToolUseContent, *llm.WebSearchToolResultContent,
-		*llm.CodeExecutionToolResultContent, *llm.BashCodeExecutionToolResultContent,
-		*llm.TextEditorCodeExecutionToolResultContent,
-		*llm.MCPToolUseContent, *llm.MCPToolResultContent:
-		return true
-	}
-	return false
 }
