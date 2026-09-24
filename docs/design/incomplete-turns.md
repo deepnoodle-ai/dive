@@ -19,7 +19,10 @@ the third and fourth, made persistence honest about what a save error proves,
 defined what an append-only session stores for a continuation and a resume,
 fixed stop-reason precedence in the adapters, stopped a cancellation from
 overriding a suspension whose work may already be dispatched, and specified
-the late-result handle. Section references to `agent.go` are against
+the late-result handle. A sixth revision, after the review of the fifth,
+made a stop reason Dive does not recognize withhold the response's tool
+calls, and aligned the suspension save row and section 9 with the
+persistence contract. Section references to `agent.go` are against
 v1.33.1._
 
 A turn that does not finish is recorded the way a turn that finishes is: what
@@ -76,7 +79,8 @@ used below so that neither promises what the other delivers.
   call on the record as it stands), `reconcile` (a call with an unknown
   result must be checked first), or `input` (nothing to continue).
 - **The agent reads the stop reason.** A response that stopped at the output
-  limit or in a refusal runs none of its tool calls; a pause is continued a
+  limit or in a refusal runs none of its tool calls, and neither does one
+  with a stop reason Dive does not recognize; a pause is continued a
   bounded number of times; the iteration limit ends the turn incomplete
   instead of running calls the model will never see; a stream that ends
   without its protocol's end marker is an interruption, not a finish.
@@ -283,7 +287,7 @@ const (
     TurnReasonError             TurnReason = "error"              // any other error; Error says which
     TurnReasonOutputLimit       TurnReason = "output_limit"       // the model stopped at max_tokens
     TurnReasonIterationLimit    TurnReason = "iteration_limit"    // ToolIterationLimit reached with calls still requested
-    TurnReasonProviderStopped   TurnReason = "provider_stopped"   // the provider ended the response early for a reason of its own
+    TurnReasonProviderStopped   TurnReason = "provider_stopped"   // the provider stopped for a reason Dive does not act on; Error carries it
     TurnReasonPause             TurnReason = "pause"              // a server tool loop paused more than the agent continues
     TurnReasonProcessExit       TurnReason = "process_exit"       // Phase 2: the process ended with the turn open
 )
@@ -327,7 +331,7 @@ the default `Next`.
 | `error`              | non-nil | `input`        |                                                                                            |
 | `output_limit`       | nil     | `continue`     | the model's own stop; the answer is valid as far as it goes                                |
 | `iteration_limit`    | nil     | `continue`     | the requested calls were not run                                                           |
-| `provider_stopped`   | nil     | `continue`     | the provider reported an early end it did not name as a limit or refusal; `Error` carries the raw stop reason; no call runs |
+| `provider_stopped`   | nil     | `continue`     | the provider reported an early end it did not name as a limit or refusal, or a stop reason Dive does not recognize; `Error` carries the raw value; no call runs |
 | `pause`              | nil     | `continue`     | only after the agent's own pause continuations were spent                                  |
 | `process_exit`       | none    | `continue`     | Phase 2, set on load; no invocation returned it                                            |
 
@@ -489,11 +493,13 @@ const (
     StopKindRefusal     StopKind = "refusal"      // refusal, content_filter
     StopKindPause       StopKind = "pause"        // pause_turn
     StopKindIncomplete  StopKind = "incomplete"   // the provider ended early for a reason it did not name as a limit or refusal
-    StopKindOther       StopKind = "other"        // anything else, treated as finished
+    StopKindOther       StopKind = "other"        // a value Dive does not recognize; never runs a call
 )
 
 // ClassifyStopReason maps a provider's stop reason, as llm.Response carries
-// it, onto the kinds the agent acts on. Unknown values are StopKindOther.
+// it, onto the kinds the agent acts on. Unknown values are StopKindOther,
+// which the agent treats as finished only when the response carries no
+// client tool call.
 func ClassifyStopReason(reason string) StopKind
 ```
 
@@ -513,13 +519,29 @@ response that carries a call would run it; that order is reversed, and its
 `incomplete` without a named reason, `cancelled`, `timeout` and `error`
 values classify as `StopKindIncomplete`. The Google adapter maps every finish
 reason other than stop and max-tokens to `other`, which loses the safety
-reasons; it maps `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`
-and `SPII` to their lowercase names, which classify as the refusal kind, and
-`MALFORMED_FUNCTION_CALL` to `malformed_function_call`, which classifies as
-`incomplete`. The raw value is always kept on `Response.StopReason`. A value
-Dive does not know is `other` and is treated as finished, with its tool
-calls run: the classification table is the checklist an adapter satisfies,
-not a guess the agent makes about an unfamiliar value.
+reasons and the tool-call reasons; it maps `SAFETY`, `RECITATION`,
+`BLOCKLIST`, `PROHIBITED_CONTENT` and `SPII` to their lowercase names, which
+classify as the refusal kind, and `MALFORMED_FUNCTION_CALL`,
+`UNEXPECTED_TOOL_CALL` and `TOO_MANY_TOOL_CALLS` to their lowercase names,
+which classify as `incomplete`. The raw value is always kept on
+`Response.StopReason`.
+
+**A value Dive does not know never runs a call.** Unknown values classify as
+`other`. A response of that kind with no client tool call is treated as
+finished: nothing acts on the guess, the raw value is on
+`Response.StopReason` for the application, and marking every compatible
+server's odd spelling of a normal end as incomplete would only churn. One
+that carries a client tool call runs none of them: the calls are answered
+"not run" and the turn is incomplete with `provider_stopped`, exactly as for
+`StopKindIncomplete`. The adapter checklist above is Dive's best knowledge
+of each provider, not a guarantee: the Google SDK Dive pins already defines
+`UNEXPECTED_TOOL_CALL`, "the tool call generated by the model is invalid",
+and `TOO_MANY_TOOL_CALLS`, neither of which the adapter names today, and a
+provider adds a truncation or refusal spelling before Dive learns it. A call
+run on such a response acts on output the provider said did not complete,
+and nothing reports it; a call withheld is reported in the outcome with the
+raw value, and is fixed by adding the spelling to the adapter. Dive fails
+closed where a wrong guess would act and open where it would only report.
 
 The agent's rules:
 
@@ -542,9 +564,11 @@ The agent's rules:
   call is dropped from the saved message so the history stays valid, and the
   next invocation starts the server loop again. The limit is a constant, not
   an option, until someone needs to tune it.
-- **Provider stopped.** A response of `StopKindIncomplete` runs none of
-  its tool calls. Incomplete with `provider_stopped`, `err == nil`,
-  `Next == continue`, and `Error` carrying the raw stop reason.
+- **Provider stopped.** A response of `StopKindIncomplete`, or of
+  `StopKindOther` that carries a client tool call, runs none of its tool
+  calls; they are answered "not run". Incomplete with `provider_stopped`,
+  `err == nil`, `Next == continue`, and `Error` carrying the raw stop
+  reason. A `StopKindOther` response with no client tool call is completed.
 - **Iteration limit.** Today the last allowed iteration sends `tool_choice:
   none` and a nudge; if the model still requests tools, the calls run and
   the loop ends with their results unseen. They no longer run: the turn is
@@ -634,6 +658,7 @@ call that is not completed:
 | `hook_abort`                                                    | The previous turn was stopped by the application before it finished: `<error>`. Everything above this note happened as shown. Do not retry the stopped step unless the user asks.                  |
 | `output_limit`                                                  | The previous response was cut off at the output limit before it finished. Continue from exactly where it stopped, without repeating what was already written.                                        |
 | `iteration_limit`                                               | The previous turn reached its limit of tool calls before finishing. Finish with the information already gathered, or ask the user before continuing.                                                 |
+| `provider_stopped`                                              | The previous turn ended because the provider stopped the response before it finished (reason: `<reason>`). Any tool call it made was not run. Everything above this note happened as shown. Continue from the completed work; if the same stop repeats, tell the user rather than retrying. |
 | `pause`                                                         | The previous turn's server tool loop was paused before it finished. Its trailing call was not completed; start it again if the user still wants it.                                                  |
 | `process_exit` (Phase 2)                                        | The previous turn was interrupted: the process ended before it finished. Everything above this note happened as shown.                                                                             |
 
@@ -761,7 +786,7 @@ that state is spread over four slices and reassembled on the error path.
 | Completed                                                             | `(resp, nil)`                             | `completed`  | `saved` or `none`  |
 | Completed, save failed                                                | `(resp, err)`                             | `completed`  | `failed` or `unknown` |
 | Suspended                                                             | `(resp, nil)`                             | `suspended`  | `saved` or `none`  |
-| A new suspension whose `SaveSuspendedTurn` failed                     | `(resp, err)` (today `(nil, err)`), so the caller can persist `resp.Suspension` itself | `suspended`  | `failed`           |
+| A new suspension whose `SaveSuspendedTurn` failed                     | `(resp, err)` (today `(nil, err)`); the caller reloads, and persists `resp.Suspension` itself only when the store does not hold it | `suspended`  | `failed` or `unknown` |
 | Incomplete, error reason                                              | `(resp, err)`, `err` wraps `*GenerationError{Response: resp}` | `incomplete` | `saved`, `none`, or `failed`/`unknown` with `errors.Join` |
 | Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `provider_stopped`, `pause`) | `(resp, nil)`    | `incomplete` | `saved` or `none`  |
 | Partial resume failed                                                 | `(nil, err)`, `err` wraps `*GenerationError` with the items so far and `Response == nil` | | unchanged |
@@ -894,9 +919,14 @@ span, the session-lock marker) and drops its cancellation. `FileStore` and
 `MemoryStore` ignore the context; a database-backed `Session` would otherwise
 refuse the write with the very cancellation that ended the turn, which is the
 trick all three applications had to invent. Making the completed-turn save
-use it too closes the save-error row in the table above. A store error is
-`Persistence == failed`; a write that hit `SaveTimeout` is `unknown`, since
-it may have landed, and an error never implies that nothing was saved.
+use it too closes the save-error row in the table above. The error's
+classification is the one in section 6: `failed` only when the session
+refused the write before writing, by wrapping `ErrSaveRejected` or with one
+of `session.Session`'s pre-write sentinels; any other error, and a write
+that hit `SaveTimeout`, is `unknown`, since it may have landed. This holds
+for `SaveSuspendedTurn` as much as for `SaveTurn`: the caller reloads
+before it retries or persists the returned snapshot, and an error never
+implies that nothing was saved.
 
 **Cancellation versus suspension.** A suspension is persisted even when the
 context has been cancelled by the time the agent reaches it. A tool that
@@ -1139,9 +1169,9 @@ Each of these is independent of the rest and can ship first:
   events.
 - **Stop reason plumbing.** `Response.StopReason` and
   `llm.ClassifyStopReason`, the precedence fix in the Responses adapter and
-  the finish-reason mapping in the Google adapter, and the chat-completions
-  iterator reporting a bare EOF, without `[DONE]` or a finish reason, as an
-  error (section 4).
+  the finish-reason mapping in the Google adapter, its tool-call reasons
+  included, and the chat-completions iterator reporting a bare EOF, without
+  `[DONE]` or a finish reason, as an error (section 4).
 - **Session resync after a write error.** `session.Session` re-reads its
   state from the store after any failed write instead of restoring its
   in-memory copy, since the write may have landed (section 6).
@@ -1284,7 +1314,9 @@ What changes for an application that upgrades and changes nothing:
 3. A response the model cut at the output limit, an exhausted pause, and the
    iteration limit now return `Status == Incomplete` with `err == nil`, and
    their tool calls are not run. A refusal stays completed, and its tool
-   calls are not run either. Code that treated every nil error as a finished
+   calls are not run either; so are the calls of a response whose stop
+   reason Dive does not recognize, which is incomplete with
+   `provider_stopped`. Code that treated every nil error as a finished
    answer sees the same text it saw before, plus a status it can check.
 4. `GenerationError.OutputMessages` is the closed output, not the raw partial
    messages. Code that answered open calls itself from it would now answer
@@ -1365,7 +1397,13 @@ What each of the three applications does after upgrading:
   is not run; the same for a Gemini `SAFETY` finish with a function call
   (completed, call not run) and a chat-completions `length` with
   `tool_calls`; a Responses `incomplete` without a named reason gives
-  `provider_stopped` with no call run.
+  `provider_stopped` with no call run; a Gemini `UNEXPECTED_TOOL_CALL` with
+  a function call is `provider_stopped` with the call not run.
+- An unrecognized stop reason: a scripted model returning `some_new_reason`
+  with a client tool call ends `Incomplete` with `provider_stopped`,
+  `Error == "some_new_reason"`, the call answered "not run" and the tool
+  never invoked; the same value with text only is `Completed` with
+  `Response.StopReason == "some_new_reason"` and no reminder recorded.
 - `pause_turn`: a scripted model that pauses twice then finishes is called
   three times with no user message between; one that pauses eleven times
   ends `Incomplete` with `pause` and no trailing server tool call in the
@@ -1411,8 +1449,8 @@ What each of the three applications does after upgrading:
   every exit class: PreGeneration error, PreIteration error, tool resolution
   error, model error, event callback error, hook aborts in PreToolUse,
   PostToolUse, Stop, PostGeneration and OnSuspend, a full-resume failure
-  before the model call, and a salvage save failure with `Persistence ==
-  failed`.
+  before the model call, and a salvage save failure with `Persistence`
+  `failed` or `unknown` by the error.
 - A completed turn whose save fails: `(resp, err)`, `Status == Completed`,
   `Persistence == failed` for a pre-write rejection and `unknown` for any
   other error; the same for a suspension whose save fails. For each of
@@ -1468,9 +1506,10 @@ Changelog, under Changed:
 > `turn-incomplete` reminder saying why; `CreateResponse` returns the
 > `Response` with the error, and `Response.Turn` is the turn as saved. A
 > response cut at `max_tokens` or the iteration limit now returns
-> `ResponseStatusIncomplete`, and neither it nor a refusal runs a tool. Set
-> `AgentOptions.IncompleteTurns.Discard` to keep the old error behaviour, or
-> if your application saves incomplete turns itself.
+> `ResponseStatusIncomplete`, and neither it, a refusal nor an unrecognized
+> stop reason runs a tool. Set `AgentOptions.IncompleteTurns.Discard` to keep
+> the old error behaviour, or if your application saves incomplete turns
+> itself.
 
 Under Added: `Response.Turn`, `Response.StopReason` and `StopDetails`, `SuspensionState.Usage`, `ErrSaveRejected`, `WithContinue`,
 `WithSoftCancel`, `OnIncompleteTurn`, `TurnOutcome` and `FindTurnOutcome`,
@@ -1737,6 +1776,7 @@ the contracts into them. Candidates, each independent:
 | A started read-only call answered "not run" (rev. 3)          | `unknown`; the annotation softens `Next` only                        | repeatability is a replay policy, not evidence (two reviews)                                        |
 | A suspension is never persisted after a cancellation (rev. 3) | the suspension is persisted; cancelling it is the application's explicit act | the tool or a hook may already have dispatched the work (review)                              |
 | A store error means the write did not land (rev. 3, 4)         | `failed` only for a pre-write rejection, `unknown` otherwise; the session resyncs | a rename can land before a later error (review)                                           |
+| An unknown stop reason is finished and its calls run (rev. 5)  | `other` never runs a call; text-only stays completed                 | the pinned Google SDK already has `UNEXPECTED_TOOL_CALL`, which the adapter does not name (review) |
 | `Turn.Messages` cumulative for every invocation (rev. 3)       | cumulative on a resume, this invocation's on a continuation           | v1.34 sessions append; only a resume replaces (review)                                              |
 
 ## Open questions
