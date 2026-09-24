@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -21,9 +22,23 @@ type faultyStore struct {
 	// tornBytes, when set, is written to the session file as a partial
 	// line before failing, the way an interrupted append leaves it.
 	tornBytes string
+	// unterminated writes the complete event line without its newline
+	// before failing.
+	unterminated bool
 }
 
 func (f *faultyStore) appendEvent(ctx context.Context, id string, evt *event) error {
+	if f.unterminated {
+		eventData, err := json.Marshal(evt)
+		if err != nil {
+			return err
+		}
+		encoded, err := json.Marshal(jsonlLine{LineType: "event", Data: eventData})
+		if err != nil {
+			return err
+		}
+		f.tornBytes = string(encoded)
+	}
 	if f.tornBytes != "" {
 		p, err := f.path(id)
 		if err != nil {
@@ -191,4 +206,52 @@ func TestResyncKeepsUnsavedTitleAndMetadata(t *testing.T) {
 	assert.True(t, errors.Is(err, errInjected))
 	assert.Equal(t, sess.Title(), "renamed")
 	assert.Equal(t, sess.Metadata()["k"], "v")
+}
+
+func TestSaveTurnUnterminatedAppendIsKeptAndHealed(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	assert.NoError(t, err)
+	sess := openFaulty(t, dir, fs, &faultyStore{unterminated: true})
+
+	// The append wrote a complete record but failed before its newline.
+	// The record is valid, so the turn landed and the session keeps it.
+	err = sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("second")}, nil)
+	assert.True(t, errors.Is(err, errInjected))
+	assert.Equal(t, sess.EventCount(), 2)
+
+	// The resync rewrote the file with the newline, so the next append
+	// starts a line of its own.
+	sess.appender = fs
+	assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("third")}, nil))
+	fresh := reopen(t, dir)
+	assert.Equal(t, fresh.EventCount(), 3)
+	msgs, err := fresh.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, msgs[len(msgs)-1].Text(), "third")
+}
+
+func TestOpenHealsUnterminatedFinalRecord(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	assert.NoError(t, err)
+	sess, err := fs.Open(ctx, "resync")
+	assert.NoError(t, err)
+	assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("first")}, nil))
+
+	// Simulate a crash that cut the file just before the final newline.
+	p, err := fs.path("resync")
+	assert.NoError(t, err)
+	raw, err := os.ReadFile(p)
+	assert.NoError(t, err)
+	assert.NoError(t, os.WriteFile(p, raw[:len(raw)-1], 0644))
+
+	// Opening keeps the record and heals the file, so the next append
+	// does not merge into it.
+	fresh := reopen(t, dir)
+	assert.Equal(t, fresh.EventCount(), 1)
+	assert.NoError(t, fresh.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("second")}, nil))
+	assert.Equal(t, reopen(t, dir).EventCount(), 2)
 }

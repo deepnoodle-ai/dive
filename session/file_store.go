@@ -70,7 +70,9 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 // torn partial line at the end of the file. Open tolerates this: the
 // corrupt trailing line is dropped (consistent with the contract above
 // that the most recent turn may be lost) and the file is rewritten to
-// heal it. Corruption anywhere else in the file is treated as fatal.
+// heal it. A complete final record missing only its newline is kept, and
+// the file is rewritten the same way so the next append starts on a line
+// of its own. Corruption anywhere else in the file is treated as fatal.
 //
 // Callers who need power-loss durability for every turn can opt in by
 // constructing the store with NewFileStoreWithSync(dir, true). When
@@ -198,9 +200,10 @@ func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 			return nil, err
 		}
 	} else if torn {
-		// A torn trailing line (crash mid-append) was dropped during the
-		// read. Heal the file now so a future append cannot concatenate
-		// onto the garbage and turn it into fatal mid-file corruption.
+		// A crash mid-append left the file without a clean final line
+		// boundary. Heal the file now so a future append cannot
+		// concatenate onto the last line and turn it into fatal mid-file
+		// corruption.
 		if err := s.writeSession(data); err != nil {
 			return nil, err
 		}
@@ -355,8 +358,9 @@ func (s *FileStore) putSession(ctx context.Context, data *sessionData) error {
 }
 
 // reloadSession implements storeReloader for FileStore. It reads the
-// session back from its file after a failed write. A trailing line torn by
-// the failed append is healed, so the next append cannot concatenate onto it.
+// session back from its file after a failed write. A trailing line the
+// failed append left without its newline is healed, so the next append
+// cannot concatenate onto it.
 func (s *FileStore) reloadSession(ctx context.Context, id string) (*sessionData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -375,9 +379,10 @@ func (s *FileStore) reloadSession(ctx context.Context, id string) (*sessionData,
 // readSession parses a JSONL file into sessionData. Must be called with at
 // least a read lock held.
 //
-// The torn return value reports that a corrupt trailing line — the signature
-// of a crash mid-append — was dropped; callers holding the write lock should
-// rewrite the file to heal it.
+// The torn return value reports that the file does not end on a clean line
+// boundary, the signature of a crash mid-append: either a corrupt trailing
+// line was dropped, or the final record is complete but lacks its newline and
+// was kept. Callers holding the write lock should rewrite the file to heal it.
 func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err error) {
 	p, err := s.path(id)
 	if err != nil {
@@ -438,10 +443,14 @@ func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err er
 	// contract already allows losing the most recent turn. Corruption
 	// anywhere else in the file is fatal.
 	var parseFailure error
+	// unterminated records that the file's last line had no newline.
+	var unterminated bool
 
 	for {
 		raw, readErr := r.ReadBytes('\n')
-		if line := bytes.TrimSuffix(raw, []byte{'\n'}); len(line) > 0 {
+		line := bytes.TrimSuffix(raw, []byte{'\n'})
+		if len(line) > 0 {
+			unterminated = len(line) == len(raw)
 			if parseFailure != nil {
 				// The bad line was followed by more content, so it is not
 				// a torn final append — treat it as real corruption.
@@ -489,7 +498,7 @@ func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err er
 		}
 	}
 
-	return data, parseFailure != nil, nil
+	return data, parseFailure != nil || unterminated, nil
 }
 
 // writeSession writes a complete session as a JSONL file (header + events).
