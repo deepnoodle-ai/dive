@@ -3,6 +3,7 @@ package openaicompletions
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -359,23 +360,23 @@ func TestStreamIteratorUsageDetails(t *testing.T) {
 	assert.Equal(t, 30, response.Usage.ReasoningTokens)
 }
 
-// TestStreamIteratorClosesDanglingBlocks verifies that a stream ending without
-// a finish_reason — at the [DONE] marker or at EOF — still closes every block it
+// TestStreamIteratorClosesDanglingBlocks verifies that a stream ending at
+// the [DONE] marker without a finish_reason still closes every block it
 // opened and terminates with message_delta then message_stop, so consumers of
-// text and tool-call streams alike see a balanced block lifecycle.
+// text and tool-call streams alike see a balanced block lifecycle. The stop
+// reason says whether the response made tool calls.
 func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
 	textChunk := `data: {"id":"chatcmpl-6","object":"chat.completion.chunk","model":"mistral-large","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`
 	toolChunk := `data: {"id":"chatcmpl-6","object":"chat.completion.chunk","model":"mistral-large","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"calculator","arguments":"{\"a\":1}"}}]}}]}`
 
 	tests := []struct {
-		name    string
-		body    string
-		content llm.ContentType
+		name       string
+		body       string
+		content    llm.ContentType
+		stopReason string
 	}{
-		{name: "text at [DONE]", body: textChunk + "\n\ndata: [DONE]\n\n", content: llm.ContentTypeText},
-		{name: "text at EOF", body: textChunk + "\n\n", content: llm.ContentTypeText},
-		{name: "tool call at [DONE]", body: toolChunk + "\n\ndata: [DONE]\n\n", content: llm.ContentTypeToolUse},
-		{name: "tool call at EOF", body: toolChunk + "\n\n", content: llm.ContentTypeToolUse},
+		{name: "text at [DONE]", body: textChunk + "\n\ndata: [DONE]\n\n", content: llm.ContentTypeText, stopReason: "stop"},
+		{name: "tool call at [DONE]", body: toolChunk + "\n\ndata: [DONE]\n\n", content: llm.ContentTypeToolUse, stopReason: "tool_use"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -405,9 +406,49 @@ func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
 
 			// The partial block still reaches consumers as a well-formed message.
 			assert.True(t, accumulator.IsComplete())
-			message := accumulator.Response().Message()
+			response := accumulator.Response()
+			assert.Equal(t, tc.stopReason, response.StopReason)
+			message := response.Message()
 			assert.Equal(t, 1, len(message.Content))
 			assert.Equal(t, tc.content, message.Content[0].Type())
 		})
 	}
+}
+
+// TestStreamIteratorReportsBareEOF verifies that a stream which stops after
+// content with neither a finish_reason nor [DONE] is reported as
+// io.ErrUnexpectedEOF: the transport ended, not the response, so the message
+// may be cut short. The events already streamed stay available.
+func TestStreamIteratorReportsBareEOF(t *testing.T) {
+	textChunk := `data: {"id":"chatcmpl-7","object":"chat.completion.chunk","model":"mistral-large","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`
+	toolChunk := `data: {"id":"chatcmpl-7","object":"chat.completion.chunk","model":"mistral-large","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"calculator","arguments":"{\"a\":"}}]}}]}`
+	for name, body := range map[string]string{"text": textChunk + "\n\n", "tool call": toolChunk + "\n\n"} {
+		t.Run(name, func(t *testing.T) {
+			iterator := newTestStreamIterator(body)
+			defer iterator.Close()
+			accumulator := llm.NewResponseAccumulator()
+			for iterator.Next() {
+				assert.NoError(t, accumulator.AddEvent(iterator.Event()))
+			}
+			assert.True(t, errors.Is(iterator.Err(), io.ErrUnexpectedEOF))
+			assert.False(t, accumulator.IsComplete())
+			assert.Equal(t, 1, len(accumulator.UnfinishedContent()))
+		})
+	}
+}
+
+// TestStreamIteratorFinishReasonThenEOF verifies that a stream ending at EOF
+// after its finish_reason, with no [DONE], is a normal end.
+func TestStreamIteratorFinishReasonThenEOF(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl-8","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"calculator","arguments":"{}"}}]}}]}`,
+		``,
+		`data: {"id":"chatcmpl-8","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		``,
+	}, "\n")
+	iterator := newTestStreamIterator(body)
+	defer iterator.Close()
+	_, accumulator := collectEvents(t, iterator)
+	assert.True(t, accumulator.IsComplete())
+	assert.Equal(t, "tool_use", accumulator.Response().StopReason)
 }

@@ -1568,13 +1568,24 @@ would make neither reviewable.
    resyncing from its store after a failed write (healing a torn append on
    the way), and the CLI's `errors.Is`. `ErrSaveRejected` moves to step 6,
    where `Persistence` first reads it.
-2. **Model boundary plumbing** (sections 4 and 11). `llm.StopKind` and
-   `ClassifyStopReason` with the full spelling table, the Responses and
-   Google adapter fixes, the chat-completions bare EOF as
-   `io.ErrUnexpectedEOF`, `Response.StopReason` and `StopDetails`, an
-   accumulator method reporting which blocks never stopped, and
-   `llm.AnswerUnansweredToolCalls` in the four encoders. The backstop only
-   repairs requests that would fail today, so it ships early.
+2. **Model boundary plumbing** (sections 4 and 11). Done:
+   `llm.StopKind` and `ClassifyStopReason` with the spelling table of every
+   adapter family (Anthropic and Ollama, Responses and Grok and Meta, Chat
+   Completions and Mistral, OpenRouter and DeepInfra, Gemini), the
+   Responses precedence fix, Gemini finish reasons kept distinct,
+   `Response.StopReason` and `StopDetails`,
+   `ResponseAccumulator.UnfinishedContent`, and
+   `llm.AnswerUnansweredToolCalls` with the two texts in all four encoders.
+   Chat Completions reports a bare EOF as `io.ErrUnexpectedEOF`; a stream
+   that ends at `[DONE]` with no `finish_reason` reports `tool_use` or
+   `stop` by whether it made calls, and non-streaming `Generate`, which set
+   no stop reason at all, reports one. Left for step 6: the Anthropic and
+   Responses iterators end without an error when the transport closes
+   before their terminal event, so the agent treats a stream whose
+   accumulator never saw `message_stop` as interrupted; the Gemini iterator
+   still closes a stream that ends without a finish reason cleanly, a
+   deliberate choice of #271 that hides a cut-off response, and step 6
+   decides whether to change it.
 3. **Exit-path refactor.** One turn accumulator fed by the resume phase,
    the generation loop and Stop-hook continuations; the `Response` created
    before PreGeneration; every exit after the boundary through one function.

@@ -991,6 +991,8 @@ generateLoop:
 	response.Usage = accumulatedUsage
 	response.Items = accumulatedItems
 	response.OutputMessages = accumulatedOutput
+	response.StopReason = genResult.StopReason
+	response.StopDetails = genResult.StopDetails
 
 	// Merge any resume-phase items into the response, keeping chronological order.
 	if len(resumeExtraItems) > 0 {
@@ -1889,6 +1891,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	// Accumulates usage across multiple LLM calls
 	totalUsage := &llm.Usage{}
 
+	// The stop reason of the last model response
+	var stopReason string
+	var stopDetails *llm.StopDetails
+
 	// Wrap any loop failure in a *GenerationError carrying the state
 	// accumulated before the failure, so callers can recover cost
 	// accounting and partial work via errors.As. The items snapshot is
@@ -2037,6 +2043,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		// Remember the assistant response message
 		assistantMsg := response.Message()
 		newMessage(assistantMsg)
+		stopReason, stopDetails = response.StopReason, response.StopDetails
 
 		// Track total token usage
 		totalUsage.Add(&response.Usage)
@@ -2092,6 +2099,8 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 				OutputMessages:  outputMessages,
 				Items:           items,
 				Usage:           totalUsage,
+				StopReason:      stopReason,
+				StopDetails:     stopDetails,
 				Suspended:       snapshot,
 				BackgroundTasks: backgroundTasks,
 			}, nil
@@ -2122,6 +2131,8 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		OutputMessages:  outputMessages,
 		Items:           items,
 		Usage:           totalUsage,
+		StopReason:      stopReason,
+		StopDetails:     stopDetails,
 		BackgroundTasks: backgroundTasks,
 	}, nil
 }
@@ -3174,6 +3185,10 @@ type generateResult struct {
 	OutputMessages []*llm.Message
 	Items          []*ResponseItem
 	Usage          *llm.Usage
+
+	// StopReason and StopDetails are those of the last model response.
+	StopReason  string
+	StopDetails *llm.StopDetails
 
 	// Suspended is non-nil if the terminal iteration of the loop unwound
 	// because at least one tool returned SuspendResult. CreateResponse uses

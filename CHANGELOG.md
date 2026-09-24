@@ -10,9 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **`dive.LockSession`.** Takes the per-session lock `CreateResponse` holds, so
   changes made to a session outside the agent wait for a run in progress.
+- **Stop reasons on the response.** `Response.StopReason` and `StopDetails`;
+  `llm.ClassifyStopReason` maps any provider's value to an `llm.StopKind`.
+- **`llm.ResponseAccumulator.UnfinishedContent`** returns the blocks a stream
+  never finished.
+
+### Changed
+
+- **A Chat Completions stream that ends with no `finish_reason` or `[DONE]`
+  is an error**, wrapping `io.ErrUnexpectedEOF`. `[DONE]` alone still ends it.
+- **Gemini finish reasons stay distinct**: `safety`, `unexpected_tool_call` and
+  the rest, lowercased, where all but `stop` and `max_tokens` were `other`.
 
 ### Fixed
 
+- **Unanswered tool calls no longer break requests.** The Anthropic, OpenAI,
+  Chat Completions and Gemini encoders answer them with an unknown result.
+- **OpenAI Responses reports why a response ended**: `max_tokens`, `error` and
+  the like take precedence over `tool_use` when the response carries calls.
+- **Chat Completions `Generate` reports a stop reason**, as its stream does.
 - **A session resyncs from its store after a failed write.** The cached
   session matches the file after a write that failed late, and a torn or
   unterminated append is healed before the next one.

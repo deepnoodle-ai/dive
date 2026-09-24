@@ -276,6 +276,15 @@ type Response struct {
 	// FinishedAt is the timestamp when this response was completed
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
+	// StopReason is the provider's raw stop reason for the last model
+	// response of this call ("end_turn", "max_tokens", "tool_use", ...), or
+	// "" when the call made no model request, as on a partial resume.
+	// llm.ClassifyStopReason says what kind of stop it was. StopDetails
+	// carries the provider's structured detail when it reports one, such as
+	// a refusal category.
+	StopReason  string           `json:"stop_reason,omitempty"`
+	StopDetails *llm.StopDetails `json:"stop_details,omitempty"`
+
 	// Status is ResponseStatusCompleted for normal returns, or
 	// ResponseStatusSuspended when at least one tool returned SuspendResult.
 	// An empty Status means Completed (back-compat).

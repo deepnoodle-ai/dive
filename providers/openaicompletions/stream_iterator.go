@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -107,10 +108,17 @@ func (s *StreamIterator) Event() *llm.Event {
 func (s *StreamIterator) next() ([]*llm.Event, error) {
 	line, err := s.reader.ReadBytes('\n')
 	if err != nil {
-		// If the stream ends before a trailing usage chunk or [DONE] marker
-		// arrives, terminate the message here so it still ends with
-		// content_block_stop, message_delta, and message_stop.
+		// If the stream ends after its finish_reason but before a trailing
+		// usage chunk or [DONE] marker arrives, terminate the message here
+		// so it still ends with content_block_stop, message_delta, and
+		// message_stop. A stream that stops after content with neither a
+		// finish_reason nor [DONE] ended in transport, not in protocol:
+		// report it rather than synthesize a clean end for a response that
+		// may be cut short.
 		if err == io.EOF {
+			if !s.terminated && len(s.finalEvents) == 0 && s.eventCount > 0 {
+				return nil, fmt.Errorf("chat completions stream ended without a finish_reason or [DONE]: %w", io.ErrUnexpectedEOF)
+			}
 			if events := s.endStream(); len(events) > 0 {
 				return events, nil
 			}
@@ -300,10 +308,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 		// Build the message_delta event with the stop reason, but defer it
 		// (along with message_stop) until the trailing usage chunk, [DONE]
 		// marker, or EOF, so the message_delta carries the real token usage.
-		stopReason := choice.FinishReason
-		if stopReason == "tool_calls" {
-			stopReason = "tool_use" // Match Anthropic
-		}
+		stopReason := stopReasonFromFinish(choice.FinishReason)
 		s.finalEvents = []*llm.Event{
 			{
 				Type:  llm.EventTypeMessageDelta,
@@ -482,9 +487,11 @@ func (s *StreamIterator) flushFinalEvents() []*llm.Event {
 }
 
 // endStream returns the terminal events for a stream that has signaled its end
-// with [DONE] or EOF. Final events deferred by a finish_reason are flushed with
-// the latest usage. When no finish_reason ever arrived, every block still open
-// is closed and a message_delta (carrying usage, with no stop reason) and
+// with [DONE], or with EOF after its finish_reason. Final events deferred by a
+// finish_reason are flushed with the latest usage. When a stream ends with
+// [DONE] but no finish_reason, which some compatible servers do, every block
+// still open is closed and a message_delta (carrying usage, and "tool_use" or
+// "stop" as the stop reason by whether the response made tool calls) and
 // message_stop are synthesized, so consumers always receive a balanced block
 // lifecycle in the content_block_stop → message_delta → message_stop order the
 // other providers emit. Returns nil once the stream has terminated, or when no
@@ -497,12 +504,16 @@ func (s *StreamIterator) endStream() []*llm.Event {
 		return nil
 	}
 	s.terminated = true
+	stopReason := "stop"
+	if len(s.toolCalls) > 0 {
+		stopReason = "tool_use"
+	}
 	events := s.closeOpenBlocks(nil)
 	usage := s.llmUsage()
 	return append(events,
 		&llm.Event{
 			Type:  llm.EventTypeMessageDelta,
-			Delta: &llm.EventDelta{},
+			Delta: &llm.EventDelta{StopReason: stopReason},
 			Usage: &usage,
 		},
 		&llm.Event{Type: llm.EventTypeMessageStop},

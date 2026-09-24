@@ -578,6 +578,9 @@ func (p *Provider) supportsAutomaticCaching() bool {
 }
 
 func (p *Provider) renderReminders(messages []*llm.Message, model string) ([]*llm.Message, error) {
+	// Answer any tool call the history left without a result, which the API
+	// would reject; see llm.AnswerUnansweredToolCalls.
+	messages = llm.AnswerUnansweredToolCalls(messages)
 	return llm.RenderReminders(messages, func(index int, all []*llm.Message) (llm.Role, bool) {
 		if !p.supportsNativeSystemReminders(model) || !nativeSystemReminderPlacement(index, all) {
 			return llm.User, false

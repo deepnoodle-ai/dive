@@ -245,6 +245,9 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 }
 
 func renderReminderMessages(messages []*llm.Message) ([]*llm.Message, error) {
+	// Answer any tool call the history left without a result, which the API
+	// would reject; see llm.AnswerUnansweredToolCalls.
+	messages = llm.AnswerUnansweredToolCalls(messages)
 	// Gemini contents allow only user/model roles, so operator reminders always
 	// render as tagged user messages (nil resolver = no native authority).
 	return llm.RenderReminders(messages, nil)
