@@ -594,7 +594,7 @@ func (a *App) inputAreaView() []tui.View {
 			Prompt("❯").
 			PromptStyle(tui.NewStyle().WithFgRGB(accentBright).WithBold()).
 			TextStyle(tui.NewStyle().WithFgRGB(primaryText)).
-			Placeholder("Type a message... (@filename, or drop a file to attach)").
+			Placeholder("Type a message... (@filename, path, or drop)").
 			Multiline(true).
 			MaxHeight(10).
 			// A pasted block shows as "[pasted N lines]" and is edited as one
@@ -1198,7 +1198,7 @@ func (a *App) captureDroppedFiles(inserted string) string {
 	parts := make([]string, 0, len(paths))
 	found := 0
 	for i, path := range paths {
-		kind, size, err := classifyAttachment(path)
+		placeholder, err := a.attachPath(path)
 		if err != nil {
 			// The drop was deliberate, so say why nothing was attached and
 			// leave the path in the message as text.
@@ -1206,22 +1206,108 @@ func (a *App) captureDroppedFiles(inserted string) string {
 			parts = append(parts, tokens[i].value)
 			continue
 		}
-		a.attachSeq++
-		att := attachment{
-			Placeholder: fmt.Sprintf("[%s #%d]", kind.label(), a.attachSeq),
-			Path:        path,
-			Name:        filepath.Base(path),
-			Kind:        kind,
-			Size:        size,
-		}
-		a.attachments = append(a.attachments, att)
-		parts = append(parts, att.Placeholder)
+		parts = append(parts, placeholder)
 		found++
 	}
 	if found == 0 {
 		return inserted
 	}
 	return strings.Join(parts, " ")
+}
+
+func (a *App) attachPath(path string) (string, error) {
+	kind, size, err := classifyAttachment(path)
+	if err != nil {
+		return "", err
+	}
+	a.attachSeq++
+	placeholder := fmt.Sprintf("[%s #%d]", kind.label(), a.attachSeq)
+	a.attachments = append(a.attachments, attachment{
+		Placeholder: placeholder,
+		Path:        path,
+		Name:        filepath.Base(path),
+		Kind:        kind,
+		Size:        size,
+	})
+	return placeholder, nil
+}
+
+// captureSubmittedFiles also recognizes paths that were typed rather than
+// pasted. A complete path is explicit, as is a run of existing paths at the
+// end of a one-line message. Other prose (including pasted logs) stays text.
+// A path that cannot be attached stays text, including slash-prefixed input.
+func (a *App) captureSubmittedFiles(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return value
+	}
+	firstToken := strings.Fields(trimmed)[0]
+	if strings.HasPrefix(firstToken, "/") && !strings.Contains(strings.TrimPrefix(firstToken, "/"), "/") && filepath.Ext(firstToken) == "" {
+		return value // Preserve ordinary slash commands such as /help.
+	}
+	if path, ok := resolveDroppedPath(trimmed); ok {
+		if _, err := os.Lstat(path); err == nil {
+			placeholder, err := a.attachPath(path)
+			if err == nil {
+				return placeholder
+			}
+			return value
+		}
+	}
+
+	tokens := scanPathTokens(trimmed)
+	if paths, ok := isFileDrop(tokens); ok {
+		for _, path := range paths {
+			if _, _, err := classifyAttachment(path); err != nil {
+				return value
+			}
+		}
+		return a.captureDroppedFiles(trimmed)
+	}
+	if strings.HasPrefix(trimmed, "/") || strings.Contains(trimmed, "\n") {
+		return value
+	}
+
+	// Only a final run of complete paths is an implicit attachment in prose.
+	// This keeps paths inside logs and ordinary slash commands as plain text.
+	start := len(tokens)
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if _, ok := isFileDrop(tokens[i : i+1]); !ok {
+			break
+		}
+		start = i
+	}
+	if start == len(tokens) {
+		// An unquoted path may contain spaces. Resolve the complete remainder
+		// starting at each absolute-path token before giving up.
+		for _, token := range tokens {
+			path, ok := resolveDroppedPath(trimmed[token.start:])
+			if !ok {
+				continue
+			}
+			if _, err := os.Lstat(path); err != nil {
+				continue
+			}
+			placeholder, err := a.attachPath(path)
+			if err != nil {
+				return value
+			}
+			return trimmed[:token.start] + placeholder
+		}
+		return value
+	}
+	for _, token := range tokens[start:] {
+		path, _ := resolveDroppedPath(token.value)
+		if _, _, err := classifyAttachment(path); err != nil {
+			return value
+		}
+	}
+	suffix := trimmed[tokens[start].start:]
+	replaced := a.captureDroppedFiles(suffix)
+	if replaced == suffix {
+		return value
+	}
+	return trimmed[:tokens[start].start] + replaced
 }
 
 // pruneAttachments drops attachments whose placeholder the user has deleted from
@@ -1437,10 +1523,15 @@ func (a *App) handleInputNavKey(e tui.KeyEvent) bool {
 
 // submitInput handles input submission
 func (a *App) submitInput(value string) {
-	// If autocomplete is active, select instead of submitting
+	// Tab accepts command completion. Enter submits the text the user typed:
+	// an exact command runs, while an unmatched slash prefix is a message.
 	if len(a.autocompleteMatches) > 0 {
-		a.selectAutocomplete()
-		return
+		if a.autocompleteType == "command" {
+			a.clearAutocomplete()
+		} else {
+			a.selectAutocomplete()
+			return
+		}
 	}
 
 	// The input reports its own value, which a drop landing in the same event
@@ -1450,6 +1541,7 @@ func (a *App) submitInput(value string) {
 		a.inputText = value
 		a.handleInputChange(value)
 	}
+	a.setInputText(a.captureSubmittedFiles(a.inputText))
 
 	trimmed := strings.TrimSpace(a.inputText)
 	if trimmed == "" || a.processing || a.compacting {
@@ -2472,8 +2564,10 @@ func extractToolResultText(result *llm.ToolResultContent) string {
 }
 
 // handleCommand runs a built-in or custom slash command, returning true when it
-// handled the input. Attachments pending on the draft are forwarded to custom
-// commands and skills; built-ins take no input beyond their arguments.
+// handled the input. Unknown commands return false so the caller sends the
+// input verbatim as a user message. Attachments pending on the draft are
+// forwarded to custom commands and skills; built-ins take no input beyond
+// their arguments.
 func (a *App) handleCommand(input string, attachments []attachment) bool {
 	// Parse command name and arguments
 	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)
@@ -2625,9 +2719,7 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 		}
 	}
 
-	// Unknown command - show error
-	a.appendNotice("Unknown command: /%s (try /help)", cmdName)
-	return true
+	return false
 }
 
 // handleCompactCommand validates a manual /compact request on the event loop,
@@ -2787,7 +2879,8 @@ func (a *App) printHelp() {
 		tui.Text(""),
 		tui.Text("Input:").Bold(),
 		tui.Text("  @filename      Include file contents"),
-		tui.Text("  drag & drop    Attach an image, PDF, video, or text file"),
+		tui.Text("  absolute path  Attach an image, PDF, video, or text file"),
+		tui.Text("  drag & drop    Attach a file from the terminal"),
 		tui.Text("  Enter          Send message"),
 		tui.Text("  Shift+Enter    New line"),
 		tui.Text("  Ctrl+C twice   Exit"),

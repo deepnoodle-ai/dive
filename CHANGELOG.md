@@ -55,6 +55,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **CLI user messages fill their background on every line**, including wrapped
+  and blank lines.
+- **CLI file paths reach the model as attachments.** Typed image paths are sent
+  as image content; unknown slash input is sent as a message.
 - **Gemini `OutputText` no longer returns `""`** when the final part only
   carries a thought signature; subagents on Gemini no longer return empty.
 - **Error tool results with images.** No more Anthropic 400; the OpenAI
