@@ -3,8 +3,13 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -138,4 +143,76 @@ data: {"type":"message_stop"}
 	calls := consumeAnthropicStream(t, iterator).Response().ToolCalls()
 	assert.Len(t, calls, 1)
 	assert.Equal(t, `{}`, string(calls[0].Input))
+}
+
+func TestComputerToolsetDeclaresAllMembers(t *testing.T) {
+	toolset := NewComputerToolset(ComputerToolsetOptions{Disabled: []string{"zoom"}})
+	members := toolset.DeclaredTools()
+	assert.Len(t, members, 17)
+	assert.Contains(t, members, "left_click")
+	// Disabled members are still declared, so a same-named tool stays hidden.
+	assert.Contains(t, members, "zoom")
+	// Callers get a copy.
+	members[0] = "changed"
+	assert.Equal(t, "screenshot", toolset.DeclaredTools()[0])
+}
+
+// In a dive.Agent, the toolset keeps its member tools out of the request and
+// a failed action halts the rest of its batch with ComputerToolsetHaltText.
+func TestComputerToolsetInAgent(t *testing.T) {
+	responses := []string{`{
+		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
+		"content": [
+			{"type": "tool_use", "id": "toolu_1", "name": "left_click", "toolset_name": "computer", "input": {"coordinate": [640, 60]}},
+			{"type": "tool_use", "id": "toolu_2", "name": "type", "toolset_name": "computer", "input": {"text": "cats"}}
+		],
+		"stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5}
+	}`, okResponse}
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, responses[len(bodies)-1])
+	}))
+	t.Cleanup(server.Close)
+
+	typed := false
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		// Hide Stream so the agent calls Generate, which the server answers.
+		Model: struct{ llm.LLM }{New(WithEndpoint(server.URL), WithAPIKey("test-key"), WithModel(ModelClaudeOpus55))},
+		Tools: []dive.Tool{
+			NewComputerToolset(ComputerToolsetOptions{}),
+			dive.FuncTool("left_click", "Click.", func(ctx context.Context, in map[string]any) (*dive.ToolResult, error) {
+				return dive.NewToolResultError("the window moved"), nil
+			}),
+			dive.FuncTool("type", "Type text.", func(ctx context.Context, in map[string]any) (*dive.ToolResult, error) {
+				typed = true
+				return dive.NewToolResultText("typed"), nil
+			}),
+			dive.FuncTool("lookup", "Look something up.", func(ctx context.Context, in map[string]any) (*dive.ToolResult, error) {
+				return dive.NewToolResultText("found"), nil
+			}),
+		},
+	})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), dive.WithInput("Search for cats."))
+	assert.NoError(t, err)
+	assert.False(t, typed)
+	assert.Len(t, bodies, 2)
+
+	tools := bodies[0]["tools"].([]any)
+	assert.Len(t, tools, 2)
+	assert.Equal(t, ComputerToolsetType, tools[0].(map[string]any)["type"])
+	assert.Equal(t, "lookup", tools[1].(map[string]any)["name"])
+
+	messages := bodies[1]["messages"].([]any)
+	results := messages[len(messages)-1].(map[string]any)["content"].([]any)
+	assert.Len(t, results, 2)
+	halted := results[1].(map[string]any)
+	assert.Equal(t, "toolu_2", halted["tool_use_id"])
+	assert.Equal(t, "computer", halted["toolset_name"])
+	assert.Equal(t, true, halted["is_error"])
+	assert.Contains(t, fmt.Sprint(halted["content"]), ComputerToolsetHaltText)
 }

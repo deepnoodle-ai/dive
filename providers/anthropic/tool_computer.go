@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -14,6 +15,7 @@ var (
 	_ llm.ToolConfiguration = &ComputerTool{}
 	_ llm.Tool              = &ComputerToolset{}
 	_ llm.ToolConfiguration = &ComputerToolset{}
+	_ dive.ToolDeclarer     = &ComputerToolset{}
 )
 
 const (
@@ -26,7 +28,8 @@ const (
 	ComputerToolsetName = "computer"
 	// ComputerToolsetHaltText is the result text Anthropic specifies for the
 	// calls in a batch after one that failed, which the agent loop must not
-	// run. Send it with IsError set.
+	// run. It is sent with IsError set. A dive.Agent answers those calls
+	// with it on its own; an application running its own loop sends it.
 	ComputerToolsetHaltText = "Not executed: an earlier computer action in this turn failed."
 )
 
@@ -47,22 +50,49 @@ func NewComputerToolset(opts ComputerToolsetOptions) *ComputerToolset {
 // 17 member tools such as screenshot, left_click, type, and zoom. Supported on
 // Opus 4.8 and later, Sonnet 5, Fable 5 and 5.1, and Mythos 5 and 5.1.
 //
-// Your application runs every call. The toolset changes the agent loop from
-// ComputerTool's:
-//   - Each action is its own tool call. Its Name is the member ("left_click"),
-//     its ToolsetName is ComputerToolsetName, and its input has no "action".
-//   - A response can hold several calls (a batch). Run them in order and stop
-//     at the first failure: answer that call with IsError and a description,
-//     and each later one with IsError and ComputerToolsetHaltText.
+// Each action is its own tool call: its Name is the member ("left_click"),
+// its ToolsetName is ComputerToolsetName, and its input has no "action". Your
+// application runs every call, with an ordinary dive.Tool per member, named
+// for it; the agent routes each call to the tool of that name, so permission
+// rules and hooks apply per member. The rest of the contract is handled for
+// you when the tools run in a dive.Agent:
+//   - The toolset declares its members (DeclaredTools), so the agent does not
+//     send the member tools as custom tools while the toolset is among the
+//     agent's tools. Leave the toolset out for a model that doesn't take it
+//     and the same member tools are sent as ordinary tools.
+//   - A response can hold several calls (a batch). The agent runs them in
+//     order and stops at the first failure: that call keeps its error, and
+//     each later one is answered with IsError and ComputerToolsetHaltText,
+//     without running. See dive.ToolAnnotations.HaltsBatch, which gives the
+//     member tools the same behavior when they are offered as plain tools.
 //   - Each result must carry the toolset name. The Anthropic provider fills
 //     it in from the matching call when ToolResultContent.ToolsetName is
 //     empty.
-//   - The API rejects screenshots and zoom images over the model's image
-//     limits instead of downscaling them, so resize them first.
+//
+// Still the application's job: report a failed action as a failure (an
+// IsError result or a Go error), and resize screenshots and zoom images to
+// the model's image limits, which the API enforces instead of downscaling.
 //
 // https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool
 type ComputerToolset struct {
 	disabled []string
+}
+
+// computerToolsetMembers are the toolset's member names, as the API accepts
+// them in the "configs" of computer_toolset_20260801.
+var computerToolsetMembers = []string{
+	"screenshot", "left_click", "right_click", "middle_click", "double_click",
+	"triple_click", "mouse_move", "left_click_drag", "left_mouse_down",
+	"left_mouse_up", "scroll", "type", "key", "hold_key", "wait",
+	"cursor_position", "zoom",
+}
+
+// DeclaredTools returns the names of all 17 members, including any listed in
+// ComputerToolsetOptions.Disabled, so that an application tool named for a
+// disabled member is withheld from the model along with the member. It
+// implements dive.ToolDeclarer.
+func (t *ComputerToolset) DeclaredTools() []string {
+	return slices.Clone(computerToolsetMembers)
 }
 
 // Name returns the toolset name. The model never calls a tool by this name;

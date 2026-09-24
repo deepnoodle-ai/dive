@@ -403,6 +403,44 @@ func TestMultiMessageTurnReturnsFinalText(t *testing.T) {
 	assert.Equal(t, "The answer is 42.", result.Text)
 }
 
+// A cited answer arrives as several adjacent text blocks. The remote client
+// must get the whole answer, joined the way Response.OutputText joins it, not
+// the first fragment.
+func TestRemoteAgentReturnsWholeCitedAnswer(t *testing.T) {
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		resp := textResponse("I'll search for that.")
+		resp.Content = append(resp.Content,
+			&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
+			&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
+			&llm.TextContent{Text: "According to the report, "},
+			&llm.TextContent{
+				Text:      "revenue grew 12%",
+				Citations: []llm.Citation{&llm.WebSearchResultLocation{URL: "https://example.com"}},
+			},
+			&llm.TextContent{Text: " in 2025."},
+			&llm.TextContent{Metadata: llm.ProviderMetadata{"google.thought_signature": "c2ln"}},
+		)
+		return resp, nil
+	}}
+	agent := buildAgent(t, model)
+	ts, client := startServer(t, agent)
+	const want = "I'll search for that.\n\nAccording to the report, revenue grew 12% in 2025."
+
+	// The whole answer travels as one text part.
+	msg := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart("Revenue?"))
+	task := sendAndExpectTask(t, client, msg)
+	assert.Len(t, task.Artifacts, 1)
+	assert.Len(t, task.Artifacts[0].Parts, 1)
+	assert.Equal(t, want, task.Artifacts[0].Parts[0].Text())
+
+	remote, err := a2a.NewRemoteAgentFromURL(context.Background(), ts.URL)
+	assert.NoError(t, err)
+	result, err := remote.SendText(context.Background(), "Revenue?")
+	assert.NoError(t, err)
+	assert.True(t, result.IsCompleted())
+	assert.Equal(t, want, result.Text)
+}
+
 func TestStreamMessage(t *testing.T) {
 	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 		return textResponse("streamed response"), nil

@@ -428,14 +428,17 @@ func contentFromPart(p *a2asdk.Part) llm.Content {
 
 // partsFromContent converts Dive LLM content to a2a parts. Internal content
 // types (tool use, tool result, thinking) are skipped.
+//
+// The answer text, as llm.Message.AnswerText gives it (which
+// Response.OutputText uses), becomes one text part, followed by a part for
+// each image, document and refusal.
 func partsFromContent(content []llm.Content) []*a2asdk.Part {
 	var parts []*a2asdk.Part
+	if text := (&llm.Message{Content: content}).AnswerText(); text != "" {
+		parts = append(parts, a2asdk.NewTextPart(text))
+	}
 	for _, c := range content {
 		switch v := c.(type) {
-		case *llm.TextContent:
-			if v.Text != "" {
-				parts = append(parts, a2asdk.NewTextPart(v.Text))
-			}
 		case *llm.ImageContent:
 			if v.Source != nil {
 				p := partFromSource(v.Source, "")
@@ -498,7 +501,7 @@ func streamEventFromItem(execCtx *a2asrv.ExecutorContext, item *dive.ResponseIte
 		if item.Message == nil || item.Message.Role != llm.Assistant {
 			return nil
 		}
-		text := item.Message.LastText()
+		text := item.Message.AnswerText()
 		if text == "" {
 			return nil
 		}

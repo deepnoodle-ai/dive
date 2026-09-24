@@ -417,6 +417,9 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 	if err != nil {
 		return nil, err
 	}
+	// Tool messages are text-only, so tool-result images move to the user
+	// message this loop emits after the run of tool messages.
+	messages = providers.LiftToolResultImages(messages)
 	var result []Message
 	for _, msg := range messages {
 		// Skip empty messages - they can occur in edge cases during long tool-calling loops
@@ -497,6 +500,13 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 				// Provider-specific encrypted blocks use namespaced metadata on
 				// ThinkingContent instead.
 			default:
+				// Tool calls and results that another provider ran on its own
+				// servers (for example Anthropic web search). Chat Completions
+				// cannot replay them, so they are skipped. The assistant text
+				// around them still carries what the model concluded.
+				if providers.IsServerToolContent(c) {
+					continue
+				}
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 			}
 		}
@@ -745,9 +755,11 @@ func toolResultContentString(c *llm.ToolResultContent) (string, error) {
 }
 
 // toolResultTextBlocks flattens tool result content blocks to a single
-// string. Chat Completions tool messages are text-only, so non-text blocks
-// (e.g. images from an MCP tool) are represented with a placeholder rather
-// than being dropped silently, as is a result with no renderable text at all.
+// string. Chat Completions tool messages are text-only. Images have already
+// been lifted out by providers.LiftToolResultImages, so a non-text block that
+// reaches here (audio, or an image with no data or an undetectable type) is
+// represented with a placeholder rather than being dropped silently, as is a
+// result with no renderable text at all.
 func toolResultTextBlocks(content []*dive.ToolResultContent) string {
 	var texts []string
 	for _, c := range content {

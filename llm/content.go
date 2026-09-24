@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"strings"
 )
+
+// errUnsupportedContentType is returned, wrapped, by UnmarshalContent for a
+// block type it cannot decode.
+var errUnsupportedContentType = errors.New("unsupported content type")
 
 // ContentType indicates the type of a content block in a message
 type ContentType string
@@ -38,6 +44,10 @@ const (
 	// Code execution tool result types (code_execution_20250825)
 	ContentTypeBashCodeExecutionToolResult       ContentType = "bash_code_execution_tool_result"
 	ContentTypeTextEditorCodeExecutionToolResult ContentType = "text_editor_code_execution_tool_result"
+
+	// Server tool result types that decode as ServerToolResultContent.
+	ContentTypeWebFetchToolResult   ContentType = "web_fetch_tool_result"
+	ContentTypeToolSearchToolResult ContentType = "tool_search_tool_result"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -1362,6 +1372,116 @@ func (c *SummaryContent) CloneContent() Content {
 	return &cp
 }
 
+//// ServerToolResultContent //////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "web_fetch_tool_result",
+  "tool_use_id": "srvtoolu_01234567890abcdef",
+  "content": {
+    "type": "web_fetch_result",
+    "url": "https://example.com/article",
+    "content": {"type": "document", "source": {...}, "title": "Article"},
+    "retrieved_at": "2025-08-25T10:30:00Z"
+  }
+}
+
+{
+  "type": "tool_search_tool_result",
+  "tool_use_id": "srvtoolu_01ABC123",
+  "content": {
+    "type": "tool_search_tool_search_result",
+    "tool_references": [{"type": "tool_reference", "tool_name": "get_weather"}]
+  }
+}
+*/
+
+// ServerToolResultContent is the result of a server-side tool call whose
+// block type has no dedicated Content type, such as Anthropic's
+// web_fetch_tool_result and tool_search_tool_result. UnmarshalContent decodes
+// any otherwise unknown block whose type ends in "_tool_result" and that
+// names a tool_use_id into it. The server tool call then keeps its result in
+// the history, and the conversation can be sent back to the provider that ran
+// the tool.
+//
+// The block is kept verbatim: MarshalJSON writes back the exact JSON that was
+// decoded, including fields that are not exposed here. BlockType, ToolUseID
+// and Content are read from that JSON for inspection; changing them does not
+// change what is encoded. A value built by hand (with no decoded JSON) is
+// encoded from those three fields.
+type ServerToolResultContent struct {
+	// BlockType is the block's wire type, for example
+	// ContentTypeWebFetchToolResult.
+	BlockType ContentType
+	// ToolUseID is the ID of the server tool call this result answers.
+	ToolUseID string
+	// Content is the block's "content" field as the provider sent it. Its
+	// shape depends on BlockType. A failed call reports its error inside it
+	// (for example {"type": "web_fetch_tool_error", "error_code": "..."}).
+	Content json.RawMessage
+
+	raw json.RawMessage
+}
+
+// Type returns the block's wire type (BlockType).
+func (c *ServerToolResultContent) Type() ContentType {
+	return c.BlockType
+}
+
+// MarshalJSON writes the block as it was decoded, or, for a value built by
+// hand, as {"type", "tool_use_id", "content"}.
+func (c *ServerToolResultContent) MarshalJSON() ([]byte, error) {
+	if len(c.raw) > 0 {
+		return c.raw, nil
+	}
+	return json.Marshal(struct {
+		Type      ContentType     `json:"type"`
+		ToolUseID string          `json:"tool_use_id"`
+		Content   json.RawMessage `json:"content,omitempty"`
+	}{
+		Type:      c.BlockType,
+		ToolUseID: c.ToolUseID,
+		Content:   c.Content,
+	})
+}
+
+// UnmarshalJSON keeps the block's JSON and reads BlockType, ToolUseID and
+// Content from it.
+func (c *ServerToolResultContent) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Type      ContentType     `json:"type"`
+		ToolUseID string          `json:"tool_use_id"`
+		Content   json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	c.BlockType = fields.Type
+	c.ToolUseID = fields.ToolUseID
+	c.Content = fields.Content
+	c.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
+// isServerToolResultBlock reports whether a block that UnmarshalContent has
+// no dedicated type for is a server tool result: its type ends in
+// "_tool_result" and it names the call it answers.
+func isServerToolResultBlock(blockType ContentType, data []byte) bool {
+	return strings.HasSuffix(string(blockType), "_tool_result") && blockToolUseID(data) != ""
+}
+
+// blockToolUseID returns the tool_use_id field of a content block's JSON, or
+// "" when it has none.
+func blockToolUseID(data []byte) string {
+	var ref struct {
+		ToolUseID string `json:"tool_use_id"`
+	}
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return ""
+	}
+	return ref.ToolUseID
+}
+
 //// Unmarshalling /////////////////////////////////////////////////////////////
 
 type contentTypeIndicator struct {
@@ -1443,7 +1563,10 @@ func UnmarshalContent(data []byte) (Content, error) {
 	case ContentTypeReminder:
 		content = &ReminderContent{}
 	default:
-		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
+		if !isServerToolResultBlock(ct.Type, data) {
+			return nil, fmt.Errorf("%w: %s", errUnsupportedContentType, ct.Type)
+		}
+		content = &ServerToolResultContent{}
 	}
 	// Unmarshal into the concrete type
 	if err := json.Unmarshal(data, content); err != nil {

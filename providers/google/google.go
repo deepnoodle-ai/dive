@@ -120,7 +120,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	// Convert messages to genai.Content format
-	contents, err := messagesToContents(rendered)
+	contents, err := messagesToContents(liftToolResultImages(request.Model, rendered))
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	}
 
 	// Convert messages to genai.Content format
-	contents, err := messagesToContents(rendered)
+	contents, err := messagesToContents(liftToolResultImages(request.Model, rendered))
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}

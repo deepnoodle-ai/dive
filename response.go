@@ -81,6 +81,10 @@ type PendingToolCall struct {
 	Prompt   string          `json:"prompt,omitempty"`
 	Reason   SuspendReason   `json:"reason,omitempty"`
 	Metadata map[string]any  `json:"metadata,omitempty"`
+	// HaltsBatch records that the call takes part in batch halting (see
+	// ToolAnnotations.HaltsBatch), so an error result supplied for it on
+	// resume halts the batch even if the resuming agent's tools changed.
+	HaltsBatch bool `json:"halts_batch,omitempty"`
 }
 
 // UnmarshalInput decodes the pending call's Input JSON into the given
@@ -189,6 +193,12 @@ type SuspensionState struct {
 	// final assistant message), so stateless callers can append it to
 	// their pre-turn history in one operation.
 	TurnMessages []*llm.Message `json:"turn_messages,omitempty"`
+
+	// BatchHalted records that a halting call in the suspended batch failed
+	// (see ToolAnnotations.HaltsBatch), so the batch's later halting calls
+	// are answered with ErrBatchHalted on resume. It is recorded rather than
+	// worked out again on resume, where the agent's tools may have changed.
+	BatchHalted bool `json:"batch_halted,omitempty"`
 }
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.
@@ -302,30 +312,26 @@ type Response struct {
 	BackgroundTasks []*BackgroundTaskHandle `json:"-"`
 }
 
-// OutputText returns the text content from the last message in the response.
-// If there are no messages or no text content, returns an empty string.
+// OutputText returns the answer text of the response: all of the text in the
+// final message, or "" when there is no message or it has no text. It is
+// llm.Message.AnswerText of that message: fragments of one passage (adjacent
+// text blocks, such as Anthropic citation splits) are concatenated, and
+// separate passages (text blocks with other content between them, or with
+// different OpenAI phases) are joined with a blank line ("\n\n").
+//
+// Text from earlier messages in the turn, such as "Let me check..." before a
+// tool call, is not included. Read OutputMessages for the full turn.
 func (r *Response) OutputText() string {
-	// Find the last message
 	var lastMessage *llm.Message
 	for _, item := range r.Items {
 		if item.Type == ResponseItemTypeMessage && item.Message != nil {
 			lastMessage = item.Message
 		}
 	}
-
 	if lastMessage == nil {
 		return ""
 	}
-
-	// Find the last text content
-	for i := len(lastMessage.Content) - 1; i >= 0; i-- {
-		content := lastMessage.Content[i]
-		if textContent, ok := content.(*llm.TextContent); ok {
-			return textContent.Text
-		}
-	}
-
-	return ""
+	return lastMessage.AnswerText()
 }
 
 // ToolCallResults returns all tool call results from the response.

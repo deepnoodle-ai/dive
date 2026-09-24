@@ -1376,3 +1376,30 @@ func TestFileStoreConcurrentOpenSingleInstance(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, n, len(msgs))
 }
+
+// A halted batch stays halted across a reload from disk, and resuming the
+// turn clears the flag.
+func TestFileStoreSuspendKeepsBatchHalted(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	sess, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+
+	state := singleSuspensionState()
+	state.BatchHalted = true
+	assert.NoError(t, sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, state))
+
+	store2, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	sess2, err := store2.Open(ctx, "s1")
+	assert.NoError(t, err)
+	loaded := sess2.LoadSuspension()
+	assert.NotNil(t, loaded)
+	assert.True(t, loaded.BatchHalted)
+
+	assert.NoError(t, sess2.SaveResumedTurn(ctx, suspendedTurnMessages(), nil))
+	assert.NoError(t, sess2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState()))
+	assert.False(t, sess2.LoadSuspension().BatchHalted)
+}

@@ -1,8 +1,15 @@
-// Package providers contains the LLM provider registry and shared error types.
+// Package providers contains the LLM provider registry, shared error types,
+// and helpers for provider implementations.
 //
 // Providers self-register via init() functions using [Register]. The registry
 // matches model names to provider factories using configurable matchers
 // ([PrefixMatcher], [ContainsMatcher], [EnvMatcher]).
+//
+// The helpers are for code that encodes Dive messages for a provider API:
+// reading tool results ([ToolResultBlocks], [EmptyToolResultText],
+// [LiftToolResultImages]), recognizing history another provider's servers
+// produced ([IsServerToolContent]), and retrying requests and streams
+// ([RetryPolicy], [NewRetryingStreamIterator]).
 //
 // Individual providers are in subpackages:
 //

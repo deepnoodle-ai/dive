@@ -267,7 +267,9 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	if len(filtered) == 0 {
 		return nil, fmt.Errorf("all messages are empty")
 	}
-	messages = filtered
+	// An error result may hold only text, so its images follow the tool
+	// results instead. Other results keep theirs (convertToolResultBlocks).
+	messages = providers.LiftErrorToolResultImages(filtered)
 	// A toolset member's result must name its toolset, as its call does.
 	// Fill it in from the call so results built without it are accepted.
 	toolsets := map[string]string{}
@@ -285,6 +287,9 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		// The "name" field in tool results can't be set either
 		var copiedContent []llm.Content
 		for _, content := range message.Content {
+			if isForeignServerToolContent(content) {
+				continue
+			}
 			switch c := content.(type) {
 			case *llm.TextContent:
 				text := c.CloneContent().(*llm.TextContent)
@@ -422,13 +427,8 @@ func convertToolResultBlocks(c *llm.ToolResultContent) any {
 	for _, b := range blocks {
 		switch b.Type {
 		case dive.ToolResultContentTypeImage:
-			mediaType := b.MimeType
+			mediaType := providers.ToolResultImageMediaType(b)
 			if mediaType == "" {
-				if detected, err := llm.DetectImageType(b.Data); err == nil {
-					mediaType = string(detected)
-				}
-			}
-			if mediaType == "" || b.Data == "" {
 				content = append(content, &llm.TextContent{Text: "[image content omitted]"})
 				continue
 			}

@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 )
 
@@ -49,6 +50,43 @@ type EventContentBlock struct {
 	Thinking    string           `json:"thinking,omitempty"`
 	Signature   string           `json:"signature,omitempty"`
 	Metadata    ProviderMetadata `json:"metadata,omitempty"`
+
+	// raw keeps the block's JSON when it was decoded from a provider stream
+	// and its type has no field set above (for example Anthropic's
+	// server_tool_use or web_search_tool_result). ResponseAccumulator decodes
+	// it with UnmarshalContent, so a streamed response holds the same content
+	// as the non-streaming one.
+	raw json.RawMessage
+}
+
+// UnmarshalJSON decodes a content block. For a type that the fields of
+// EventContentBlock cannot hold, it also keeps the block's JSON for
+// ResponseAccumulator.
+func (b *EventContentBlock) UnmarshalJSON(data []byte) error {
+	type plain EventContentBlock
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*b = EventContentBlock(decoded)
+	switch b.Type {
+	case ContentTypeText, ContentTypeToolUse, ContentTypeThinking, ContentTypeRedactedThinking:
+	default:
+		b.raw = append(json.RawMessage(nil), data...)
+	}
+	return nil
+}
+
+// MarshalJSON encodes the content block. A block whose JSON UnmarshalJSON
+// kept is written back as that JSON, so an event that is encoded (for example
+// to relay or record a stream) and decoded again still carries the whole
+// block, such as a server tool result.
+func (b EventContentBlock) MarshalJSON() ([]byte, error) {
+	if len(b.raw) > 0 {
+		return b.raw, nil
+	}
+	type plain EventContentBlock
+	return json.Marshal(plain(b))
 }
 
 // EventDeltaType indicates the type of delta in an LLM event.
@@ -85,14 +123,23 @@ type ResponseAccumulator struct {
 	response      *Response
 	contentBlocks map[int]Content // Map of content blocks by index
 	skippedBlocks map[int]bool    // Indices of unrecognized content block types
-	complete      bool
+	// skippedResultIDs holds the tool_use_id of each skipped block that
+	// named one. A server tool call whose result was skipped is dropped from
+	// the response (see dropServerToolCalls).
+	skippedResultIDs map[string]bool
+	// serverInputs buffers input_json_delta fragments for server-side tool
+	// calls (ServerToolUseContent, MCPToolUseContent) until the block stops.
+	serverInputs map[int][]byte
+	complete     bool
 }
 
 // NewResponseAccumulator creates a new ResponseAccumulator.
 func NewResponseAccumulator() *ResponseAccumulator {
 	return &ResponseAccumulator{
-		contentBlocks: make(map[int]Content),
-		skippedBlocks: make(map[int]bool),
+		contentBlocks:    make(map[int]Content),
+		skippedBlocks:    make(map[int]bool),
+		skippedResultIDs: make(map[string]bool),
+		serverInputs:     make(map[int][]byte),
 	}
 }
 
@@ -136,14 +183,30 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		case ContentTypeRedactedThinking:
 			content = &RedactedThinkingContent{}
+		default:
+			// Blocks such as Anthropic's server_tool_use and
+			// web_search_tool_result arrive whole in the start event. Decode
+			// them the way a non-streaming response is decoded, so streaming
+			// and non-streaming calls produce the same message.
+			if len(event.ContentBlock.raw) > 0 {
+				if decoded, err := UnmarshalContent(event.ContentBlock.raw); err == nil {
+					content = decoded
+				}
+			}
 		}
 		if content == nil {
-			// Unrecognized content block type (e.g. server-tool blocks like
-			// server_tool_use or web_search_tool_result). Skip it rather than
+			// Unrecognized content block type (for example one that
+			// UnmarshalContent does not support). Skip it rather than
 			// storing a nil entry, and remember the index so subsequent delta
-			// events for this block are ignored.
+			// events for this block are ignored. When the skipped block is
+			// the result of a server tool call, that call is dropped too:
+			// a call without its result is rejected when the history is
+			// sent back.
 			if event.Index != nil {
 				r.skippedBlocks[*event.Index] = true
+			}
+			if id := blockToolUseID(event.ContentBlock.raw); id != "" {
+				r.skippedResultIDs[id] = true
 			}
 			return nil
 		}
@@ -179,9 +242,14 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 				return errors.New("in-progress block is not a text content")
 			}
 		case EventDeltaTypeInputJSON:
-			if toolUseContent, ok := content.(*ToolUseContent); ok {
-				toolUseContent.Input = append(toolUseContent.Input, []byte(event.Delta.PartialJSON)...)
-			} else {
+			switch toolUse := content.(type) {
+			case *ToolUseContent:
+				toolUse.Input = append(toolUse.Input, []byte(event.Delta.PartialJSON)...)
+			case *ServerToolUseContent, *MCPToolUseContent:
+				// The start event carried a placeholder input ({}). Buffer
+				// the fragments and replace it when the block stops.
+				r.serverInputs[*event.Index] = append(r.serverInputs[*event.Index], event.Delta.PartialJSON...)
+			default:
 				return errors.New("in-progress block is not a tool use content")
 			}
 		case EventDeltaTypeThinking, EventDeltaTypeSignature:
@@ -203,6 +271,12 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		if event.Index != nil {
 			if toolUse, ok := r.contentBlocks[*event.Index].(*ToolUseContent); ok && len(toolUse.Input) == 0 {
 				toolUse.Input = json.RawMessage("{}")
+			}
+			if input, ok := r.serverInputs[*event.Index]; ok {
+				delete(r.serverInputs, *event.Index)
+				if err := setServerToolInput(r.contentBlocks[*event.Index], input); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -243,6 +317,25 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	// after usage accumulation, so the final token counts are reflected.
 	if r.complete && r.response != nil {
 		PopulateCost(r.response.Model, r.response.Usage.Speed == string(SpeedFast), &r.response.Usage)
+	}
+	return nil
+}
+
+// setServerToolInput replaces the input of a streamed server-side tool call
+// with the JSON gathered from its input_json_delta events.
+func setServerToolInput(content Content, input []byte) error {
+	if len(input) == 0 {
+		return nil
+	}
+	switch toolUse := content.(type) {
+	case *ServerToolUseContent:
+		var parsed map[string]any
+		if err := json.Unmarshal(input, &parsed); err != nil {
+			return fmt.Errorf("invalid server tool input for %s: %w", toolUse.ID, err)
+		}
+		toolUse.Input = parsed
+	case *MCPToolUseContent:
+		toolUse.Input = json.RawMessage(input)
 	}
 	return nil
 }
@@ -290,7 +383,36 @@ func (r *ResponseAccumulator) finalizeContent() {
 		content[i] = r.contentBlocks[index]
 	}
 
-	r.response.Content = content
+	r.response.Content = dropServerToolCalls(content, r.skippedResultIDs)
+}
+
+// dropServerToolCalls removes the server-side tool calls
+// (ServerToolUseContent, MCPToolUseContent) whose IDs are in ids. It is used
+// for calls whose result block was skipped because Dive cannot decode it.
+// Such a call must not stay in the history on its own: Anthropic rejects a
+// server tool call that has no result, except at the very end of a paused
+// turn (stop reason pause_turn), where the call is legitimately still
+// running and its result was never sent. Only calls with a skipped result
+// are removed, so that case is untouched.
+func dropServerToolCalls(content []Content, ids map[string]bool) []Content {
+	if len(ids) == 0 {
+		return content
+	}
+	kept := content[:0]
+	for _, c := range content {
+		switch call := c.(type) {
+		case *ServerToolUseContent:
+			if ids[call.ID] {
+				continue
+			}
+		case *MCPToolUseContent:
+			if ids[call.ID] {
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	return kept
 }
 
 func (r *ResponseAccumulator) IsComplete() bool {

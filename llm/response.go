@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"errors"
 )
 
 // Response is the generated response from an LLM. Matches the Anthropic
@@ -109,7 +110,9 @@ func (r *Response) ToolCalls() []*ToolUseContent {
 }
 
 // UnmarshalJSON implements custom unmarshaling for Response to properly handle
-// the polymorphic Content field.
+// the polymorphic Content field. Content blocks of a type UnmarshalContent
+// does not support are skipped, together with any server tool call whose
+// result is such a block.
 func (r *Response) UnmarshalJSON(data []byte) error {
 	type tempResponse struct {
 		ID                   string                     `json:"id"`
@@ -143,14 +146,28 @@ func (r *Response) UnmarshalJSON(data []byte) error {
 	r.ContextManagement = tmp.ContextManagement
 	r.InputTransformations = tmp.InputTransformations
 
-	// Process each content item
+	// Process each content item. A block of a type Dive cannot decode is
+	// skipped, as ResponseAccumulator skips it in a streamed response, so a
+	// new provider block type does not fail the whole call. When the skipped
+	// block is a server tool result, its call is dropped with it.
 	r.Content = make([]Content, 0, len(tmp.Content))
+	var skippedResultIDs map[string]bool
 	for _, rawContent := range tmp.Content {
 		content, err := UnmarshalContent(rawContent)
+		if errors.Is(err, errUnsupportedContentType) {
+			if id := blockToolUseID(rawContent); id != "" {
+				if skippedResultIDs == nil {
+					skippedResultIDs = map[string]bool{}
+				}
+				skippedResultIDs[id] = true
+			}
+			continue
+		}
 		if err != nil {
 			return err
 		}
 		r.Content = append(r.Content, content)
 	}
+	r.Content = dropServerToolCalls(r.Content, skippedResultIDs)
 	return nil
 }

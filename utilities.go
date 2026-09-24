@@ -19,21 +19,24 @@ func getToolResultContent(callResults []*ToolCallResult) []*llm.ToolResultConten
 	results := make([]*llm.ToolResultContent, len(callResults))
 	for i, callResult := range callResults {
 		var content any
-		var isError bool
 		if callResult.Result != nil {
 			content = callResult.Result.Content
-			isError = callResult.Result.IsError
 		}
-		// IsError is true if either the tool crashed (Error) or the tool
-		// reported a protocol-level error (Result.IsError).
 		resultContent := &llm.ToolResultContent{
 			ToolUseID: callResult.ID,
 			Content:   content,
-			IsError:   callResult.Error != nil || isError,
+			IsError:   callResult.isError(),
 		}
 		results[i] = resultContent
 	}
 	return results
+}
+
+// isError reports whether the call's result reaches the model as an error:
+// either the tool crashed (Error) or it reported a protocol-level error
+// (Result.IsError).
+func (r *ToolCallResult) isError() bool {
+	return r.Error != nil || (r.Result != nil && r.Result.IsError)
 }
 
 func getAdditionalContextContent(callResults []*ToolCallResult) []*llm.TextContent {

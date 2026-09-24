@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Provider-defined toolsets declare their members.** `dive.ToolDeclarer`;
+  `anthropic.ComputerToolset` implements it. Member tools are left out of the
+  request while the toolset is present and sent as ordinary tools without it.
+- **Batch halting.** `ToolAnnotations.HaltsBatch`: after a failure, later
+  halting calls in the response are not run and carry `dive.ErrBatchHalted`.
+  Automatic for toolset calls, with `anthropic.ComputerToolsetHaltText`.
+- **Tool-result image helpers for encoders.** `providers.LiftToolResultImages`,
+  `providers.LiftErrorToolResultImages` and `providers.ToolResultImageMediaType`.
+- **Server tool results without a dedicated type.** `llm.ServerToolResultContent`
+  keeps Anthropic `web_fetch_tool_result`, `tool_search_tool_result` and future
+  `*_tool_result` blocks verbatim so they replay unchanged.
+- **`providers.IsServerToolContent`.** Reports tool calls and results a provider
+  ran itself, so encoders can leave out history they cannot replay.
+- **`llm.Message.AnswerText`.** Returns a model-written message's text the way
+  `Response.OutputText` does.
+
+### Changed
+
+- **`OutputText` returns the whole answer.** All text of the final message:
+  adjacent fragments joined as-is, separate passages by a blank line. It
+  previously returned the last text block.
+- **`a2a` `TaskResult.Text` returns the whole answer.** A Dive server sends it
+  as one text part; appended chunks are concatenated.
+- **Streamed responses keep server tool blocks.** Web search calls and results
+  (including encrypted content) stay in history as with `Generate`, so history
+  grows. Providers that cannot replay a block leave it out.
+- **Tool-result images reach every provider**, including Gemini, Chat
+  Completions, Mistral and OpenRouter. A text-only model now returns the
+  provider's API error; don't give it tools that return images.
+- **Toolset calls run in order and halt at the first failure**, even with
+  `ParallelToolExecution`.
+- **Unknown content blocks no longer fail `Generate`.** They are skipped, as in
+  streams, along with any server tool call whose result was skipped.
+
+### Fixed
+
+- **Gemini `OutputText` no longer returns `""`** when the final part only
+  carries a thought signature; subagents on Gemini no longer return empty.
+- **Error tool results with images.** No more Anthropic 400; the OpenAI
+  Responses API no longer drops the images.
+- **`Message.Text` and `LastText` skip empty text blocks.**
+- **Anthropic web fetch and tool search work with `Generate`** and replay on the
+  next turn, instead of failing with "unsupported content type".
+- **Server tool history from another provider is left out.** Anthropic MCP
+  connector blocks no longer reach OpenAI, nor OpenAI search/MCP items other
+  providers. OpenAI MCP tool listings no longer fail the next request.
+
 ## [1.32.0] - 2026-09-23
 
 ### Changed

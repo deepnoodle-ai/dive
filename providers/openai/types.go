@@ -25,7 +25,8 @@ const (
 	// updates, "final_answer" for the answer). Callers that replay history
 	// manually must resend it unchanged; dropping it degrades gpt-5.3-codex and
 	// later. Absent means OpenAI did not label the message, and Dive never
-	// infers one.
+	// infers one. llm.Message.AnswerText reads the same key to separate
+	// commentary from the final answer.
 	openAIPhaseMetadataKey = "openai.phase"
 )
 

@@ -118,7 +118,7 @@ remote, err := a2a.NewRemoteAgentFromURL(ctx, "https://my-agent.example.com")
 
 // Simple send-and-receive.
 result, err := remote.SendText(ctx, "What is the capital of France?")
-fmt.Println(result.Text)           // extracted response text
+fmt.Println(result.Text)           // the answer text
 fmt.Println(result.IsCompleted())  // true
 
 // Streaming with a chunk callback.
@@ -126,6 +126,12 @@ result, err = remote.StreamText(ctx, "Tell me a story", func(chunk string) {
     fmt.Print(chunk)
 })
 ```
+
+`TaskResult.Text` concatenates the text parts of the latest artifact. A Dive
+server sends its whole answer as one text part, so `Text` equals the server's
+`OutputText`; a server that streams its answer as appended chunks has them
+joined back together. `StreamText` passes each chunk to the callback
+unchanged.
 
 `remote.ContextID()` is automatically updated from each response so
 follow-up calls continue the same A2A context without manual tracking.

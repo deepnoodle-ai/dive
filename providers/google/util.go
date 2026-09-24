@@ -297,34 +297,54 @@ func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) (*genai.Part, err
 	return part, nil
 }
 
-// joinToolResultText flattens tool result content blocks to a single string.
-// Gemini function responses are JSON-only, so non-text blocks (e.g. images
-// from an MCP tool) are represented with a placeholder rather than being
-// dropped silently, as is a result with no renderable text at all.
-func joinToolResultText(blocks []*dive.ToolResultContent) string {
-	var parts []string
+// toolResultParts splits tool result content blocks into the text Gemini
+// reads from the function response and the images it takes as the response's
+// own parts (FunctionResponse.Parts). Only models that accept those parts get
+// here with images: for the rest, Generate and Stream first lift the images
+// out of the tool results (see liftToolResultImages). Other non-text blocks,
+// and an image with no data or an undetectable type, are represented with a
+// placeholder rather than being dropped silently, as is a result with no
+// renderable text at all.
+func toolResultParts(blocks []*dive.ToolResultContent) (string, []*genai.FunctionResponsePart, error) {
+	var texts []string
+	var parts []*genai.FunctionResponsePart
 	for _, b := range blocks {
 		switch b.Type {
 		case dive.ToolResultContentTypeText, "":
 			if b.Text != "" {
-				parts = append(parts, b.Text)
+				texts = append(texts, b.Text)
 			}
+		case dive.ToolResultContentTypeImage:
+			mediaType := providers.ToolResultImageMediaType(b)
+			if mediaType == "" {
+				texts = append(texts, "[image content omitted]")
+				continue
+			}
+			data, err := base64.StdEncoding.DecodeString(b.Data)
+			if err != nil {
+				return "", nil, fmt.Errorf("failed to decode tool result image data: %w", err)
+			}
+			parts = append(parts, genai.NewFunctionResponsePartFromBytes(data, mediaType))
 		default:
-			parts = append(parts, fmt.Sprintf("[%s content omitted]", b.Type))
+			texts = append(texts, fmt.Sprintf("[%s content omitted]", b.Type))
 		}
 	}
-	if len(parts) == 0 {
-		return providers.EmptyToolResultText
+	if len(texts) == 0 {
+		texts = append(texts, providers.EmptyToolResultText)
 	}
-	return strings.Join(parts, "\n\n")
+	return strings.Join(texts, "\n\n"), parts, nil
 }
 
-// convertToolResultToFunctionResponse converts a generic llm.ToolResultContent to a genai.FunctionResponse part
+// convertToolResultToFunctionResponse converts a generic llm.ToolResultContent
+// to a genai.FunctionResponse part. Its text goes in Response, under "error"
+// for a failed call and "output" otherwise, and its images in Parts.
 func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functionName string) (*genai.Part, error) {
 	if content == nil {
 		return nil, fmt.Errorf("content is nil")
 	}
 	var outputValue any
+	var parts []*genai.FunctionResponsePart
+	var err error
 	switch c := content.Content.(type) {
 	case nil:
 		outputValue = providers.EmptyToolResultText
@@ -333,13 +353,17 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 	case []byte:
 		outputValue = string(c)
 	case []*dive.ToolResultContent:
-		outputValue = joinToolResultText(c)
+		if outputValue, parts, err = toolResultParts(c); err != nil {
+			return nil, err
+		}
 	default:
 		// Content that round-tripped through JSON (session persistence,
 		// Message.Copy) arrives as generic []any rather than typed blocks.
 		var blocks []*dive.ToolResultContent
 		if err := content.DecodeContent(&blocks); err == nil && blocks != nil {
-			outputValue = joinToolResultText(blocks)
+			if outputValue, parts, err = toolResultParts(blocks); err != nil {
+				return nil, err
+			}
 		} else {
 			data, err := json.Marshal(content.Content)
 			if err != nil {
@@ -359,6 +383,7 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 			ID:       content.ToolUseID,
 			Name:     functionName,
 			Response: responseData,
+			Parts:    parts,
 		},
 	}, nil
 }
@@ -543,6 +568,13 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 				// RedactedThinkingContent is an Anthropic wire type. It has no
 				// safe Gemini representation and is intentionally skipped.
 			default:
+				// Tool calls and results that another provider ran on its own
+				// servers (for example Anthropic web search). Gemini cannot
+				// replay them, so they are skipped. The assistant text around
+				// them still carries what the model concluded.
+				if providers.IsServerToolContent(c) {
+					continue
+				}
 				return nil, fmt.Errorf("unsupported content type for google provider: %s", c.Type())
 			}
 		}

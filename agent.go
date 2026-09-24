@@ -35,6 +35,13 @@ var (
 	// call would deadlock waiting on a lock its own caller holds. Use a
 	// separate session for nested agent calls.
 	ErrReentrantSession = errors.New("dive: reentrant CreateResponse on a session whose turn is already in progress")
+
+	// ErrBatchHalted is the ToolCallResult.Error of a call the agent did not
+	// run because an earlier call in the same model response failed (see
+	// ToolAnnotations.HaltsBatch). No PreToolUse, PostToolUse or
+	// PostToolUseFailure hook fires for such a call, but its tool_call and
+	// tool_call_result events are still emitted.
+	ErrBatchHalted = errors.New("dive: not executed because an earlier call in the batch failed")
 )
 
 // GenerationError wraps a failure that occurred inside the generation loop,
@@ -813,6 +820,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				}
 			}
 		}
+		batchHalted := resumedBatchHalted(rs, resumeToolsByName)
 		if len(rs.RemainingPending) > 0 {
 			// Partial resume: update session and return a new suspended response.
 			// This is not a fresh transition — the session was already suspended —
@@ -820,6 +828,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			snap := &suspendedSnapshot{
 				PendingToolCalls:   rs.RemainingPendingCalls,
 				CompletedToolCalls: rs.CompletedToolCalls(),
+				BatchHalted:        batchHalted,
 			}
 			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, true)
 		}
@@ -836,7 +845,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				resumeItemsMu.Unlock()
 				return eventCallback(ctx, item)
 			}
-			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback)
+			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback, batchHalted)
 			if err != nil {
 				// Mirror the generate loop: expose the items accumulated
 				// during the resume phase via a *GenerationError so callers
@@ -1131,6 +1140,7 @@ func (a *Agent) finishSuspended(
 		PendingToolCalls:   snap.PendingToolCalls,
 		CompletedToolCalls: snap.CompletedToolCalls,
 		TurnMessages:       turnMsgs,
+		BatchHalted:        snap.BatchHalted,
 	}
 	if len(extraItems) > 0 {
 		response.Items = append(extraItems, response.Items...)
@@ -1245,6 +1255,13 @@ type resumeState struct {
 	// RemainingPendingCalls is the PendingToolCall list matching
 	// RemainingPending, preserved from the original suspend's pending set.
 	RemainingPendingCalls []*PendingToolCall
+
+	// BatchHalted carries SuspensionState.BatchHalted from the suspend.
+	BatchHalted bool
+
+	// HaltingPending holds the IDs of pending calls recorded as taking part
+	// in batch halting when they suspended.
+	HaltingPending map[string]bool
 }
 
 func (rs *resumeState) CompletedToolCalls() []*CompletedToolCall {
@@ -1329,8 +1346,12 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 	pendingCalls := state.PendingToolCalls
 	pendingByID := make(map[string]*PendingToolCall, len(pendingCalls))
 	pendingIDs := make([]string, len(pendingCalls))
+	haltingPending := map[string]bool{}
 	for i, pc := range pendingCalls {
 		pendingByID[pc.ID] = pc
+		if pc.HaltsBatch {
+			haltingPending[pc.ID] = true
+		}
 		pendingIDs[i] = pc.ID
 	}
 	// Validate caller-supplied IDs. Any ID not in the pending set — including
@@ -1530,12 +1551,13 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 			}
 		}
 		remainingCalls = append(remainingCalls, &PendingToolCall{
-			ID:       id,
-			Name:     name,
-			Input:    input,
-			Prompt:   pc.Prompt,
-			Reason:   pc.Reason,
-			Metadata: pc.Metadata,
+			ID:         id,
+			Name:       name,
+			Input:      input,
+			Prompt:     pc.Prompt,
+			Reason:     pc.Reason,
+			Metadata:   pc.Metadata,
+			HaltsBatch: pc.HaltsBatch,
 		})
 	}
 
@@ -1549,6 +1571,8 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		PreviouslyCompleted:       previouslyCompleted,
 		RemainingPending:          remaining,
 		RemainingPendingCalls:     remainingCalls,
+		BatchHalted:               state.BatchHalted,
+		HaltingPending:            haltingPending,
 	}, nil
 }
 
@@ -2012,7 +2036,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		}
 
 		// Execute all requested tool calls
-		batch, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, collectingCallback)
+		batch, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, collectingCallback, false)
 		if err != nil {
 			return nil, err
 		}
@@ -2153,25 +2177,34 @@ func eventHasContent(event *llm.Event) bool {
 // then tool executions run in parallel, then PostToolUse hooks and result
 // events run sequentially. This keeps hooks single-threaded while parallelizing
 // the expensive tool execution.
+//
+// halted starts the batch already halted (see ToolAnnotations.HaltsBatch):
+// resuming a suspended batch passes true when a halting call answered
+// before the suspension failed.
 func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	hctx *HookContext,
 	toolCalls []*llm.ToolUseContent,
 	toolsByName map[string]Tool,
 	callback EventCallback,
+	halted bool,
 ) (*toolBatchResult, error) {
 	if a.parallelToolExecution && len(toolCalls) > 1 && !batchHasSequentialOnlyTool(toolCalls, toolsByName) {
 		return a.executeToolCallsParallel(ctx, hctx, toolCalls, toolsByName, callback)
 	}
-	return a.executeToolCallsSequential(ctx, hctx, toolCalls, toolsByName, callback)
+	return a.executeToolCallsSequential(ctx, hctx, toolCalls, toolsByName, callback, halted)
 }
 
-// batchHasSequentialOnlyTool reports whether any tool in the batch carries
-// the SequentialOnlyHint annotation. When true, the agent falls back to
+// batchHasSequentialOnlyTool reports whether any call in the batch must run
+// in order: its tool carries SequentialOnlyHint, or the call takes part in
+// batch halting (see callHaltsBatch). When true, the agent falls back to
 // sequential execution even with ParallelToolExecution enabled, so a single
 // non-thread-safe tool doesn't force every batch to be serial globally.
 func batchHasSequentialOnlyTool(toolCalls []*llm.ToolUseContent, toolsByName map[string]Tool) bool {
 	for _, call := range toolCalls {
+		if callHaltsBatch(call, toolsByName) {
+			return true
+		}
 		tool, ok := toolsByName[call.Name]
 		if !ok {
 			continue
@@ -2184,16 +2217,78 @@ func batchHasSequentialOnlyTool(toolCalls []*llm.ToolUseContent, toolsByName map
 	return false
 }
 
+// callHaltsBatch reports whether a call takes part in batch halting: a
+// failure halts the later participating calls in its batch, and an earlier
+// failure halts it. That is a call to a provider-defined toolset's member,
+// whose contract requires it, or to a tool annotated HaltsBatch.
+func callHaltsBatch(call *llm.ToolUseContent, toolsByName map[string]Tool) bool {
+	if call.ToolsetName != "" {
+		return true
+	}
+	tool, ok := toolsByName[call.Name]
+	if !ok {
+		return false
+	}
+	ann := tool.Annotations()
+	return ann != nil && ann.HaltsBatch
+}
+
+// haltedToolCallResult answers a call that was not run because an earlier
+// call in its batch failed. A toolset member's call gets the text the
+// provider specifies; for "computer" it is Anthropic's
+// ComputerToolsetHaltText, verbatim.
+func haltedToolCallResult(call *llm.ToolUseContent) *ToolCallResult {
+	text := "Not executed: an earlier tool call in this response failed."
+	if call.ToolsetName != "" {
+		text = fmt.Sprintf("Not executed: an earlier %s action in this turn failed.", call.ToolsetName)
+	}
+	return &ToolCallResult{
+		ID:     call.ID,
+		Name:   call.Name,
+		Input:  call.Input,
+		Result: NewToolResultError(text),
+		Error:  ErrBatchHalted,
+	}
+}
+
+// resumedBatchHalted reports whether a suspended batch being resumed is
+// already halted: the suspension recorded a failed halting call, or a result
+// the caller supplied on resume failed for a halting call. What the
+// suspension recorded (BatchHalted, PendingToolCall.HaltsBatch) is trusted
+// over the current tools, which may have changed since.
+func resumedBatchHalted(rs *resumeState, toolsByName map[string]Tool) bool {
+	if rs.BatchHalted {
+		return true
+	}
+	if rs.ToolResultMessageIdx < 0 {
+		return false
+	}
+	failed := map[string]bool{}
+	for _, c := range rs.TurnMessages[rs.ToolResultMessageIdx].Content {
+		if trc, ok := c.(*llm.ToolResultContent); ok && trc.IsError {
+			failed[trc.ToolUseID] = true
+		}
+	}
+	for _, call := range toolUseContents(rs.AssistantToolUse) {
+		if failed[call.ID] && (rs.HaltingPending[call.ID] || callHaltsBatch(call, toolsByName)) {
+			return true
+		}
+	}
+	return false
+}
+
 // executeToolCallsSequential executes tool calls one at a time in order.
 // If any tool returns a SuspendResult, the remaining trailing tool calls are
 // NOT executed; their outcomes stay zero-valued ("not started") and are
-// re-scheduled on resume.
+// re-scheduled on resume. Once a halting call fails, the later halting calls
+// are answered with haltedToolCallResult instead of being run.
 func (a *Agent) executeToolCallsSequential(
 	ctx context.Context,
 	hctx *HookContext,
 	toolCalls []*llm.ToolUseContent,
 	toolsByName map[string]Tool,
 	callback EventCallback,
+	halted bool,
 ) (*toolBatchResult, error) {
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	for i, toolCall := range toolCalls {
@@ -2205,6 +2300,15 @@ func (a *Agent) executeToolCallsSequential(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		halts := callHaltsBatch(toolCall, toolsByName)
+		if halted && halts {
+			result, err := a.haltToolCall(ctx, toolCall, callback)
+			if err != nil {
+				return nil, err
+			}
+			batch.Outcomes[i] = toolCallOutcome{Result: result}
+			continue
+		}
 		result, err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback)
 		if err != nil {
 			return nil, err
@@ -2213,15 +2317,42 @@ func (a *Agent) executeToolCallsSequential(
 			return nil, err
 		}
 		if result != nil && result.Result != nil && result.Result.Suspend != nil {
-			batch.Outcomes[i] = toolCallOutcome{
-				Pending: toPendingToolCall(toolCall, result.Result.Suspend),
-			}
+			pending := toPendingToolCall(toolCall, result.Result.Suspend)
+			pending.HaltsBatch = halts
+			batch.Outcomes[i] = toolCallOutcome{Pending: pending}
 			batch.Suspended = true
+			batch.Halted = halted
 			return batch, nil
+		}
+		if halts && result.isError() {
+			halted = true
 		}
 		batch.Outcomes[i] = toolCallOutcome{Result: result}
 	}
 	return batch, nil
+}
+
+// haltToolCall answers a halted call without running hooks or the tool,
+// emitting the same tool_call and tool_call_result events as a call that
+// ran, so event consumers see every call answered.
+func (a *Agent) haltToolCall(ctx context.Context, toolCall *llm.ToolUseContent, callback EventCallback) (*ToolCallResult, error) {
+	a.logger.Debug("tool call halted by an earlier failure in its batch",
+		"tool_id", toolCall.ID,
+		"tool_name", toolCall.Name)
+	if err := callback(ctx, &ResponseItem{
+		Type:     ResponseItemTypeToolCall,
+		ToolCall: toolCall,
+	}); err != nil {
+		return nil, err
+	}
+	result := haltedToolCallResult(toolCall)
+	if err := callback(ctx, &ResponseItem{
+		Type:           ResponseItemTypeToolCallResult,
+		ToolCallResult: result,
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // toolCallPrep holds the result of the PreToolUse phase for a single tool call.
@@ -2965,11 +3096,7 @@ func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Op
 		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
 	}
 	if len(tools) > 0 {
-		defs := make([]llm.Tool, len(tools))
-		for i, tool := range tools {
-			defs[i] = tool
-		}
-		generateOpts = append(generateOpts, llm.WithTools(defs...))
+		generateOpts = append(generateOpts, llm.WithTools(toolDefinitions(tools)...))
 	}
 	if a.llmHooks != nil {
 		generateOpts = append(generateOpts, llm.WithHooks(a.llmHooks))
@@ -2979,6 +3106,33 @@ func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Op
 	}
 	generateOpts = append(generateOpts, a.modelSettings.Options()...)
 	return generateOpts
+}
+
+// toolDefinitions returns the tools to declare to the model, in order: every
+// tool except those another ToolDeclarer among them already declares. A
+// declarer that lists its own name is still sent.
+func toolDefinitions(tools []Tool) []llm.Tool {
+	var declared map[string]bool
+	for _, tool := range tools {
+		if d, ok := tool.(ToolDeclarer); ok {
+			for _, name := range d.DeclaredTools() {
+				if name == tool.Name() {
+					continue
+				}
+				if declared == nil {
+					declared = map[string]bool{}
+				}
+				declared[name] = true
+			}
+		}
+	}
+	defs := make([]llm.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if !declared[tool.Name()] {
+			defs = append(defs, tool)
+		}
+	}
+	return defs
 }
 
 // promptCacheKeyForSession keeps cache routing stable across a session without
@@ -3016,6 +3170,7 @@ type generateResult struct {
 type suspendedSnapshot struct {
 	PendingToolCalls   []*PendingToolCall
 	CompletedToolCalls []*CompletedToolCall
+	BatchHalted        bool
 }
 
 // toolCallOutcome is the per-tool-call result of an executeToolCalls batch.
@@ -3032,6 +3187,9 @@ type toolCallOutcome struct {
 type toolBatchResult struct {
 	Outcomes  []toolCallOutcome
 	Suspended bool
+	// Halted reports that a halting call in the batch failed before it
+	// suspended, so the calls left for resume stay halted.
+	Halted bool
 }
 
 // Completed returns a slice of ToolCallResult for outcomes that completed
@@ -3051,7 +3209,7 @@ func (b *toolBatchResult) Completed() []*ToolCallResult {
 // intentionally omitted — they are re-scheduled from the assistant tool_use
 // blocks on resume, not carried in the suspended response.
 func buildSuspendedSnapshot(toolCalls []*llm.ToolUseContent, batch *toolBatchResult) *suspendedSnapshot {
-	snap := &suspendedSnapshot{}
+	snap := &suspendedSnapshot{BatchHalted: batch.Halted}
 	for i, o := range batch.Outcomes {
 		switch {
 		case o.Pending != nil:

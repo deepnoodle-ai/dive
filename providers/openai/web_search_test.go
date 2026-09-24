@@ -178,3 +178,24 @@ func TestEncodeWebSearchCallReplaysQueries(t *testing.T) {
 	assert.Contains(t, string(encoded), "muse spark pricing")
 	assert.Contains(t, string(encoded), "muse spark context window")
 }
+
+// An Anthropic turn that used web search keeps its server tool blocks in
+// history. Switching the session to OpenAI must skip them, not fail, while
+// OpenAI's own web_search_call still replays.
+func TestEncodeAssistantMessageSkipsForeignServerToolBlocks(t *testing.T) {
+	items, err := encodeAssistantMessage(&llm.Message{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.TextContent{Text: "Searching."},
+			&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
+			&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
+			&llm.ServerToolUseContent{ID: "ws_1", Name: "web_search_call"},
+			&llm.TextContent{Text: "Found it."},
+		},
+	})
+	assert.NoError(t, err)
+	assert.Len(t, items, 3)
+	assert.NotNil(t, items[0].OfOutputMessage)
+	assert.NotNil(t, items[1].OfWebSearchCall)
+	assert.NotNil(t, items[2].OfOutputMessage)
+}

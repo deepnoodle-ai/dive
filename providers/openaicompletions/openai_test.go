@@ -848,6 +848,27 @@ func TestConvertMessagesSkipsThinkingContent(t *testing.T) {
 	assert.Equal(t, result[0].Content, "The answer is 4.")
 }
 
+// An Anthropic turn that used web search keeps its server tool blocks in
+// history. Switching the session to a Chat Completions provider must skip
+// them, not fail.
+func TestConvertMessagesSkipsForeignServerToolBlocks(t *testing.T) {
+	messages := []*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
+				&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
+				&llm.MCPListToolsContent{ServerLabel: "deepwiki"},
+				&llm.TextContent{Text: "Found it."},
+			},
+		},
+	}
+	result, err := convertMessages(messages)
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, result[0].Content, "Found it.")
+}
+
 func TestMistralThinkingChunksDecodeAndReplay(t *testing.T) {
 	var message Message
 	assert.NoError(t, json.Unmarshal([]byte(`{

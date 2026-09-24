@@ -16,6 +16,7 @@ import (
 // mockLLM implements llm.LLM for testing.
 type mockLLM struct {
 	response string
+	content  []llm.Content // replaces response when set
 	err      error
 	delay    time.Duration
 }
@@ -33,11 +34,15 @@ func (m *mockLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respon
 	if m.err != nil {
 		return nil, m.err
 	}
+	content := m.content
+	if content == nil {
+		content = []llm.Content{&llm.TextContent{Text: m.response}}
+	}
 	return &llm.Response{
 		ID:         "test-resp",
 		Model:      "mock-llm",
 		Role:       llm.Assistant,
-		Content:    []llm.Content{&llm.TextContent{Text: m.response}},
+		Content:    content,
 		Type:       "message",
 		StopReason: "stop",
 		Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
@@ -242,6 +247,22 @@ func TestAgentTool(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, res.IsError)
 		assert.Contains(t, res.Content[0].Text, "explored!")
+	})
+
+	t.Run("answer survives a trailing empty signed text block", func(t *testing.T) {
+		// Gemini can end a reply with an empty text part that only carries a
+		// thought signature. The parent must still get the subagent's answer.
+		tool := NewAgentTool(AgentToolOptions{
+			Subagents: testTypes(),
+			Model: &mockLLM{content: []llm.Content{
+				&llm.TextContent{Text: "3 purple"},
+				&llm.TextContent{Metadata: llm.ProviderMetadata{"google.thought_signature": "c2ln"}},
+			}},
+		})
+		res, err := tool.Call(ctx, &AgentToolInput{Prompt: "x", Description: "t", SubagentType: "Explore"})
+		assert.NoError(t, err)
+		assert.False(t, res.IsError)
+		assert.Contains(t, res.Content[0].Text, "3 purple")
 	})
 
 	t.Run("AgentFactory takes precedence over Model", func(t *testing.T) {

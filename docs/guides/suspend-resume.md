@@ -163,6 +163,7 @@ for _, pending := range resp.Suspension.PendingToolCalls {
 | `PendingToolCalls`   | Tool calls awaiting external results. Contains ID, name, input JSON, prompt, metadata.                                                                                                 |
 | `CompletedToolCalls` | Sibling tool calls that ran to completion in the same iteration as the suspender (parallel execution). Informational — their results are already merged into the persisted turn.       |
 | `TurnMessages`       | Snapshot of the in-progress turn (user input + any assistant/tool_result messages produced so far). Stateless callers pass this back via `WithResume` to reconstruct the conversation. |
+| `BatchHalted`        | A halting call in the suspended batch failed (see below). Recorded so the batch stays halted on resume.                                                                                |
 
 Decode a pending call's input with either the method or the generic
 helper:
@@ -272,6 +273,16 @@ With sequential execution (the default), a suspending tool stops the
 batch: earlier tools keep their results, later tools in the batch are
 **not** started. On resume, once the suspended call is satisfied, the
 agent runs the remaining sequential tools before the next LLM call.
+
+Batch halting (see `ToolAnnotations.HaltsBatch`) carries across a
+suspension. If a halting call in the batch failed, either before the
+suspension or because the caller resumed a suspended halting call with an
+`IsError` result, the batch stays halted: the remaining halting calls are
+answered with an error and not run, and their `ToolCallResult.Error` is
+`dive.ErrBatchHalted`. Calls to tools without the annotation still run.
+The suspension records what it needs for this: `SuspensionState.BatchHalted`
+for a failure before it, and `PendingToolCall.HaltsBatch` for a suspended
+halting call, so both hold even if the resuming agent's tools have changed.
 
 ## The `OnSuspend` hook
 

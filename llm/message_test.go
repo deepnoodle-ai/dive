@@ -34,6 +34,24 @@ func TestMessage_Text(t *testing.T) {
 		}
 		assert.Equal(t, "answer", msg.Text())
 	})
+
+	t.Run("skips empty text blocks without adding separators", func(t *testing.T) {
+		msg := &Message{
+			Role: Assistant,
+			Content: []Content{
+				&TextContent{Text: ""},
+				&TextContent{Text: "3 purple"},
+				&TextContent{Text: "", Metadata: ProviderMetadata{"google.thought_signature": "c2ln"}},
+			},
+		}
+		assert.Equal(t, "3 purple", msg.Text())
+	})
+
+	t.Run("only empty text returns empty string", func(t *testing.T) {
+		msg := &Message{Role: Assistant}
+		msg.WithText("", "")
+		assert.Equal(t, "", msg.Text())
+	})
 }
 
 func TestMessage_LastText(t *testing.T) {
@@ -41,6 +59,23 @@ func TestMessage_LastText(t *testing.T) {
 		msg := &Message{Role: Assistant}
 		msg.WithText("first", "last")
 		assert.Equal(t, "last", msg.LastText())
+	})
+
+	t.Run("skips a trailing empty signed text block", func(t *testing.T) {
+		msg := &Message{
+			Role: Assistant,
+			Content: []Content{
+				&TextContent{Text: "3 purple"},
+				&TextContent{Text: "", Metadata: ProviderMetadata{"google.thought_signature": "c2ln"}},
+			},
+		}
+		assert.Equal(t, "3 purple", msg.LastText())
+	})
+
+	t.Run("only empty text returns empty string", func(t *testing.T) {
+		msg := &Message{Role: Assistant}
+		msg.WithText("")
+		assert.Equal(t, "", msg.LastText())
 	})
 
 	t.Run("returns empty string for no text", func(t *testing.T) {

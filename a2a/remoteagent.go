@@ -18,7 +18,11 @@ type TaskResult struct {
 	ID        string
 	ContextID string
 	State     string
-	Text      string // extracted response text
+	// Text is the answer: the text parts of the latest artifact with text,
+	// concatenated. A Dive server sends the whole answer as one text part, so
+	// Text equals the server's Response.OutputText; a server that streams the
+	// answer as appended chunks gets them joined back together.
+	Text string
 }
 
 // IsCompleted reports whether the task completed successfully.
@@ -145,6 +149,9 @@ func (r *RemoteAgent) SendTextOnTask(ctx context.Context, taskID string, prompt 
 // StreamText sends a text prompt and calls onChunk for each text chunk as it
 // arrives. Returns the final TaskResult when the stream ends. Cancellation is
 // handled via the context.
+//
+// Each text part of an artifact update is passed to onChunk unchanged, so
+// concatenating the chunks of the final artifact gives TaskResult.Text.
 func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk func(string)) (*TaskResult, error) {
 	if prompt == "" {
 		return nil, fmt.Errorf("a2a: StreamText: empty prompt")
@@ -258,20 +265,22 @@ func normalizeState(s a2asdk.TaskState) string {
 	return strings.ToLower(strings.TrimPrefix(string(s), "TASK_STATE_"))
 }
 
-// extractText returns the most useful text from a task: prefers the latest
-// artifact's text parts (Dive's A2A server emits one final artifact per turn,
-// matching Response.OutputText() semantics; other servers may emit several,
-// in which case the most recent one is the final answer), falling back to
-// the last agent message in history.
+// extractText returns the answer text of a task: all text parts of the latest
+// artifact that has text, concatenated. Without such an artifact it uses the
+// text parts of the last agent message in history.
+//
+// Dive's A2A server emits one artifact per turn whose single text part is
+// Response.OutputText. A server that streams an artifact in appended chunks
+// leaves one part per chunk, which concatenation joins back together. Other
+// servers may emit several artifacts, in which case the most recent one is
+// taken as the final answer.
 func extractText(task *a2asdk.Task) string {
 	if task == nil {
 		return ""
 	}
 	for i := len(task.Artifacts) - 1; i >= 0; i-- {
-		for _, p := range task.Artifacts[i].Parts {
-			if t := p.Text(); t != "" {
-				return t
-			}
+		if t := joinTextParts(task.Artifacts[i].Parts); t != "" {
+			return t
 		}
 	}
 	for i := len(task.History) - 1; i >= 0; i-- {
@@ -279,11 +288,18 @@ func extractText(task *a2asdk.Task) string {
 		if msg.Role != a2asdk.MessageRoleAgent {
 			continue
 		}
-		for _, p := range msg.Parts {
-			if t := p.Text(); t != "" {
-				return t
-			}
+		if t := joinTextParts(msg.Parts); t != "" {
+			return t
 		}
 	}
 	return ""
+}
+
+// joinTextParts concatenates the text parts.
+func joinTextParts(parts []*a2asdk.Part) string {
+	var sb strings.Builder
+	for _, p := range parts {
+		sb.WriteString(p.Text())
+	}
+	return sb.String()
 }

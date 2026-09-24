@@ -16,6 +16,11 @@ model := anthropic.New() // defaults to claude-opus-4-8
 **Models:** See `providers/anthropic/models.go` for available models.
 **Features:** Streaming, tool calling, prompt caching, reasoning control
 
+A streamed Anthropic response keeps its server tool blocks (web search calls
+and results, code execution results and the like) in the message, as `Generate`
+does, so they replay to Anthropic on the next turn; providers that cannot
+replay another provider's server tool blocks leave them out of the request.
+
 ### OpenAI
 
 ```go
@@ -124,13 +129,57 @@ Notes:
 - A content block a provider cannot encode is a request-building error, never
   a silent drop.
 
-Tool results can also carry media (e.g. an MCP tool returning a screenshot).
-Anthropic and OpenAI (Responses) receive tool-result images natively; on
-providers whose tool messages are text-only (google, openaicompletions,
-mistral, openrouter), non-text blocks are replaced with a
-`[image content omitted]` placeholder so the model knows content was elided.
 A tool result with nothing to render is sent as `(no output)` rather than an
 empty block or empty array, which are variously rejected or ambiguous.
+
+### Images in tool results
+
+A tool result can carry images (a screenshot, a chart, an image from an MCP
+tool), and every provider shows them to the model. Where the API takes an
+image inside a tool result, it goes there. Where it cannot, the provider
+moves the image into the user turn that follows the tool results. The tool
+result keeps its text plus the line
+`(The image this call returned follows the tool results.)`, and a label such
+as `The image from tool call call_1:` comes before the image.
+
+| Provider                               | Tool-result images                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| anthropic, ollama                      | Inside the tool result. An error result moves them after the results, because Anthropic takes only text in an `is_error` result |
+| openai (Responses), grok, meta         | Inside the function call output. An error result starts with `Error:`                                                           |
+| google, Gemini 3.x                     | Inside the function response (`FunctionResponse.Parts`). The text goes under `output`, or `error` for a failed call             |
+| google, Gemini 2.5 and unknown models  | Moved after the function responses, because 2.5 rejects images in a function response                                           |
+| openaicompletions, mistral, openrouter | Moved to a user message after the `tool` messages. Tool messages take only text                                                 |
+
+Only the request changes. The conversation history keeps each image in its
+tool result, so a session can switch between providers.
+
+The `[image content omitted]` placeholder is used only when there
+is no image to send: the block has no data, or it has no `MimeType` and Dive
+cannot detect the type from the data. A model that cannot read images at all
+returns an API error, for example Mistral's "Image input is not enabled for
+this model" or OpenRouter's "No endpoints found that support image input".
+Because the image stays in the conversation history, every later request in
+the conversation fails the same way. Don't give a text-only model tools that
+return images.
+
+## Reading Message Text
+
+`llm.Message` has three text helpers. All of them skip empty text blocks and
+ignore non-text content.
+
+- `AnswerText()` returns a model-written message as the model wrote it. A
+  provider can split one answer into several text blocks (Anthropic splits at
+  citation boundaries; Gemini gives a part carrying a thought signature its
+  own block). Adjacent text blocks are joined with no separator. Blocks that
+  are separate passages are joined with a blank line: those with other
+  content between them, such as reasoning or a server tool call, and adjacent
+  blocks from different OpenAI output messages (different `phase`
+  metadata). `dive.Response.OutputText` returns the `AnswerText` of the
+  turn's final message.
+- `Text()` joins every text block with a blank line. Use it for messages built
+  from separate passages, such as a system reminder followed by a prompt.
+- `LastText()` returns only the last non-empty text block, which for a split
+  answer is just its last fragment.
 
 ## Provider Options
 
@@ -252,14 +301,47 @@ Each of these sends its beta header automatically.
 
 ### Computer Use On Claude
 
-`anthropic.NewComputerToolset` declares the `computer_toolset_20260801`
-toolset, the only computer use Opus 5.5 accepts on the Claude API. Each action
-is its own tool call: `ToolUseContent.Name` is the member (`left_click`,
-`screenshot`) and `ToolsetName` is `"computer"`. Run a batch in order, stop at
-the first failure, and answer the remaining calls with
-`anthropic.ComputerToolsetHaltText`. The provider adds the toolset name to
-each result. `anthropic.NewComputerTool` still declares the earlier
-`computer_20251124` tool for other models.
+`anthropic.NewComputerToolset` declares the provider-defined toolset
+`computer_toolset_20260801`, the only computer use Opus 5.5 accepts on the
+Claude API. Each action is its own tool call: `ToolUseContent.Name` is the
+member (`left_click`, `screenshot`) and `ToolsetName` is `"computer"`. Your
+application runs the actions, with one ordinary tool per member, named for it:
+
+```go
+member := dive.WithFuncToolAnnotations(&dive.ToolAnnotations{HaltsBatch: true})
+tools := []dive.Tool{
+    dive.FuncTool("screenshot", "Capture the screen.", screen.Capture, member),
+    dive.FuncTool("left_click", "Click at a coordinate.", screen.Click, member),
+    dive.FuncTool("type", "Type text.", screen.Type, member),
+    // ... one per member you run
+}
+// Add the toolset only for a model that takes it (see anthropic.ComputerToolset).
+switch modelName {
+case anthropic.ModelClaudeOpus55, anthropic.ModelClaudeOpus5, anthropic.ModelClaudeOpus48,
+    anthropic.ModelClaudeSonnet5, anthropic.ModelClaudeFable51, anthropic.ModelClaudeFable5,
+    anthropic.ModelClaudeMythos51, anthropic.ModelClaudeMythos5:
+    tools = append(tools, anthropic.NewComputerToolset(anthropic.ComputerToolsetOptions{}))
+}
+agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Tools: tools})
+```
+
+In a `dive.Agent` the rest of the contract is handled for you:
+
+- The toolset declares its members (`dive.ToolDeclarer`), so the member tools
+  are not sent as custom tools while it is present. Leave it out for GPT,
+  Gemini or an older Claude and the same tools are sent as ordinary tools.
+- A batch runs in order and stops at the first failure: every later action is
+  answered with `anthropic.ComputerToolsetHaltText` without running, and
+  without asking a `PreToolUse` permission hook. A denied action counts as a
+  failure. `HaltsBatch` gives the tools the same behavior when they are
+  offered as plain tools; toolset calls don't need it.
+- The provider adds the toolset name to each result.
+
+Still your application's job: report a failed action as an error (an `IsError`
+result or a Go error), and resize screenshots and zoom images to the model's
+image limits, which the API enforces instead of downscaling.
+`anthropic.NewComputerTool` still declares the earlier `computer_20251124`
+tool for other models.
 
 ## Provider Registry
 

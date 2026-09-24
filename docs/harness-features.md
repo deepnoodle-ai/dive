@@ -21,7 +21,13 @@ The core of the harness: `Agent.CreateResponse` runs the generate → tool-call
   mid-tool-call.
 - **Parallel tool execution** — `ParallelToolExecution` runs a batch of tool
   calls concurrently, with automatic sequential fallback when any tool in the
-  batch is annotated `SequentialOnlyHint`.
+  batch is annotated `SequentialOnlyHint` or `HaltsBatch`, or any call belongs
+  to a provider-defined toolset.
+- **Batch halting** — calls to tools annotated `HaltsBatch`, and calls to a
+  provider-defined toolset's members (such as Anthropic's computer toolset),
+  run in order and stop at the first failure: each later such call is answered
+  with an error and not run, and its `ToolCallResult.Error` is
+  `ErrBatchHalted`.
 - **Tool panic recovery** — a panic inside a tool becomes an `IsError` tool
   result the model can react to, rather than crashing the process.
 - **Partial-work recovery** — a failed turn returns `GenerationError`
@@ -42,14 +48,23 @@ The abstractions that equip an agent with capabilities. See the
   LLM request, enabling MCP-backed, permission-filtered, or context-dependent
   tool availability.
 - **Tool annotations** — ReadOnly, Destructive, Idempotent, OpenWorld, and
-  SequentialOnly hints drive permission categorization and execution behavior.
+  SequentialOnly hints and `HaltsBatch` drive permission categorization and
+  execution behavior.
+- **Provider-defined toolsets** — a tool implementing `ToolDeclarer`, such as
+  `anthropic.ComputerToolset`, declares other tools to the model. The agent
+  runs each call with your tool of that name and leaves the declared tools
+  out of the request while the declarer is present, so the same tools work
+  as ordinary tools on models without the toolset.
 - **Tool previews** — `ToolPreviewer` produces a human-readable summary of
   what a call will do before it runs, for approval UIs.
 - **Live output channels** — running tools can stream text with
   `StreamOutput` and publish structured progress snapshots with
   `ReportProgress`.
 - **Rich results** — tool results carry text, image, or audio content, an
-  optional display variant, and error status.
+  optional display variant, and error status. Every provider shows
+  tool-result images to the model, inside the tool result where the API
+  allows it and in the following user turn where it doesn't. A text-only
+  model returns the provider's API error instead.
 
 ## Built-in Toolkit
 

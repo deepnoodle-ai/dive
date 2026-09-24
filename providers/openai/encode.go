@@ -197,6 +197,10 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 			processed[i] = true
 			continue
 		}
+		if isForeignServerToolContent(c) {
+			processed[i] = true
+			continue
+		}
 		if mcpToolUse, ok := c.(*llm.MCPToolUseContent); ok {
 			// Handle MCP tool use, potentially pairing it with a result
 			mcpCallParam, pairedResultIndex, err := findAndEncodeMCPPair(mcpToolUse, message.Content, i, processed)
@@ -230,6 +234,41 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 		}
 	}
 	return encodedItems, nil
+}
+
+// isForeignServerToolContent reports whether content is a tool call or result
+// that another provider ran on its own servers (for example Anthropic web
+// search or an Anthropic MCP connector call). The Responses API cannot replay
+// it, and its IDs are not OpenAI item IDs, so it is skipped; the assistant
+// text around it still carries what the model concluded. OpenAI's own server
+// tool items are replayed (see isOpenAIServerToolContent).
+func isForeignServerToolContent(content llm.Content) bool {
+	return providers.IsServerToolContent(content) && !isOpenAIServerToolContent(content)
+}
+
+// openAIMCPCallIDPrefix starts the item ID of every OpenAI mcp_call. Anthropic
+// MCP connector calls use "mcptoolu_" IDs instead.
+const openAIMCPCallIDPrefix = "mcp_"
+
+// isOpenAIServerToolContent reports whether server tool content was decoded
+// from an OpenAI response, and so can be sent back as the item it came from.
+// The decoder marks OpenAI web search as a ServerToolUseContent named
+// "web_search_call" (Anthropic names its calls after the tool, such as
+// "web_search"). An mcp_call decodes to an MCPToolUseContent and, when it has
+// output, an MCPToolResultContent, both keyed by the item ID, which OpenAI
+// starts with "mcp_". An mcp_list_tools item is not replayed, even OpenAI's
+// own: the decoder does not keep its item ID, and without the item the API
+// lists the server's tools again.
+func isOpenAIServerToolContent(content llm.Content) bool {
+	switch c := content.(type) {
+	case *llm.ServerToolUseContent:
+		return c.Name == "web_search_call"
+	case *llm.MCPToolUseContent:
+		return strings.HasPrefix(c.ID, openAIMCPCallIDPrefix)
+	case *llm.MCPToolResultContent:
+		return strings.HasPrefix(c.ToolUseID, openAIMCPCallIDPrefix)
+	}
+	return false
 }
 
 func encodeAssistantContent(content llm.Content) (responses.ResponseInputItemUnionParam, error) {
@@ -319,28 +358,24 @@ func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.Respo
 
 // encodeFunctionCallOutput renders a tool result as a Responses API
 // function_call_output item. Typed tool result blocks are flattened to plain
-// text rather than JSON-marshaled; results carrying images are emitted as a
-// content-part list so the model can actually see them.
+// text rather than JSON-marshaled; results carrying images, error results
+// included, are emitted as a content-part list so the model can actually see
+// them.
 func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInputItemUnionParam, error) {
 	blocks := providers.ToolResultBlocks(c)
-	if blocks == nil || c.IsError || !blocksContainImage(blocks) {
+	if blocks == nil || !blocksContainImage(blocks) {
 		output, err := toolResultOutputText(c)
 		if err != nil {
 			return responses.ResponseInputItemUnionParam{}, err
 		}
 		return functionCallOutputItem(c.ToolUseID, output), nil
 	}
-	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(blocks))
+	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(blocks)+1)
 	for _, b := range blocks {
 		switch b.Type {
 		case dive.ToolResultContentTypeImage:
-			mediaType := b.MimeType
+			mediaType := providers.ToolResultImageMediaType(b)
 			if mediaType == "" {
-				if detected, err := llm.DetectImageType(b.Data); err == nil {
-					mediaType = string(detected)
-				}
-			}
-			if mediaType == "" || b.Data == "" {
 				items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
 					OfInputText: &responses.ResponseInputTextContentParam{Text: "[image content omitted]"},
 				})
@@ -364,7 +399,28 @@ func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInput
 			})
 		}
 	}
+	if c.IsError {
+		items = markErrorOutputItems(items)
+	}
 	return functionCallOutputItem(c.ToolUseID, items), nil
+}
+
+// markErrorOutputItems applies toolResultOutputText's "Error: " signal to an
+// item-list output. The prefix goes on the leading text item; when the output
+// opens with an image instead, a text item carrying only the prefix is put in
+// front of it, so the model reads that the call failed before what it shows.
+func markErrorOutputItems(items responses.ResponseFunctionCallOutputItemListParam) responses.ResponseFunctionCallOutputItemListParam {
+	if len(items) > 0 && items[0].OfInputText != nil {
+		text := items[0].OfInputText.Text
+		hasErrorEnvelope := strings.HasPrefix(text, "<error>") && strings.HasSuffix(text, "</error>")
+		if !strings.HasPrefix(text, "Error:") && !hasErrorEnvelope {
+			items[0].OfInputText.Text = "Error: " + text
+		}
+		return items
+	}
+	return append(responses.ResponseFunctionCallOutputItemListParam{{
+		OfInputText: &responses.ResponseInputTextContentParam{Text: "Error:"},
+	}}, items...)
 }
 
 // functionCallOutputItem builds a function_call_output item for a tool call.
