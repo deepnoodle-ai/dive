@@ -185,15 +185,52 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 		e.cancelInflight(execCtx.TaskID)
 
 		// If the session supports cancellation, clean up suspension state.
+		// The task is reported canceled only once that cleanup is done.
 		if e.sessions != nil && execCtx.ContextID != "" {
-			if sess, err := e.sessions(ctx, execCtx.ContextID); err == nil && sess != nil {
-				if suspendable, ok := sess.(dive.SuspendableSession); ok {
-					_ = suspendable.CancelSuspension(ctx)
-				}
+			if err := e.cancelSuspension(ctx, execCtx.ContextID); err != nil {
+				yield(nil, err)
+				return
 			}
 		}
 		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), nil)
 	}
+}
+
+// cancelSuspension removes the suspension of the session behind contextID,
+// if it has one. It takes the session lock first: the cancelled run may still
+// be writing the session, and a suspension it persists must be removed after
+// that write, not raced by it. The session is fetched again under the lock,
+// since the provider may return a separate instance that has not seen the
+// run's write. A provider that returns no session means there is nothing to
+// clean up; a provider error means the cleanup could not be checked.
+func (e *Executor) cancelSuspension(ctx context.Context, contextID string) error {
+	sess, err := e.sessions(ctx, contextID)
+	if err != nil {
+		return fmt.Errorf("cancel: loading session: %w", err)
+	}
+	if sess == nil {
+		return nil
+	}
+	if _, ok := sess.(dive.SuspendableSession); !ok {
+		return nil
+	}
+	lockedCtx, unlock, err := dive.LockSession(ctx, sess.ID())
+	if err != nil {
+		return fmt.Errorf("cancel: waiting for session %q: %w", sess.ID(), err)
+	}
+	defer unlock()
+	sess, err = e.sessions(lockedCtx, contextID)
+	if err != nil {
+		return fmt.Errorf("cancel: reloading session: %w", err)
+	}
+	suspendable, ok := sess.(dive.SuspendableSession)
+	if !ok || suspendable.LoadSuspension() == nil {
+		return nil
+	}
+	if err := suspendable.CancelSuspension(lockedCtx); err != nil {
+		return fmt.Errorf("cancel: removing suspension: %w", err)
+	}
+	return nil
 }
 
 func (e *Executor) trackInflight(id a2asdk.TaskID, cancel context.CancelFunc) {

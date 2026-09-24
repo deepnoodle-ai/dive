@@ -1403,3 +1403,38 @@ func TestFileStoreSuspendKeepsBatchHalted(t *testing.T) {
 	assert.NoError(t, sess2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState()))
 	assert.False(t, sess2.LoadSuspension().BatchHalted)
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot isolation of suspension state
+// ---------------------------------------------------------------------------
+
+func TestLoadSuspensionIsDeepCopy(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("snapshot-isolation")
+
+	state := singleSuspensionState()
+	state.CompletedToolCalls = []*dive.CompletedToolCall{{
+		ID:     "toolu_b",
+		Name:   "lookup",
+		Input:  []byte(`{}`),
+		Result: dive.NewToolResultText("found"),
+	}}
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, state)
+	assert.NoError(t, err)
+
+	// Mutating the state handed to the session does not change it.
+	state.CompletedToolCalls[0].Result.Content[0].Text = "mutated by caller"
+
+	// Mutating a returned snapshot does not change the session either.
+	loaded := sess.LoadSuspension()
+	assert.Equal(t, loaded.CompletedToolCalls[0].Result.Content[0].Text, "found")
+	loaded.CompletedToolCalls[0].Result.Content[0].Text = "mutated snapshot"
+	loaded.TurnMessages[0].Content[0].(*llm.TextContent).Text = "mutated message"
+
+	again := sess.LoadSuspension()
+	assert.Equal(t, again.CompletedToolCalls[0].Result.Content[0].Text, "found")
+	assert.Equal(t, again.TurnMessages[0].Text(), "start")
+	msgs, err := sess.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, msgs[0].Text(), "start")
+}

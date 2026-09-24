@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`dive.LockSession`.** Takes the per-session lock `CreateResponse` holds, so
+  changes made to a session outside the agent wait for a run in progress.
+
+### Fixed
+
+- **A session resyncs from its store after a failed write.** The cached
+  session matches the file after a write that failed late, and a torn or
+  unterminated append is healed before the next one.
+- **Suspension snapshots are deep copies.** `LoadSuspension` and
+  `SaveSuspendedTurn` copy turn messages and completed-call results.
+- **A2A `Cancel` waits for the cancelled run's session write** before removing
+  its suspension, and returns an error rather than `canceled` when it cannot.
+- **The CLI no longer reports a cancelled turn as an error.**
+
 ## [1.33.1] - 2026-09-24
 
 ### Fixed

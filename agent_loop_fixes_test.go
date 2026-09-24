@@ -570,3 +570,60 @@ func TestResumeMergeSurvivesMessageReplacingPreGenerationHook(t *testing.T) {
 	assert.True(t, resultIDs["toolu_ask"], "caller-supplied result must reach the LLM")
 	assert.True(t, resultIDs["toolu_noop"], "re-executed not-started tool result must reach the LLM")
 }
+
+// TestLockSessionOrdersWithCreateResponse pins the exported session lock: a
+// run on the session waits for it, a CreateResponse made with the locked
+// context fails fast instead of deadlocking, and unlock is idempotent.
+func TestLockSessionOrdersWithCreateResponse(t *testing.T) {
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			return &llm.Response{
+				ID:         "resp",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+			}, nil
+		},
+	}
+	sess := newMemSession("lock-session-exported")
+	agent, err := NewAgent(AgentOptions{Model: mock, Session: sess})
+	assert.NoError(t, err)
+
+	lockedCtx, unlock, err := LockSession(context.Background(), sess.ID())
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(lockedCtx, WithInput("nested"))
+	assert.True(t, errors.Is(err, ErrReentrantSession))
+
+	_, _, err = LockSession(lockedCtx, sess.ID())
+	assert.True(t, errors.Is(err, ErrReentrantSession))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := agent.CreateResponse(context.Background(), WithInput("waits"))
+		done <- err
+	}()
+	select {
+	case <-done:
+		t.Fatal("CreateResponse ran while the session was locked")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	unlock()
+	unlock()
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("CreateResponse did not run after unlock")
+	}
+
+	waitCtx, cancel := context.WithCancel(context.Background())
+	_, unlockAgain, err := LockSession(context.Background(), sess.ID())
+	assert.NoError(t, err)
+	cancel()
+	_, _, err = LockSession(waitCtx, sess.ID())
+	assert.True(t, errors.Is(err, context.Canceled))
+	unlockAgain()
+}
