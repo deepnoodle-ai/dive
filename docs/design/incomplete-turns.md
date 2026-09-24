@@ -1,7 +1,7 @@
 # Incomplete Turns
 
 _Last updated: 2026-09-24_
-_Status: proposal, no code written. Answers the Noodle team's request "Dive:
+_Status: accepted; implementation in progress (see "Order of work"). Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
 revision, after six reviews: the pull-request review (a running call must
 not be recorded as "not run"; the partial-resume rule; the error contract;
@@ -22,8 +22,13 @@ overriding a suspension whose work may already be dispatched, and specified
 the late-result handle. A sixth revision, after the review of the fifth,
 made a stop reason Dive does not recognize withhold the response's tool
 calls, and aligned the suspension save row and section 9 with the
-persistence contract. Section references to `agent.go` are against
-v1.33.1._
+persistence contract. A seventh revision, after checking the design
+against the code, corrected the server-tool cleanup rule, added
+`model_context_window_exceeded`, required the parallel batch to hand a late
+tool's real result to its handle, made `WithContinue` add its reminder
+whenever the history ends in an assistant message, made `LockSession` return
+the locked context, and replaced the order of work with six steps. Section
+references to `agent.go` are against v1.33.1._
 
 A turn that does not finish is recorded the way a turn that finishes is: what
 happened is kept, the history is valid to send again, and the record says how
@@ -422,7 +427,11 @@ provider accepts. The rules, in order:
    call's `ToolUseID`, a description naming the call, and the PreToolUse hook
    context. A forwarder that outlives the batch moves each goroutine's
    eventual completion from the batch channel to that handle's `Done`
-   channel; a panic is already an error result by the time it reaches the
+   channel. Today a goroutine whose tool fails after the batch context is
+   cancelled sends the context error in place of the tool's result
+   (`executeToolCallsParallel`), and a sibling's context error cancels the
+   whole batch; both change, so the goroutine always sends the tool's own
+   result and the drain records rather than aborts; a panic is already an error result by the time it reaches the
    channel, as `executeTool` recovers it, and the late stream events stay
    suppressed by the existing callback gate. The handles are attached to
    `Response.BackgroundTasks` next to any from tools that returned
@@ -448,8 +457,11 @@ provider accepts. The rules, in order:
    `tool_use` block whose input is not complete JSON is dropped, since
    `ToolUseContent.MarshalJSON` cannot send it; a thinking block that was
    still streaming is dropped, since its signature arrives last; a server
-   tool call whose result never arrived is dropped by the existing
-   `dropServerToolCalls` rule. The same cleanup applies to a response the
+   tool call (`server_tool_use`, `mcp_tool_use`) whose result block is not in
+   the partial message is dropped. That needs a new rule: the existing
+   `dropServerToolCalls` only drops calls whose result block arrived and was
+   skipped as undecodable, and matching calls to results by ID in the partial
+   message is the same helper rule 5 uses. The same cleanup applies to a response the
    model stopped at the output limit: a truncated `tool_use` is dropped, a
    complete one is recorded and answered "not run". A partial message with
    nothing left is not recorded. Non-streaming `Generate` has no partial
@@ -489,7 +501,7 @@ type StopKind string
 const (
     StopKindFinished    StopKind = "finished"     // end_turn, stop, stop_sequence
     StopKindToolUse     StopKind = "tool_use"
-    StopKindOutputLimit StopKind = "output_limit" // max_tokens, length
+    StopKindOutputLimit StopKind = "output_limit" // max_tokens, length, model_context_window_exceeded
     StopKindRefusal     StopKind = "refusal"      // refusal, content_filter
     StopKindPause       StopKind = "pause"        // pause_turn
     StopKindIncomplete  StopKind = "incomplete"   // the provider ended early for a reason it did not name as a limit or refusal
@@ -503,7 +515,11 @@ const (
 func ClassifyStopReason(reason string) StopKind
 ```
 
-Providers keep their raw values (Anthropic `end_turn`/`max_tokens`/`refusal`/
+The classifier's table covers every provider Dive ships, not only the four
+adapters named below: Anthropic's `model_context_window_exceeded` (the
+context window, not `max_tokens`, cut the response) is an output limit, and
+Ollama, Mistral, Grok and OpenRouter spellings are listed from their
+adapters. Providers keep their raw values (Anthropic `end_turn`/`max_tokens`/`refusal`/
 `pause_turn`, Gemini `stop`/`max_tokens`/`other`, chat completions
 `stop`/`length`/`content_filter`, the Responses API's mapped set), and
 `Response.StopReason` exposes the raw value of the last model response.
@@ -816,10 +832,11 @@ end and one handle per unknown call.
 // WithContinue asks for another invocation of the conversation as recorded,
 // with no new input: the model is called on the history as it stands. It is
 // how a stopped, failed or cut-off turn is picked up without rerunning any
-// tool, since every tool result is already in the record. On a session
-// whose last turn is incomplete, the agent adds a model-only reminder,
-// "turn-continue", saying the user asked to continue from where the turn
-// stopped. Returns ErrResumeRequired on a suspended session, which must be
+// tool, since every tool result is already in the record. When the last
+// turn is incomplete, or the history ends in an assistant message, the
+// agent adds a model-only reminder, "turn-continue", saying the user asked
+// to continue from where the turn stopped, so the request never ends in an
+// assistant turn, which some models reject as a prefill. Returns ErrResumeRequired on a suspended session, which must be
 // resumed first, and an error when there is no history at all.
 func WithContinue() CreateResponseOption
 ```
@@ -948,9 +965,12 @@ after the run's write, removes it. The only remaining need is that lock:
 ```go
 // LockSession takes the per-session lock CreateResponse uses, so a caller
 // that changes a session outside the agent (CancelSuspension, a rewind, an
-// import) is serialized with any run on it. It returns ErrReentrantSession
-// when ctx already holds the lock and ctx.Err() when cancelled while waiting.
-func LockSession(ctx context.Context, id string) (unlock func(), err error)
+// import) is serialized with any run on it. The returned context marks the
+// lock as held, so a CreateResponse made with it fails with
+// ErrReentrantSession instead of deadlocking. It returns
+// ErrReentrantSession when ctx already holds the lock and ctx.Err() when
+// cancelled while waiting.
+func LockSession(ctx context.Context, id string) (lockedCtx context.Context, unlock func(), err error)
 ```
 
 With it, A2A's `Cancel` cancels the run, takes the lock (which waits for the
@@ -1222,7 +1242,7 @@ type  AgentOptions struct{ ...; IncompleteTurns IncompleteTurnOptions }
 type  IncompleteTurnOptions struct{ Discard, DropPartialText bool; SaveTimeout time.Duration }
 func  WithSoftCancel(parent context.Context) (context.Context, func())
 func  SoftCanceled(ctx context.Context) bool
-func  LockSession(ctx context.Context, id string) (unlock func(), err error)
+func  LockSession(ctx context.Context, id string) (context.Context, func(), error)
 const ResponseItemTypeTurnEnded ResponseItemType; ResponseItem.Turn *Turn   // ResponseItemTypeSuspended deprecated
 // Response.BackgroundTasks also carries one handle per unknown call
 
@@ -1518,19 +1538,47 @@ Under Added: `Response.Turn`, `Response.StopReason` and `StopDetails`, `Suspensi
 
 ### Order of work
 
-Three increments, each shippable and each leaving `main` consistent:
+Six steps, each a pull request that leaves `main` consistent. The exit-path
+refactor is its own step because `CreateResponse` ends in a dozen places and
+keeps its state in five slices; changing that and the behaviour at once
+would make neither reviewable.
 
-1. **The model boundary and the copies** (section 4 and 14): stop reasons,
-   partial preservation, the chat-completions EOF, snapshot isolation,
-   `LockSession`. Small, independent, and they fix confirmed bugs.
-2. **The envelope** (section 1 and 6): the status and reasons, `Turn` on
-   every response, `(resp, err)` on every exit, `turn_ended`.
-3. **Keeping the turn** (sections 3, 5, 7 to 13): closing, the reminder,
-   saving on every exit, hooks, `WithContinue`, soft cancel, the encoder
-   backstop, the options. This is the behaviour change users notice, and it
-   lands with the changelog entry above.
+1. **Standalone fixes** (section 14). Done: deep-copied suspension
+   snapshots, `LockSession` and its use in A2A's `Cancel`, `session.Session`
+   resyncing from its store after a failed write (healing a torn append on
+   the way), and the CLI's `errors.Is`. `ErrSaveRejected` moves to step 6,
+   where `Persistence` first reads it.
+2. **Model boundary plumbing** (sections 4 and 11). `llm.StopKind` and
+   `ClassifyStopReason` with the full spelling table, the Responses and
+   Google adapter fixes, the chat-completions bare EOF as
+   `io.ErrUnexpectedEOF`, `Response.StopReason` and `StopDetails`, an
+   accumulator method reporting which blocks never stopped, and
+   `llm.AnswerUnansweredToolCalls` in the four encoders. The backstop only
+   repairs requests that would fail today, so it ships early.
+3. **Exit-path refactor.** One turn accumulator fed by the resume phase,
+   the generation loop and Stop-hook continuations; the `Response` created
+   before PreGeneration; every exit after the boundary through one function.
+   No behaviour change: the existing tests pass unmodified.
+4. **The envelope** (sections 1, 6 and 13). `ResponseStatusIncomplete`, the
+   outcome types, `Response.Turn`, `(resp, err)` on every exit,
+   `GenerationError.Response`, `turn_ended`. Additive; nothing new is saved
+   yet, so error exits report `Persistence == none`.
+5. **Tool batch outcomes** (section 3, rule 3, and section 10). Both batch
+   paths return the partial batch with a state per call, the non-blocking
+   drain, the unknown-call handles and their forwarder, the not-run and
+   unknown items, and `WithSoftCancel`.
+6. **Keeping the turn** (sections 3, 5, 7 to 9 and 12). `CloseTurn`,
+   `Reminder.Details` and the outcome reminder, saving on every exit with
+   the salvage context, `ErrSaveRejected` and `Persistence`,
+   `OnIncompleteTurn`, `IncompleteTurns`, closing a failed full resume,
+   persisting a suspension after a cancellation, the output-limit, refusal,
+   pause and iteration-limit rules, partial streamed text, `WithContinue`,
+   `Metadata["outcome"]`, `SuspensionState.Usage`, and the guides. This is
+   the behaviour change users notice and lands with the changelog entry
+   above; if it proves too large it splits into closing and saving error
+   exits first, then the model-stop rules and `WithContinue`.
 
-Phase 2a and 2b below are the fourth and fifth stages.
+Phase 2a and 2b below are the seventh and eighth stages.
 
 ## Phase 2: recoverable turns, then per-step durability
 
@@ -1778,6 +1826,8 @@ the contracts into them. Candidates, each independent:
 | A store error means the write did not land (rev. 3, 4)         | `failed` only for a pre-write rejection, `unknown` otherwise; the session resyncs | a rename can land before a later error (review)                                           |
 | An unknown stop reason is finished and its calls run (rev. 5)  | `other` never runs a call; text-only stays completed                 | the pinned Google SDK already has `UNEXPECTED_TOOL_CALL`, which the adapter does not name (review) |
 | `Turn.Messages` cumulative for every invocation (rev. 3)       | cumulative on a resume, this invocation's on a continuation           | v1.34 sessions append; only a resume replaces (review)                                              |
+| `LockSession` returns only `unlock` (rev. 6)                   | it also returns the locked context                                   | a caller that locks and then runs the agent must get `ErrReentrantSession`, not a deadlock          |
+| Three increments of work (rev. 6)                              | six steps, the exit-path refactor on its own                         | the refactor and the behaviour change are each reviewable alone                                     |
 
 ## Open questions
 
