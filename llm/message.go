@@ -75,16 +75,12 @@ func (m *Message) Text() string {
 	return sb.String()
 }
 
-// TextPhaseMetadataKey is the TextContent metadata key under which a provider
-// records the phase of the output message a text block came from. The OpenAI
-// Responses provider sets it to "commentary" for an intermediate update or
-// "final_answer" for the answer, and must get it back unchanged when the
-// history is replayed. AnswerText treats text blocks with different phases as
-// separate passages.
-//
-// The value is "openai.phase" because OpenAI is the only provider that labels
-// phases, and stored sessions already carry the key under that name.
-const TextPhaseMetadataKey = "openai.phase"
+// textPhaseMetadataKey is the TextContent metadata key under which the OpenAI
+// Responses provider records the phase of the output message a text block came
+// from: "commentary" for an intermediate update or "final_answer" for the
+// answer. AnswerText treats text blocks with different phases as separate
+// passages.
+const textPhaseMetadataKey = "openai.phase"
 
 // AnswerText returns the answer text of a model-written message: the text of
 // all its non-empty text blocks, in order, or "" when it has none. This is
@@ -98,8 +94,8 @@ const TextPhaseMetadataKey = "openai.phase"
 // ("\n\n"), when
 //   - other content, such as reasoning or a tool call, lies between two text
 //     blocks, or
-//   - two adjacent text blocks have different phases (TextPhaseMetadataKey),
-//     as when an OpenAI commentary message is followed by the final answer.
+//   - two adjacent text blocks have different phases, as when an OpenAI
+//     commentary message is followed by the final answer.
 //
 // Empty text blocks are skipped and neither join nor separate passages.
 //
@@ -118,7 +114,7 @@ func (m *Message) AnswerText() string {
 		if text.Text == "" {
 			continue
 		}
-		textPhase := text.Metadata[TextPhaseMetadataKey]
+		textPhase := text.Metadata[textPhaseMetadataKey]
 		if sb.Len() > 0 && (separated || textPhase != phase) {
 			sb.WriteString("\n\n")
 		}

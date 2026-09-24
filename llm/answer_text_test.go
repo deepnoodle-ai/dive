@@ -8,7 +8,7 @@ import (
 
 func TestMessageAnswerText(t *testing.T) {
 	phase := func(text, p string) *TextContent {
-		return &TextContent{Text: text, Metadata: ProviderMetadata{TextPhaseMetadataKey: p}}
+		return &TextContent{Text: text, Metadata: ProviderMetadata{textPhaseMetadataKey: p}}
 	}
 	tests := []struct {
 		name    string
