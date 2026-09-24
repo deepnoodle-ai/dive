@@ -496,6 +496,14 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 				// Redacted thinking has no portable Chat Completions shape.
 				// Provider-specific encrypted blocks use namespaced metadata on
 				// ThinkingContent instead.
+			case *llm.ServerToolUseContent, *llm.WebSearchToolResultContent,
+				*llm.CodeExecutionToolResultContent, *llm.BashCodeExecutionToolResultContent,
+				*llm.TextEditorCodeExecutionToolResultContent,
+				*llm.MCPToolUseContent, *llm.MCPToolResultContent:
+				// Tool calls and results that another provider ran on its own
+				// servers (for example Anthropic web search). Chat Completions
+				// cannot replay them, so they are skipped. The assistant text
+				// around them still carries what the model concluded.
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 			}

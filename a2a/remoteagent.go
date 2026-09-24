@@ -18,7 +18,10 @@ type TaskResult struct {
 	ID        string
 	ContextID string
 	State     string
-	Text      string // extracted response text
+	// Text is the answer: the text parts of the latest artifact with text,
+	// joined with a blank line. For a Dive server it equals the server's
+	// Response.OutputText.
+	Text string
 }
 
 // IsCompleted reports whether the task completed successfully.
@@ -258,20 +261,22 @@ func normalizeState(s a2asdk.TaskState) string {
 	return strings.ToLower(strings.TrimPrefix(string(s), "TASK_STATE_"))
 }
 
-// extractText returns the most useful text from a task: prefers the latest
-// artifact's text parts (Dive's A2A server emits one final artifact per turn,
-// matching Response.OutputText() semantics; other servers may emit several,
-// in which case the most recent one is the final answer), falling back to
-// the last agent message in history.
+// extractText returns the answer text of a task: all text parts of the latest
+// artifact that has text, joined with a blank line. Without such an artifact
+// it uses the text parts of the last agent message in history.
+//
+// Dive's A2A server emits one artifact per turn and gives each passage of the
+// final message its own text part (adjacent text blocks, such as citation
+// fragments, share one part), so the result equals Response.OutputText on the
+// server. Other servers may emit several artifacts, in which case the most
+// recent one is taken as the final answer.
 func extractText(task *a2asdk.Task) string {
 	if task == nil {
 		return ""
 	}
 	for i := len(task.Artifacts) - 1; i >= 0; i-- {
-		for _, p := range task.Artifacts[i].Parts {
-			if t := p.Text(); t != "" {
-				return t
-			}
+		if t := joinTextParts(task.Artifacts[i].Parts); t != "" {
+			return t
 		}
 	}
 	for i := len(task.History) - 1; i >= 0; i-- {
@@ -279,11 +284,20 @@ func extractText(task *a2asdk.Task) string {
 		if msg.Role != a2asdk.MessageRoleAgent {
 			continue
 		}
-		for _, p := range msg.Parts {
-			if t := p.Text(); t != "" {
-				return t
-			}
+		if t := joinTextParts(msg.Parts); t != "" {
+			return t
 		}
 	}
 	return ""
+}
+
+// joinTextParts joins the non-empty text parts with a blank line.
+func joinTextParts(parts []*a2asdk.Part) string {
+	var texts []string
+	for _, p := range parts {
+		if t := p.Text(); t != "" {
+			texts = append(texts, t)
+		}
+	}
+	return strings.Join(texts, "\n\n")
 }

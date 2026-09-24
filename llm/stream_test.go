@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -15,15 +16,13 @@ func TestResponseAccumulatorSkipsUnknownBlockTypes(t *testing.T) {
 		Message: &Response{ID: "msg_1", Role: Assistant},
 	}))
 
-	// An unrecognized content block type (e.g. a server-tool block) must not
-	// be stored as a nil entry.
+	// An unrecognized content block type must not be stored as a nil entry.
 	assert.NoError(t, acc.AddEvent(&Event{
 		Type:  EventTypeContentBlockStart,
 		Index: &idx0,
 		ContentBlock: &EventContentBlock{
-			Type: ContentType("server_tool_use"),
-			ID:   "srvtoolu_1",
-			Name: "web_search",
+			Type: ContentType("future_block"),
+			ID:   "fb_1",
 		},
 	}))
 
@@ -63,6 +62,40 @@ func TestResponseAccumulatorSkipsUnknownBlockTypes(t *testing.T) {
 	textContent, ok := response.Content[0].(*TextContent)
 	assert.True(t, ok)
 	assert.Equal(t, textContent.Text, "hello")
+}
+
+// Server tool blocks decoded from a provider stream are kept as the content
+// UnmarshalContent produces. A block type it does not support is still skipped.
+func TestResponseAccumulatorKeepsDecodedServerToolBlocks(t *testing.T) {
+	events := []string{
+		`{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[]}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"q\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://example.com","title":"Example"}]}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"content_block_start","index":2,"content_block":{"type":"future_tool_result","tool_use_id":"srvtoolu_1"}}`,
+		`{"type":"content_block_stop","index":2}`,
+		`{"type":"message_stop"}`,
+	}
+	acc := NewResponseAccumulator()
+	for _, raw := range events {
+		var event Event
+		assert.NoError(t, json.Unmarshal([]byte(raw), &event))
+		assert.NoError(t, acc.AddEvent(&event))
+	}
+
+	content := acc.Response().Content
+	assert.Len(t, content, 2)
+	use, ok := content[0].(*ServerToolUseContent)
+	assert.True(t, ok)
+	assert.Equal(t, "srvtoolu_1", use.ID)
+	assert.Equal(t, map[string]any{"query": "q"}, use.Input)
+	result, ok := content[1].(*WebSearchToolResultContent)
+	assert.True(t, ok)
+	assert.Equal(t, "srvtoolu_1", result.ToolUseID)
+	assert.Equal(t, "https://example.com", result.Content[0].URL)
 }
 
 func TestResponseAccumulatorUsageBeforeMessageStart(t *testing.T) {

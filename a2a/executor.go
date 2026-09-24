@@ -428,14 +428,28 @@ func contentFromPart(p *a2asdk.Part) llm.Content {
 
 // partsFromContent converts Dive LLM content to a2a parts. Internal content
 // types (tool use, tool result, thinking) are skipped.
+//
+// Text blocks that directly follow one another are fragments of one passage
+// (Anthropic splits text at citation boundaries), so they become one text
+// part, as Response.OutputText joins them. Any other content between text
+// blocks, even content that is skipped, starts a new part. A client can then
+// join an artifact's text parts with a blank line and get OutputText.
 func partsFromContent(content []llm.Content) []*a2asdk.Part {
 	var parts []*a2asdk.Part
+	var passage strings.Builder
+	flush := func() {
+		if passage.Len() > 0 {
+			parts = append(parts, a2asdk.NewTextPart(passage.String()))
+			passage.Reset()
+		}
+	}
 	for _, c := range content {
+		if v, ok := c.(*llm.TextContent); ok {
+			passage.WriteString(v.Text)
+			continue
+		}
+		flush()
 		switch v := c.(type) {
-		case *llm.TextContent:
-			if v.Text != "" {
-				parts = append(parts, a2asdk.NewTextPart(v.Text))
-			}
 		case *llm.ImageContent:
 			if v.Source != nil {
 				p := partFromSource(v.Source, "")
@@ -456,6 +470,7 @@ func partsFromContent(content []llm.Content) []*a2asdk.Part {
 			}
 		}
 	}
+	flush()
 	return parts
 }
 

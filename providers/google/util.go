@@ -542,6 +542,14 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 			case *llm.RedactedThinkingContent:
 				// RedactedThinkingContent is an Anthropic wire type. It has no
 				// safe Gemini representation and is intentionally skipped.
+			case *llm.ServerToolUseContent, *llm.WebSearchToolResultContent,
+				*llm.CodeExecutionToolResultContent, *llm.BashCodeExecutionToolResultContent,
+				*llm.TextEditorCodeExecutionToolResultContent,
+				*llm.MCPToolUseContent, *llm.MCPToolResultContent:
+				// Tool calls and results that another provider ran on its own
+				// servers (for example Anthropic web search). Gemini cannot
+				// replay them, so they are skipped. The assistant text around
+				// them still carries what the model concluded.
 			default:
 				return nil, fmt.Errorf("unsupported content type for google provider: %s", c.Type())
 			}

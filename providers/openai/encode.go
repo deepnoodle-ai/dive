@@ -197,6 +197,10 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 			processed[i] = true
 			continue
 		}
+		if isForeignServerToolContent(c) {
+			processed[i] = true
+			continue
+		}
 		if mcpToolUse, ok := c.(*llm.MCPToolUseContent); ok {
 			// Handle MCP tool use, potentially pairing it with a result
 			mcpCallParam, pairedResultIndex, err := findAndEncodeMCPPair(mcpToolUse, message.Content, i, processed)
@@ -230,6 +234,22 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 		}
 	}
 	return encodedItems, nil
+}
+
+// isForeignServerToolContent reports whether content is a tool call or result
+// that another provider ran on its own servers (for example Anthropic web
+// search). The Responses API cannot replay it, so it is skipped; the assistant
+// text around it still carries what the model concluded. OpenAI's own web
+// search is decoded as a ServerToolUseContent named "web_search_call".
+func isForeignServerToolContent(content llm.Content) bool {
+	switch c := content.(type) {
+	case *llm.ServerToolUseContent:
+		return c.Name != "web_search_call"
+	case *llm.WebSearchToolResultContent, *llm.CodeExecutionToolResultContent,
+		*llm.BashCodeExecutionToolResultContent, *llm.TextEditorCodeExecutionToolResultContent:
+		return true
+	}
+	return false
 }
 
 func encodeAssistantContent(content llm.Content) (responses.ResponseInputItemUnionParam, error) {
