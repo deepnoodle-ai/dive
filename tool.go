@@ -26,8 +26,23 @@ type ToolAnnotations struct {
 	// to sequential execution. Use for tools that mutate shared state (a
 	// working-directory chdir, a non-thread-safe SDK, a singleton resource).
 	// Default false = parallel-safe, matching the existing behavior.
-	SequentialOnlyHint bool           `json:"sequentialOnlyHint,omitempty"`
-	Extra              map[string]any `json:"extra,omitempty"`
+	SequentialOnlyHint bool `json:"sequentialOnlyHint,omitempty"`
+	// HaltsBatch chains the tool's calls within one model response, like
+	// shell commands joined by &&: once one fails, every later HaltsBatch
+	// call in that response is answered with an error saying it was not
+	// executed, without running its PreToolUse hooks or the tool. Use it for
+	// actions that depend on the ones before them, such as typing after the
+	// click that should have focused a field. Implies SequentialOnlyHint.
+	//
+	// A call fails when its result reaches the model as an error: the tool
+	// returned an IsError result or a Go error, a PreToolUse hook denied it,
+	// or a hook replaced its result with an error. Calls to tools without
+	// the annotation neither halt the batch nor are halted by it. Calls to a
+	// provider-defined toolset's members (llm.ToolUseContent.ToolsetName
+	// set) behave as if they carried HaltsBatch, since the provider's
+	// contract requires it. See ErrBatchHalted.
+	HaltsBatch bool           `json:"haltsBatch,omitempty"`
+	Extra      map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
@@ -41,6 +56,9 @@ func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 	}
 	if a.SequentialOnlyHint {
 		data["sequentialOnlyHint"] = a.SequentialOnlyHint
+	}
+	if a.HaltsBatch {
+		data["haltsBatch"] = a.HaltsBatch
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -68,6 +86,7 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 		"openWorldHint":      &a.OpenWorldHint,
 		"editHint":           &a.EditHint,
 		"sequentialOnlyHint": &a.SequentialOnlyHint,
+		"haltsBatch":         &a.HaltsBatch,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
@@ -293,6 +312,23 @@ type ToolPreviewer interface {
 	// PreviewCall returns a markdown description of what the tool will do
 	// given the input. The input is the same type passed to Call().
 	PreviewCall(ctx context.Context, input any) *ToolCallPreview
+}
+
+// ToolDeclarer is implemented by a tool whose provider definition declares
+// other tools too, such as anthropic.ComputerToolset, which declares
+// left_click, screenshot and the rest of Anthropic's computer actions.
+//
+// The model calls a declared tool by its own name, and the agent runs the
+// call with the Tool of that name, like any other call; that Tool is also
+// what permission rules and hooks see. While the declarer is among the tools
+// sent to the model, the agent leaves the tools it declares out of the
+// request, since the provider already has their definitions. Without the
+// declarer they are sent as ordinary tools, so the same tools serve a model
+// that takes the provider's toolset and one that doesn't.
+type ToolDeclarer interface {
+	// DeclaredTools returns the names of the tools this tool's definition
+	// declares.
+	DeclaredTools() []string
 }
 
 // TypedTool is a tool that can be called with a specific type of input.
@@ -590,7 +626,7 @@ type ToolCallResult struct {
 	Input              any
 	Preview            *ToolCallPreview      // Preview generated before execution (if tool implements ToolPreviewer)
 	Result             *ToolResult           // Protocol-level result sent to the LLM
-	Error              error                 // Go error from tool.Call() or dispatch, including UnknownToolError
+	Error              error                 // Go error from tool.Call() or dispatch, including UnknownToolError and ErrBatchHalted
 	AdditionalContext  string                // Context injected by hooks, appended to the tool result message
 	BackgroundHandle   *BackgroundTaskHandle // Non-nil when the tool returned BackgroundResult
 	reminderDeliveries []reminderDelivery

@@ -255,11 +255,40 @@ Each of these sends its beta header automatically.
 `anthropic.NewComputerToolset` declares the `computer_toolset_20260801`
 toolset, the only computer use Opus 5.5 accepts on the Claude API. Each action
 is its own tool call: `ToolUseContent.Name` is the member (`left_click`,
-`screenshot`) and `ToolsetName` is `"computer"`. Run a batch in order, stop at
-the first failure, and answer the remaining calls with
-`anthropic.ComputerToolsetHaltText`. The provider adds the toolset name to
-each result. `anthropic.NewComputerTool` still declares the earlier
-`computer_20251124` tool for other models.
+`screenshot`) and `ToolsetName` is `"computer"`. Your application runs the
+actions, with one ordinary tool per member, named for it:
+
+```go
+member := dive.WithFuncToolAnnotations(&dive.ToolAnnotations{HaltsBatch: true})
+tools := []dive.Tool{
+    dive.FuncTool("screenshot", "Capture the screen.", screen.Capture, member),
+    dive.FuncTool("left_click", "Click at a coordinate.", screen.Click, member),
+    dive.FuncTool("type", "Type text.", screen.Type, member),
+    // ... one per member you run
+}
+if takesComputerToolset { // e.g. Claude Opus 5.5
+    tools = append(tools, anthropic.NewComputerToolset(anthropic.ComputerToolsetOptions{}))
+}
+agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Tools: tools})
+```
+
+In a `dive.Agent` the rest of the contract is handled for you:
+
+- The toolset declares its members (`dive.ToolDeclarer`), so the member tools
+  are not sent as custom tools while it is present. Leave it out for GPT,
+  Gemini or an older Claude and the same tools are sent as ordinary tools.
+- A batch runs in order and stops at the first failure: every later action is
+  answered with `anthropic.ComputerToolsetHaltText` without running, and
+  without asking a `PreToolUse` permission hook. A denied action counts as a
+  failure. `HaltsBatch` gives the tools the same behavior when they are
+  offered as plain tools; toolset calls don't need it.
+- The provider adds the toolset name to each result.
+
+Still your application's job: report a failed action as an error (an `IsError`
+result or a Go error), and resize screenshots and zoom images to the model's
+image limits, which the API enforces instead of downscaling.
+`anthropic.NewComputerTool` still declares the earlier `computer_20251124`
+tool for other models.
 
 ## Provider Registry
 

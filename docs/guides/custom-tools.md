@@ -147,6 +147,26 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 
 `Toolset.Tools(ctx context.Context)` is called before each LLM request, returning `([]Tool, error)`, so the tool set can change between iterations. Tools from toolsets are merged with static `Tools`.
 
+## Tools Another Tool Declares
+
+Some provider tools declare other tools: Anthropic's computer toolset declares
+`left_click`, `screenshot` and the rest. The model calls those by name, so you
+register an ordinary tool per name to run them. A tool that declares others
+implements `dive.ToolDeclarer`:
+
+```go
+type ToolDeclarer interface {
+    DeclaredTools() []string
+}
+```
+
+While a declarer is among the tools sent to the model (static or from a
+`Toolset`), the agent leaves the tools it declares out of the request, since
+the provider already has their definitions. Calls still route to them by name,
+and hooks and permission rules see them as usual. Without the declarer they are
+sent as ordinary tools, so one set of tools works for every provider. See
+"Computer Use On Claude" in the [LLM guide](llm-guide.md).
+
 ## Tool Annotations
 
 Annotations help agents and permission systems understand tool behavior:
@@ -162,6 +182,37 @@ func (t *MyTool) Annotations() *dive.ToolAnnotations {
     }
 }
 ```
+
+### Stopping a Batch at the First Failure
+
+A model can return several tool calls in one response. Set `HaltsBatch` on
+tools whose calls depend on the ones before them, such as typing after the
+click that should have focused a field:
+
+```go
+dive.FuncTool("left_click", "Click at a coordinate.", click,
+    dive.WithFuncToolAnnotations(&dive.ToolAnnotations{HaltsBatch: true}))
+```
+
+The batch then runs in order (`HaltsBatch` implies `SequentialOnlyHint`), and
+once a `HaltsBatch` call fails, every later `HaltsBatch` call in the same
+response is answered with an error saying it was not executed:
+
+- A call fails when the model would see its result as an error: the tool
+  returned an `IsError` result or a Go error, a `PreToolUse` hook denied it,
+  or a hook replaced its result with an error.
+- A halted call runs no `PreToolUse`, `PostToolUse` or `PostToolUseFailure`
+  hook, and no tracing span, since the tool never ran. The `tool_call` and
+  `tool_call_result` events are still emitted, and its
+  `ToolCallResult.Error` is `dive.ErrBatchHalted`.
+- A call to a tool without `HaltsBatch` still runs, and its failure halts
+  nothing.
+- The next model response starts a fresh batch. A batch resumed after a
+  suspension stays halted if a call answered before the resume failed.
+
+Calls to a provider-defined toolset's members (`ToolUseContent.ToolsetName`
+set, as with Anthropic's computer toolset) behave this way without the
+annotation, as the provider's contract requires.
 
 ## Error Handling
 
