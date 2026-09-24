@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/wonton/cli"
 )
@@ -10,36 +13,43 @@ import (
 func runModels(ctx *cli.Context) error {
 	available := ctx.Bool("available")
 
+	var providers []providerInfo
 	for _, p := range providerCatalog {
-		isAvail := p.Available()
-		if available && !isAvail {
+		if available && !p.Available() {
 			continue
 		}
+		providers = append(providers, p)
+	}
+	writeModelsTable(os.Stdout, providers, providerInfo.Available)
+	return nil
+}
 
-		// Provider header
-		status := "✓"
-		if !isAvail {
-			status = "✗"
-			envHint := strings.Join(p.EnvVars, " or ")
-			fmt.Printf("%s %s  (set %s)\n", status, p.Name, envHint)
-		} else {
-			fmt.Printf("%s %s\n", status, p.Name)
-		}
-
-		// Model rows
-		modelWidth := 30
+// writeModelsTable prints each provider's models under a status header. Column
+// widths come from every row printed, so the columns line up across sections.
+func writeModelsTable(w io.Writer, providers []providerInfo, available func(providerInfo) bool) {
+	var idWidth, labelWidth, ctxWidth int
+	for _, p := range providers {
 		for _, m := range p.Models {
-			modelWidth = max(modelWidth, len(m.ModelID)+2)
+			idWidth = max(idWidth, utf8.RuneCountInString(m.ModelID))
+			labelWidth = max(labelWidth, utf8.RuneCountInString(m.Label))
+			ctxWidth = max(ctxWidth, len(formatContextWindow(contextWindowForModel(m.ModelID))))
 		}
-		for _, m := range p.Models {
-			ctx := contextWindowForModel(m.ModelID)
-			ctxStr := formatContextWindow(ctx)
-			fmt.Printf("    %-*s %-18s %6s    %s\n", modelWidth, m.ModelID, m.Label, ctxStr, m.Description)
-		}
-		fmt.Println()
 	}
 
-	return nil
+	for _, p := range providers {
+		if available(p) {
+			fmt.Fprintf(w, "✓ %s\n", p.Name)
+		} else {
+			fmt.Fprintf(w, "✗ %s  (set %s)\n", p.Name, strings.Join(p.EnvVars, " or "))
+		}
+		for _, m := range p.Models {
+			ctxStr := formatContextWindow(contextWindowForModel(m.ModelID))
+			line := fmt.Sprintf("    %-*s   %-*s   %*s   %s",
+				idWidth, m.ModelID, labelWidth, m.Label, ctxWidth, ctxStr, m.Description)
+			fmt.Fprintln(w, strings.TrimRight(line, " "))
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 // formatContextWindow formats a context window size for display (e.g. 1000000 -> "1M").

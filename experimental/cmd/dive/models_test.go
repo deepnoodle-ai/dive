@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -155,4 +157,42 @@ func TestCompactionThreshold(t *testing.T) {
 			assert.Equal(t, compactionThreshold(tt.explicit, tt.model), tt.want)
 		})
 	}
+}
+
+func TestModelsTableAlignsColumnsAcrossSections(t *testing.T) {
+	providers := []providerInfo{
+		{Name: "Short", EnvVars: []string{"SHORT_KEY"}, Models: []modelChoice{
+			{ModelID: "a", Label: "A", Description: "first"},
+			{ModelID: "gemini-3.5-flash-lite", Label: "Gemini 3.5 Flash-Lite", Description: "long label"},
+		}},
+		deepinfraProviderInfo(),
+	}
+	var buf bytes.Buffer
+	writeModelsTable(&buf, providers, func(p providerInfo) bool { return p.Name == "Short" })
+	out := buf.String()
+	assert.Contains(t, out, "✓ Short\n")
+	assert.Contains(t, out, "✗ DeepInfra  (set ")
+
+	lines := strings.Split(out, "\n")
+	labelCol, descCol, rows := -1, -1, 0
+	for _, p := range providers {
+		for _, m := range p.Models {
+			var line string
+			for _, l := range lines {
+				if strings.HasPrefix(l, "    "+m.ModelID+" ") {
+					line = l
+				}
+			}
+			assert.NotEqual(t, "", line, "row for %s", m.ModelID)
+			label := strings.Index(line, "   "+m.Label+" ")
+			desc := strings.LastIndex(line, "   "+m.Description)
+			if labelCol < 0 {
+				labelCol, descCol = label, desc
+			}
+			assert.Equal(t, labelCol, label, "label column for %s", m.ModelID)
+			assert.Equal(t, descCol, desc, "description column for %s", m.ModelID)
+			rows++
+		}
+	}
+	assert.True(t, rows > 2)
 }
