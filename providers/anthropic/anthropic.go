@@ -86,6 +86,10 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
+	msgs, err = p.dropUnreplayableServerTools(msgs)
+	if err != nil {
+		return nil, err
+	}
 	msgs, err = resolveEffortMessages(msgs, request.Model, config)
 	if err != nil {
 		return nil, err
@@ -191,6 +195,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	msgs, err := convertMessages(rendered)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
+	}
+	msgs, err = p.dropUnreplayableServerTools(msgs)
+	if err != nil {
+		return nil, err
 	}
 	msgs, err = resolveEffortMessages(msgs, request.Model, config)
 	if err != nil {
@@ -570,6 +578,42 @@ func finalizeUsage(config *llm.Config, model string, usage *llm.Usage) {
 // through different endpoints.
 func (p *Provider) supportsAutomaticCaching() bool {
 	return p.endpoint == DefaultEndpoint
+}
+
+// dropUnreplayableServerTools removes server-side tool calls and results
+// (server_tool_use, web_search_tool_result, code execution and MCP connector
+// blocks) from the converted messages unless the endpoint is the first-party
+// Claude API. Those blocks are only valid where Anthropic ran the tools; an
+// Anthropic-compatible server such as Ollama never did, so a session that
+// switches to it must not send them. The assistant text around them still
+// carries what the model concluded. The messages are convertMessages'
+// copies, so they are edited in place.
+func (p *Provider) dropUnreplayableServerTools(messages []*llm.Message) ([]*llm.Message, error) {
+	if p.endpoint == DefaultEndpoint {
+		return messages, nil
+	}
+	out := messages[:0]
+	for _, message := range messages {
+		kept := message.Content[:0]
+		for _, content := range message.Content {
+			switch content.(type) {
+			case *llm.ServerToolUseContent, *llm.WebSearchToolResultContent,
+				*llm.CodeExecutionToolResultContent, *llm.BashCodeExecutionToolResultContent,
+				*llm.TextEditorCodeExecutionToolResultContent,
+				*llm.MCPToolUseContent, *llm.MCPToolResultContent:
+				continue
+			}
+			kept = append(kept, content)
+		}
+		message.Content = kept
+		if len(message.Content) > 0 || message.Effort != "" {
+			out = append(out, message)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("all messages are empty after provider conversion")
+	}
+	return out, nil
 }
 
 func (p *Provider) renderReminders(messages []*llm.Message, model string) ([]*llm.Message, error) {
