@@ -81,6 +81,10 @@ type PendingToolCall struct {
 	Prompt   string          `json:"prompt,omitempty"`
 	Reason   SuspendReason   `json:"reason,omitempty"`
 	Metadata map[string]any  `json:"metadata,omitempty"`
+	// HaltsBatch records that the call takes part in batch halting (see
+	// ToolAnnotations.HaltsBatch), so an error result supplied for it on
+	// resume halts the batch even if the resuming agent's tools changed.
+	HaltsBatch bool `json:"halts_batch,omitempty"`
 }
 
 // UnmarshalInput decodes the pending call's Input JSON into the given

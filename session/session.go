@@ -95,12 +95,10 @@ func clonePendingToolCall(p *dive.PendingToolCall) *dive.PendingToolCall {
 	if p == nil {
 		return nil
 	}
-	cp := &dive.PendingToolCall{
-		ID:     p.ID,
-		Name:   p.Name,
-		Prompt: p.Prompt,
-		Reason: p.Reason,
-	}
+	c := *p
+	cp := &c
+	cp.Input = nil
+	cp.Metadata = nil
 	if p.Input != nil {
 		cp.Input = append(json.RawMessage(nil), p.Input...)
 	}

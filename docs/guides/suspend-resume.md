@@ -280,8 +280,9 @@ suspension or because the caller resumed a suspended halting call with an
 `IsError` result, the batch stays halted: the remaining halting calls are
 answered with an error and not run, and their `ToolCallResult.Error` is
 `dive.ErrBatchHalted`. Calls to tools without the annotation still run.
-A failure before the suspension is recorded in `SuspensionState.BatchHalted`,
-so it holds even if the resuming agent's tools have changed since.
+The suspension records what it needs for this: `SuspensionState.BatchHalted`
+for a failure before it, and `PendingToolCall.HaltsBatch` for a suspended
+halting call, so both hold even if the resuming agent's tools have changed.
 
 ## The `OnSuspend` hook
 

@@ -1258,6 +1258,10 @@ type resumeState struct {
 
 	// BatchHalted carries SuspensionState.BatchHalted from the suspend.
 	BatchHalted bool
+
+	// HaltingPending holds the IDs of pending calls recorded as taking part
+	// in batch halting when they suspended.
+	HaltingPending map[string]bool
 }
 
 func (rs *resumeState) CompletedToolCalls() []*CompletedToolCall {
@@ -1342,8 +1346,12 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 	pendingCalls := state.PendingToolCalls
 	pendingByID := make(map[string]*PendingToolCall, len(pendingCalls))
 	pendingIDs := make([]string, len(pendingCalls))
+	haltingPending := map[string]bool{}
 	for i, pc := range pendingCalls {
 		pendingByID[pc.ID] = pc
+		if pc.HaltsBatch {
+			haltingPending[pc.ID] = true
+		}
 		pendingIDs[i] = pc.ID
 	}
 	// Validate caller-supplied IDs. Any ID not in the pending set — including
@@ -1543,12 +1551,13 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 			}
 		}
 		remainingCalls = append(remainingCalls, &PendingToolCall{
-			ID:       id,
-			Name:     name,
-			Input:    input,
-			Prompt:   pc.Prompt,
-			Reason:   pc.Reason,
-			Metadata: pc.Metadata,
+			ID:         id,
+			Name:       name,
+			Input:      input,
+			Prompt:     pc.Prompt,
+			Reason:     pc.Reason,
+			Metadata:   pc.Metadata,
+			HaltsBatch: pc.HaltsBatch,
 		})
 	}
 
@@ -1563,6 +1572,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		RemainingPending:          remaining,
 		RemainingPendingCalls:     remainingCalls,
 		BatchHalted:               state.BatchHalted,
+		HaltingPending:            haltingPending,
 	}, nil
 }
 
@@ -2243,8 +2253,9 @@ func haltedToolCallResult(call *llm.ToolUseContent) *ToolCallResult {
 
 // resumedBatchHalted reports whether a suspended batch being resumed is
 // already halted: the suspension recorded a failed halting call, or a result
-// the caller supplied on resume failed for a halting call. The recorded
-// decision is trusted over the current tools, which may have changed since.
+// the caller supplied on resume failed for a halting call. What the
+// suspension recorded (BatchHalted, PendingToolCall.HaltsBatch) is trusted
+// over the current tools, which may have changed since.
 func resumedBatchHalted(rs *resumeState, toolsByName map[string]Tool) bool {
 	if rs.BatchHalted {
 		return true
@@ -2259,7 +2270,7 @@ func resumedBatchHalted(rs *resumeState, toolsByName map[string]Tool) bool {
 		}
 	}
 	for _, call := range toolUseContents(rs.AssistantToolUse) {
-		if failed[call.ID] && callHaltsBatch(call, toolsByName) {
+		if failed[call.ID] && (rs.HaltingPending[call.ID] || callHaltsBatch(call, toolsByName)) {
 			return true
 		}
 	}
@@ -2306,9 +2317,9 @@ func (a *Agent) executeToolCallsSequential(
 			return nil, err
 		}
 		if result != nil && result.Result != nil && result.Result.Suspend != nil {
-			batch.Outcomes[i] = toolCallOutcome{
-				Pending: toPendingToolCall(toolCall, result.Result.Suspend),
-			}
+			pending := toPendingToolCall(toolCall, result.Result.Suspend)
+			pending.HaltsBatch = halts
+			batch.Outcomes[i] = toolCallOutcome{Pending: pending}
 			batch.Suspended = true
 			batch.Halted = halted
 			return batch, nil
