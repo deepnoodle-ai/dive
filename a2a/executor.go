@@ -201,10 +201,14 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 // be writing the session, and a suspension it persists must be removed after
 // that write, not raced by it. The session is fetched again under the lock,
 // since the provider may return a separate instance that has not seen the
-// run's write. A session the provider cannot return has nothing to clean up.
+// run's write. A provider that returns no session means there is nothing to
+// clean up; a provider error means the cleanup could not be checked.
 func (e *Executor) cancelSuspension(ctx context.Context, contextID string) error {
 	sess, err := e.sessions(ctx, contextID)
-	if err != nil || sess == nil {
+	if err != nil {
+		return fmt.Errorf("cancel: loading session: %w", err)
+	}
+	if sess == nil {
 		return nil
 	}
 	if _, ok := sess.(dive.SuspendableSession); !ok {

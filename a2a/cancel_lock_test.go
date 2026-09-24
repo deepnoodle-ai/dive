@@ -185,3 +185,24 @@ func TestCancelWithoutSuspension(t *testing.T) {
 	assert.NoError(t, res.err)
 	assert.True(t, res.canceled)
 }
+
+var errProvider = errors.New("session store unavailable")
+
+// TestCancelReportsProviderError pins that Cancel does not report the task
+// canceled when it cannot load the session to check for a suspension, and
+// that a provider returning no session still cancels.
+func TestCancelReportsProviderError(t *testing.T) {
+	exec := a2a.NewExecutor(unusedModelAgent(t), a2a.WithSessionProvider(func(ctx context.Context, contextID string) (dive.Session, error) {
+		return nil, errProvider
+	}))
+	res := runCancel(context.Background(), exec)
+	assert.True(t, errors.Is(res.err, errProvider))
+	assert.False(t, res.canceled)
+
+	exec = a2a.NewExecutor(unusedModelAgent(t), a2a.WithSessionProvider(func(ctx context.Context, contextID string) (dive.Session, error) {
+		return nil, nil
+	}))
+	res = runCancel(context.Background(), exec)
+	assert.NoError(t, res.err)
+	assert.True(t, res.canceled)
+}
