@@ -142,13 +142,13 @@ result keeps its text plus the line
 `(The image this call returned follows the tool results.)`, and a label such
 as `The image from tool call call_1:` comes before the image.
 
-| Provider                               | Tool-result images                                                               |
-| -------------------------------------- | -------------------------------------------------------------------------------- |
+| Provider                               | Tool-result images                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | anthropic, ollama                      | Inside the tool result. An error result moves them after the results, because Anthropic takes only text in an `is_error` result |
-| openai (Responses), grok, meta         | Inside the function call output. An error result starts with `Error:`            |
-| google, Gemini 3.x                     | Inside the function response (`FunctionResponse.Parts`). The text goes under `output`, or `error` for a failed call |
-| google, Gemini 2.5 and unknown models  | Moved after the function responses, because 2.5 rejects images in a function response |
-| openaicompletions, mistral, openrouter | Moved to a user message after the `tool` messages. Tool messages take only text  |
+| openai (Responses), grok, meta         | Inside the function call output. An error result starts with `Error:`                                                           |
+| google, Gemini 3.x                     | Inside the function response (`FunctionResponse.Parts`). The text goes under `output`, or `error` for a failed call             |
+| google, Gemini 2.5 and unknown models  | Moved after the function responses, because 2.5 rejects images in a function response                                           |
+| openaicompletions, mistral, openrouter | Moved to a user message after the `tool` messages. Tool messages take only text                                                 |
 
 Only the request changes. The conversation history keeps each image in its
 tool result, so a session can switch between providers.
