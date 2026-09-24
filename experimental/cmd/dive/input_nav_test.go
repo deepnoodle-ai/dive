@@ -116,6 +116,20 @@ func TestHandleInputNavKey_AutocompleteTabSelects(t *testing.T) {
 	assert.Equal(t, 0, len(a.autocompleteMatches), "selecting clears autocomplete")
 }
 
+func TestSubmitInput_CommandAutocompleteDoesNotReplaceUnknownSlashText(t *testing.T) {
+	a := newTestApp()
+	a.processing = true // Keep submission at the draft boundary.
+	a.inputText = "/he"
+	a.autocompleteType = "command"
+	a.autocompleteMatches = []string{"help"}
+
+	a.submitInput("/he")
+
+	assert.Equal(t, "/he", a.inputText)
+	assert.Empty(t, a.autocompleteMatches)
+	assert.Empty(t, a.messages)
+}
+
 func TestHandleInputNavKey_AutocompleteTakesPrecedenceOverHistory(t *testing.T) {
 	a := newTestApp()
 	a.history = []string{"old"}

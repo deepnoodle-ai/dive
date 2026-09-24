@@ -309,6 +309,143 @@ func TestSubmitInput_CapturesADropDeliveredWithEnter(t *testing.T) {
 	assert.Equal(t, path, a.attachments[0].Path)
 }
 
+func TestSubmitInput_AttachesTypedImagePaths(t *testing.T) {
+	path := writeTempFile(t, "shot.png", pngBytes)
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"standalone path", path, "[Image #1]"},
+		{"question with path", "what is in this image? " + path, "what is in this image? [Image #1]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp()
+			a.processing = true // Keep submission at the draft boundary.
+			for i := 1; i <= len(tc.input); i++ {
+				simulateInput(a, tc.input[:i])
+			}
+			a.submitInput(tc.input)
+
+			assert.Equal(t, tc.want, a.inputText)
+			assert.Len(t, a.attachments, 1)
+			assert.Equal(t, path, a.attachments[0].Path)
+			text, blocks, err := expandAttachments(a.inputText, a.attachments)
+			assert.NoError(t, err)
+			assert.Contains(t, text, "[image: "+path+"]")
+			assert.Len(t, blocks, 1)
+			_, ok := blocks[0].(*llm.ImageContent)
+			assert.True(t, ok, "image must reach the model as native content")
+		})
+	}
+}
+
+func TestSubmitInput_AttachesImageInUnknownSlashMessage(t *testing.T) {
+	a := newTestApp()
+	a.processing = true // Keep submission at the draft boundary.
+	path := writeTempFile(t, "shot.png", pngBytes)
+	input := "/what is in this? " + path
+
+	for i := 1; i <= len(input); i++ {
+		simulateInput(a, input[:i])
+	}
+	a.submitInput(input)
+
+	assert.Equal(t, "/what is in this? [Image #1]", a.inputText)
+	assert.Len(t, a.attachments, 1)
+	text, blocks, err := expandAttachments(a.inputText, a.attachments)
+	assert.NoError(t, err)
+	assert.Equal(t, "/what is in this? [image: "+path+"]", text)
+	assert.Len(t, blocks, 1)
+	image, ok := blocks[0].(*llm.ImageContent)
+	assert.True(t, ok, "image must reach the model as native content")
+	assert.Equal(t, "image/png", image.Source.MediaType)
+}
+
+func TestSubmitInput_AttachesUnquotedStandalonePathWithSpaces(t *testing.T) {
+	path := writeTempFile(t, "my shot.png", pngBytes)
+	for _, tc := range []struct {
+		input string
+		want  string
+	}{
+		{path, "[Image #1]"},
+		{"what is in this image? " + path, "what is in this image? [Image #1]"},
+	} {
+		a := newTestApp()
+		a.processing = true
+		for i := 1; i <= len(tc.input); i++ {
+			simulateInput(a, tc.input[:i])
+		}
+		a.submitInput(tc.input)
+
+		assert.Equal(t, tc.want, a.inputText)
+		assert.Len(t, a.attachments, 1)
+		assert.Equal(t, path, a.attachments[0].Path)
+	}
+}
+
+func TestSubmitInput_DoesNotAttachPathsInsidePastedLogs(t *testing.T) {
+	a := newTestApp()
+	a.processing = true
+	path := writeTempFile(t, "shot.png", pngBytes)
+	log := "panic: boom\nfound " + path
+
+	a.submitInput(log)
+
+	assert.Equal(t, log, a.inputText)
+	assert.Empty(t, a.attachments)
+}
+
+func TestSubmitInput_DoesNotAttachMultilinePaths(t *testing.T) {
+	a := newTestApp()
+	a.processing = true
+	first := writeTempFile(t, "first.png", pngBytes)
+	second := writeTempFile(t, "second.png", pngBytes)
+	input := first + "\n" + second
+
+	for i := 1; i <= len(input); i++ {
+		simulateInput(a, input[:i])
+	}
+	a.submitInput(input)
+
+	assert.Equal(t, input, a.inputText)
+	assert.Empty(t, a.attachments)
+}
+
+func TestSubmitInput_UnsupportedStandaloneFileStaysText(t *testing.T) {
+	a := newTestApp()
+	a.processing = true
+	path := writeTempFile(t, "archive.bin", []byte{0, 1, 2})
+
+	for i := 1; i <= len(path); i++ {
+		simulateInput(a, path[:i])
+	}
+	a.submitInput(path)
+
+	assert.Equal(t, path, a.inputText)
+	assert.Empty(t, a.attachments)
+	assert.Empty(t, a.messages)
+}
+
+func TestCaptureSubmittedFiles_MissingAbsolutePathStaysText(t *testing.T) {
+	a := newTestApp()
+	path := filepath.Join(t.TempDir(), "missing.png")
+
+	text := a.captureSubmittedFiles(path)
+
+	assert.Equal(t, path, text)
+	assert.Empty(t, a.attachments)
+	assert.Empty(t, a.messages)
+}
+
+func TestCaptureSubmittedFiles_PreservesSlashCommands(t *testing.T) {
+	a := newTestApp()
+	text := a.captureSubmittedFiles("/help")
+
+	assert.Equal(t, "/help", text)
+	assert.Empty(t, a.attachments)
+}
+
 func TestExpandAttachments_Image(t *testing.T) {
 	path := writeTempFile(t, "shot.png", pngBytes)
 	attachments := []attachment{{

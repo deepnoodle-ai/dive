@@ -84,7 +84,7 @@ func TestScreenFrameLayout(t *testing.T) {
 		"",
 		"",
 		strings.Repeat("─", 60),
-		"❯ Type a message... (@filename, or drop a file to attach)",
+		"❯ Type a message... (@filename, path, or drop)",
 		strings.Repeat("─", 60),
 		" test-model in test on main",
 		"",

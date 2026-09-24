@@ -10,9 +10,15 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
+
+type eventChannelRunner struct{ events chan tui.Event }
+
+func (r *eventChannelRunner) SendEvent(e tui.Event) { r.events <- e }
+func (r *eventChannelRunner) Stop()                 {}
 
 func TestHandleCompaction(t *testing.T) {
 	// Create a mock agent (we won't use it for this test)
@@ -51,6 +57,47 @@ func TestHandleCompaction(t *testing.T) {
 	// The next turn reclaims the turn-summary slot.
 	app.handleProcessingStart(processingStartEvent{baseEvent: newBaseEvent(), userInput: "hi"})
 	assert.False(t, app.showCompactionSummary, "a new turn should clear the compaction summary")
+}
+
+func TestHandleCommand_UnknownSlashInputFallsThrough(t *testing.T) {
+	a := newTestApp()
+	for _, input := range []string{
+		"/not-a-command some text",
+		"/Users/curtis/missing-image.png",
+		"/not-a-command",
+	} {
+		assert.False(t, a.handleCommand(input, nil), "%q should be sent as a user message", input)
+	}
+	assert.Empty(t, a.messages, "unknown slash input should not emit an error notice")
+}
+
+func TestSubmitInput_UnknownSlashInputReachesModel(t *testing.T) {
+	model := &contextCaptureModel{}
+	agent, err := dive.NewAgent(dive.AgentOptions{Model: model})
+	assert.NoError(t, err)
+	a := NewApp(agent, nil, t.TempDir(), "test", "", nil, "", nil, "")
+	a.currentSession = session.New("slash-input-test")
+	runner := &eventChannelRunner{events: make(chan tui.Event, 32)}
+	a.runner = runner
+	t.Cleanup(a.cancel)
+
+	input := "/not-a-command some text"
+	a.submitInput(input)
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-runner.events:
+			if end, ok := event.(processingEndEvent); ok {
+				assert.NoError(t, end.err)
+				assert.Len(t, model.messages, 1)
+				assert.Equal(t, llm.User, model.messages[0].Role)
+				assert.Equal(t, input, model.messages[0].Content[0].(*llm.TextContent).Text)
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for unknown slash input to reach the model")
+		}
+	}
 }
 
 func TestManualCompactionRunsOffTheEventLoop(t *testing.T) {

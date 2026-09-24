@@ -432,8 +432,11 @@ func (a *App) textMessageView(msg Message) tui.View {
 		// what is sent) is untouched.
 		text := tui.Text("%s", trimTrailingWhitespacePerLine(msg.Content)).Wrap().Style(
 			tui.NewStyle().WithFgRGB(primaryText).WithBgRGB(bg),
-		)
-		return tui.Group(caret, text, tui.Fill(' ').BgRGB(bg.R, bg.G, bg.B))
+		).FillBg().Flex(1)
+		// Fill the text's whole rectangle, including the empty space after
+		// short and wrapped lines. A separate fill after the text only covers
+		// columns beyond its widest line.
+		return tui.Group(caret, text)
 
 	case roleAssistant:
 		content := strings.TrimSpace(msg.Content)

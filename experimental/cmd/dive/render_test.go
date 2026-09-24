@@ -6,8 +6,36 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/termtest"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
+
+func TestUserMessageBackgroundFillsEveryLine(t *testing.T) {
+	app := newTestApp()
+	wantBg := termtest.Color{Type: termtest.ColorRGB, R: subtleBg.R, G: subtleBg.G, B: subtleBg.B}
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		width   int
+		rows    int
+	}{
+		{"explicit newline", "[Image #1]\nwhen I click the link, this is what I get.", 52, 2},
+		{"wrapped line", strings.Repeat("longer words ", 6), 24, 4},
+		{"blank line", "first\n\nlast", 24, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			screen := tui.SprintScreen(app.textMessageView(Message{Role: roleUser, Content: tc.content}), tui.WithWidth(tc.width))
+			for y := 0; y < tc.rows; y++ {
+				for x := 2; x < tc.width; x++ {
+					if got := screen.Cell(x, y).Style.Background; got != wantBg {
+						t.Fatalf("background at (%d, %d) = %+v, want %+v", x, y, got, wantBg)
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestFormatTokenCount(t *testing.T) {
 	assert.Equal(t, "56", formatTokenCount(56))
