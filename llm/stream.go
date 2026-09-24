@@ -136,7 +136,7 @@ type ResponseAccumulator struct {
 // NewResponseAccumulator creates a new ResponseAccumulator.
 func NewResponseAccumulator() *ResponseAccumulator {
 	return &ResponseAccumulator{
-		contentBlocks: make(map[int]Content),
+		contentBlocks:    make(map[int]Content),
 		skippedBlocks:    make(map[int]bool),
 		skippedResultIDs: make(map[string]bool),
 		serverInputs:     make(map[int][]byte),
