@@ -180,6 +180,8 @@ type ToolAnnotations struct {
     IdempotentHint     bool   // Safe to call multiple times
     OpenWorldHint      bool   // Accesses external resources
     EditHint           bool   // File edit operation
+    SequentialOnlyHint bool   // Never run in parallel with other calls
+    HaltsBatch         bool   // A failure stops later HaltsBatch calls in the response
 }
 ```
 

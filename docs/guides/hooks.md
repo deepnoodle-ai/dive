@@ -235,6 +235,12 @@ Hooks: dive.Hooks{
 This separation mirrors Claude Code's distinct `PostToolUse` and
 `PostToolUseFailure` events.
 
+A call the agent halts because an earlier call in its batch failed (see
+`ToolAnnotations.HaltsBatch` in the [Custom Tools guide](custom-tools.md))
+fires no tool hooks at all: it never reaches `PreToolUse`, so a permission
+hook is not asked about it. A denial from `PreToolUse` counts as a failure and
+halts the rest of the batch.
+
 ### Injecting typed reminders
 
 Use `hctx.AppendReminder` for contextual or operator context that should appear
