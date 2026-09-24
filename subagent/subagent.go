@@ -130,24 +130,11 @@ func DescribeTypes(types map[string]*Definition) string {
 // If def.Tools is non-empty, only those tools are kept; otherwise all parent
 // tools are kept. Any tool named in def.DisallowedTools is then removed
 // (matched case-insensitively), and the Agent tool is never included.
-//
-// A tool that implements dive.ToolDeclarer, such as anthropic.ComputerToolset,
-// stands for the tools it declares: naming it in def.Tools also allows each
-// of allTools that it declares, and naming it in def.DisallowedTools also
-// removes them. So Tools: []string{"computer"} keeps the toolset together
-// with its member tools (left_click, screenshot, ...), which the model calls
-// by their own names, and DisallowedTools: []string{"computer"} does not
-// leave the members behind as plain tools.
 func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	var allowedSet map[string]bool
 	if len(def.Tools) > 0 {
 		allowedSet = make(map[string]bool, len(def.Tools))
 		for _, name := range def.Tools {
-			allowedSet[name] = true
-		}
-		for _, name := range declaredBy(allTools, func(declarer string) bool {
-			return allowedSet[declarer]
-		}) {
 			allowedSet[name] = true
 		}
 	}
@@ -156,11 +143,6 @@ func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	if len(def.DisallowedTools) > 0 {
 		disallowedSet = make(map[string]bool, len(def.DisallowedTools))
 		for _, name := range def.DisallowedTools {
-			disallowedSet[strings.ToLower(name)] = true
-		}
-		for _, name := range declaredBy(allTools, func(declarer string) bool {
-			return disallowedSet[strings.ToLower(declarer)]
-		}) {
 			disallowedSet[strings.ToLower(name)] = true
 		}
 	}
@@ -185,16 +167,4 @@ func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 		result = append(result, tool)
 	}
 	return result
-}
-
-// declaredBy returns the names of the tools declared by each tool in tools
-// that implements dive.ToolDeclarer and whose name matches.
-func declaredBy(tools []dive.Tool, match func(name string) bool) []string {
-	var names []string
-	for _, tool := range tools {
-		if d, ok := tool.(dive.ToolDeclarer); ok && match(tool.Name()) {
-			names = append(names, d.DeclaredTools()...)
-		}
-	}
-	return names
 }

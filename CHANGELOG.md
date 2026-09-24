@@ -12,7 +12,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (`DeclaredTools() []string`); `anthropic.ComputerToolset` implements it. Member
   tools are left out of the request while the toolset is present, saving ~1.3k
   input tokens per request, and are sent as ordinary tools without it.
-  `subagent.FilterTools` treats a declarer as its declared tools.
 - **Batch halting.** `ToolAnnotations.HaltsBatch` runs a response's calls in
   order and answers later halting calls after a failure without running them;
   `ToolCallResult.Error` is `dive.ErrBatchHalted`. Automatic for toolset calls
