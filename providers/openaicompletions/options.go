@@ -80,3 +80,20 @@ func WithReportedUsageCost(currency string) Option {
 		p.reportedCostCurrency = currency
 	}
 }
+
+// WithoutToolResultImages keeps images that tools return out of requests.
+// Each image is replaced by the text "[image content omitted]" in its tool
+// message, so the model is told an image existed but cannot see it.
+//
+// Chat Completions tool messages are text-only, so by default a tool-result
+// image is sent in a user message right after the tool messages. A text-only
+// model rejects that request, for example Mistral's codestral ("Image input
+// is not enabled") or DeepSeek models on OpenRouter ("No endpoints found
+// that support image input"). The image stays in the conversation history,
+// so every later request in the conversation fails too. Use this option with
+// text-only models.
+func WithoutToolResultImages() Option {
+	return func(p *Provider) {
+		p.omitToolResultImages = true
+	}
+}
