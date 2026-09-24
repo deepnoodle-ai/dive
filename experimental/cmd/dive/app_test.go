@@ -246,6 +246,23 @@ func TestReplayingAFailedReadKeepsTheError(t *testing.T) {
 	assert.Equal(t, msgs[0].ToolResult, "no such file: nope.go")
 }
 
+// A replayed tool result that carries an image shows its text, not the
+// image's base64, whether the blocks are typed or came back from JSON.
+func TestExtractToolResultTextSkipsImageData(t *testing.T) {
+	want := "Generated image: /tmp/cat.png (4x4 png)"
+	typed := []*dive.ToolResultContent{
+		{Type: dive.ToolResultContentTypeText, Text: want},
+		{Type: dive.ToolResultContentTypeImage, Data: "iVBORw0KGgo=", MimeType: "image/png"},
+	}
+	assert.Equal(t, want, extractToolResultText(&llm.ToolResultContent{Content: typed}))
+
+	decoded := []interface{}{
+		map[string]interface{}{"type": "text", "text": want},
+		map[string]interface{}{"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png"},
+	}
+	assert.Equal(t, want, extractToolResultText(&llm.ToolResultContent{Content: decoded}))
+}
+
 func TestMessageThinkingText(t *testing.T) {
 	text := messageThinkingText(&llm.Message{
 		Role: llm.Assistant,

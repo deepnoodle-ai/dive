@@ -1,13 +1,150 @@
 package toolkit
 
 import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/media"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
+
+// fakeImages maps a model name to the image the fake provider returns for it.
+var fakeImages sync.Map
+
+type fakeImageProvider struct{ model string }
+
+func (p fakeImageProvider) GenerateImage(ctx context.Context, prompt string, config *media.Config) ([]*media.ImageResult, error) {
+	v, _ := fakeImages.Load(p.model)
+	return []*media.ImageResult{v.(*media.ImageResult)}, nil
+}
+
+func init() {
+	media.RegisterImage(media.ImageProviderEntry{
+		Name:    "toolkit-fake",
+		Match:   media.PrefixMatcher("toolkit-fake-"),
+		Factory: func(model string) media.ImageProvider { return fakeImageProvider{model: model} },
+	})
+}
+
+// callFakeImageTool runs the tool against a fake model that returns result.
+func callFakeImageTool(t *testing.T, result *media.ImageResult, input *ImageGenerationInput) (*dive.ToolResult, string) {
+	t.Helper()
+	model := "toolkit-fake-" + t.Name()
+	fakeImages.Store(model, result)
+	t.Cleanup(func() { fakeImages.Delete(model) })
+	dir := t.TempDir()
+	out, err := NewImageGenerationTool(model, WithImageToolWorkDir(dir)).Unwrap().(*imageGenerationTool).Call(context.Background(), input)
+	assert.NoError(t, err)
+	return out, dir
+}
+
+func encodePNG(t *testing.T, img image.Image, level png.CompressionLevel) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	assert.NoError(t, (&png.Encoder{CompressionLevel: level}).Encode(&buf, img))
+	return buf.Bytes()
+}
+
+func TestImageGenerationTool_ReturnsImageAndSavesFile(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 4, 2))
+	data := encodePNG(t, img, png.DefaultCompression)
+	result, dir := callFakeImageTool(t, &media.ImageResult{
+		Data: data, Format: media.FormatPNG, MimeType: "image/png", Width: 4, Height: 2,
+	}, &ImageGenerationInput{Prompt: "a tiny square", OutputPath: "out.png"})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, 2, len(result.Content))
+
+	text := result.Content[0]
+	assert.Equal(t, dive.ToolResultContentTypeText, text.Type)
+	assert.Contains(t, text.Text, "out.png")
+	assert.Contains(t, text.Text, "(4x2 png)")
+	assert.Equal(t, text.Text, result.Display)
+
+	block := result.Content[1]
+	assert.Equal(t, dive.ToolResultContentTypeImage, block.Type)
+	assert.Equal(t, "image/png", block.MimeType)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(data), block.Data)
+
+	saved, err := os.ReadFile(filepath.Join(dir, "out.png"))
+	assert.NoError(t, err)
+	assert.Equal(t, data, saved)
+}
+
+func TestImageGenerationTool_ImageMimeTypeFollowsFormat(t *testing.T) {
+	var buf bytes.Buffer
+	assert.NoError(t, jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil))
+	// No MimeType from the provider: it is derived from the format.
+	result, _ := callFakeImageTool(t, &media.ImageResult{
+		Data: buf.Bytes(), Format: media.FormatJPEG, Width: 2, Height: 2,
+	}, &ImageGenerationInput{Prompt: "a photo", Format: "jpeg"})
+
+	assert.Equal(t, 2, len(result.Content))
+	assert.Equal(t, "image/jpeg", result.Content[1].MimeType)
+	assert.Contains(t, result.Content[0].Text, ".jpg")
+}
+
+// An image over the inline limit is sent as a downscaled JPEG preview, while
+// the original is what lands on disk.
+func TestImageGenerationTool_OversizedImageIsDownscaled(t *testing.T) {
+	img := image.NewGray(image.Rect(0, 0, 3000, 2000))
+	for i := range img.Pix {
+		img.Pix[i] = 128
+	}
+	data := encodePNG(t, img, png.NoCompression)
+	assert.True(t, base64.StdEncoding.EncodedLen(len(data)) > maxInlineImageBase64)
+
+	result, dir := callFakeImageTool(t, &media.ImageResult{
+		Data: data, Format: media.FormatPNG, MimeType: "image/png", Width: 3000, Height: 2000,
+	}, &ImageGenerationInput{Prompt: "a big grey field", OutputPath: "big.png"})
+
+	assert.Equal(t, 2, len(result.Content))
+	assert.Contains(t, result.Content[0].Text, "1568x1045 JPEG preview")
+	assert.Equal(t, "Generated image: "+filepath.Join(mustEvalSymlinks(t, dir), "big.png")+" (3000x2000 png)", result.Display)
+	assert.Equal(t, "image/jpeg", result.Content[1].MimeType)
+
+	preview, err := base64.StdEncoding.DecodeString(result.Content[1].Data)
+	assert.NoError(t, err)
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(preview))
+	assert.NoError(t, err)
+	assert.Equal(t, 1568, cfg.Width)
+	assert.Equal(t, 1045, cfg.Height)
+
+	saved, err := os.ReadFile(filepath.Join(dir, "big.png"))
+	assert.NoError(t, err)
+	assert.Equal(t, len(data), len(saved))
+}
+
+// An oversized image that cannot be decoded is left out, and the text says so.
+func TestImageGenerationTool_OversizedUndecodableImageIsOmitted(t *testing.T) {
+	data := bytes.Repeat([]byte{0}, maxInlineImageBase64)
+	result, _ := callFakeImageTool(t, &media.ImageResult{
+		Data: data, Format: media.FormatPNG, Width: 10, Height: 10,
+	}, &ImageGenerationInput{Prompt: "junk"})
+
+	assert.Equal(t, 1, len(result.Content))
+	assert.Equal(t, dive.ToolResultContentTypeText, result.Content[0].Type)
+	assert.Contains(t, result.Content[0].Text, "too large to show inline")
+	assert.False(t, strings.Contains(result.Display, "too large"))
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(path)
+	assert.NoError(t, err)
+	return real
+}
 
 func TestImageGenerationTool_Name(t *testing.T) {
 	tool := NewImageGenerationTool("test-model")
@@ -19,6 +156,7 @@ func TestImageGenerationTool_Description(t *testing.T) {
 	desc := tool.Description()
 	assert.Contains(t, desc, "imagen-4")
 	assert.Contains(t, desc, "image")
+	assert.Contains(t, desc, "returns both the file path and the image")
 }
 
 func TestImageGenerationTool_Annotations(t *testing.T) {

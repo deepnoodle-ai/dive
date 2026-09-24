@@ -274,6 +274,13 @@ The tools automatically:
 - Return the absolute file path to the agent
 - Avoid overwriting existing files
 
+`ImageGeneration` also returns the image itself in the tool result, after a
+text block with the path, dimensions and format, so the model can see what it
+made. An image over 5 MB base64 (Anthropic's per-image limit) is sent as a JPEG
+preview with a long edge of 1568 px instead; if it cannot be shrunk, it is left
+out and the text says so. The file on disk is always the original.
+`VideoGeneration` returns only the path.
+
 ## CLI Commands
 
 The experimental CLI includes `image` and `video` subcommands. The model is

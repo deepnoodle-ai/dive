@@ -26,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **`ImageGeneration` returns the image to the model.** The result is a text
+  block (path, size, format) plus the image; over 5 MB base64 it becomes a
+  1568 px JPEG preview, or is omitted. The file is still saved.
 - **`OutputText` returns the whole answer.** All text of the final message:
   adjacent fragments joined as-is, separate passages by a blank line. It
   previously returned the last text block.
