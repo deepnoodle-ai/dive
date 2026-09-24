@@ -6,7 +6,6 @@ import (
 	"html"
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -26,6 +25,7 @@ type Client struct {
 	resources          []mcp.Resource
 	serverCapabilities *mcp.ServerCapabilities
 	connected          bool
+	stopStream         context.CancelFunc
 }
 
 // NewClient creates a new MCP client instance with OAuth support
@@ -68,6 +68,12 @@ func NewClient(cfg *ServerConfig) (*Client, error) {
 
 // Connect establishes connection to the MCP server with OAuth support
 func (c *Client) Connect(ctx context.Context) error {
+	// A failed connect must not leave a stdio child process running.
+	defer func() {
+		if !c.connected && c.client != nil {
+			_ = c.client.Close()
+		}
+	}()
 	// For OAuth-enabled HTTP clients, create the client first
 	if c.config.Type == "http" && c.config.IsOAuthEnabled() {
 		if err := c.connectWithOAuth(); err != nil {
@@ -82,31 +88,35 @@ func (c *Client) Connect(ctx context.Context) error {
 				return fmt.Errorf("url is required for http mcp server")
 			}
 			var opts []transport.StreamableHTTPCOption
-			if headers := buildRequestHeaders(c.config.AuthorizationToken, c.config.Headers); len(headers) > 0 {
+			if headers := buildRequestHeaders(ExpandEnv(c.config.AuthorizationToken), expandEnvMap(c.config.Headers)); len(headers) > 0 {
 				opts = append(opts, transport.WithHTTPHeaders(headers))
 			}
-			c.client, err = client.NewStreamableHttpClient(c.config.URL, opts...)
+			c.client, err = client.NewStreamableHttpClient(ExpandEnv(c.config.URL), opts...)
+		case "sse":
+			if c.config.URL == "" {
+				return fmt.Errorf("url is required for sse mcp server")
+			}
+			var opts []transport.ClientOption
+			if headers := buildRequestHeaders(ExpandEnv(c.config.AuthorizationToken), expandEnvMap(c.config.Headers)); len(headers) > 0 {
+				opts = append(opts, transport.WithHeaders(headers))
+			}
+			c.client, err = client.NewSSEMCPClient(ExpandEnv(c.config.URL), opts...)
 		case "stdio":
 			if c.config.Command == "" {
 				return fmt.Errorf("command is required for stdio mcp server")
 			}
-			// For stdio, URL contains the command to execute
-			envMap := c.config.Env
-			args := c.config.Args
-
-			// Perform environment variable substitution on args
-			expandedArgs := make([]string, len(args))
-			for i, arg := range args {
-				expandedArgs[i] = os.ExpandEnv(arg)
+			// Expand ${VAR} and ${VAR:-default} references in the command,
+			// args, and env values. The child inherits the parent environment;
+			// Env adds to it.
+			expandedArgs := make([]string, len(c.config.Args))
+			for i, arg := range c.config.Args {
+				expandedArgs[i] = ExpandEnv(arg)
 			}
-
-			// Convert environment map to slice of "KEY=VALUE" strings with substitution
-			env := make([]string, 0, len(envMap))
-			for key, value := range envMap {
-				expandedValue := os.ExpandEnv(value)
-				env = append(env, fmt.Sprintf("%s=%s", key, expandedValue))
+			env := make([]string, 0, len(c.config.Env))
+			for key, value := range c.config.Env {
+				env = append(env, fmt.Sprintf("%s=%s", key, ExpandEnv(value)))
 			}
-			c.client, err = client.NewStdioMCPClient(c.config.Command, env, expandedArgs...)
+			c.client, err = client.NewStdioMCPClient(ExpandEnv(c.config.Command), env, expandedArgs...)
 		default:
 			return fmt.Errorf("unsupported mcp server type: %s", c.config.Type)
 		}
@@ -115,15 +125,29 @@ func (c *Client) Connect(ctx context.Context) error {
 		}
 	}
 
+	// Some transports (SSE) bind their long-lived stream to the context
+	// passed to Start. Give them one that follows ctx only until Connect
+	// succeeds, so a connect timeout bounds the handshake without ending the
+	// session when it expires later.
+	startCtx, cancelStart := context.WithCancel(context.WithoutCancel(ctx))
+	stopFollowing := context.AfterFunc(ctx, cancelStart)
+	defer func() {
+		stopFollowing()
+		if !c.connected {
+			cancelStart()
+		}
+	}()
+	c.stopStream = cancelStart
+
 	// Start the client (OAuth flow may happen here)
-	if err := c.client.Start(ctx); err != nil {
+	if err := c.client.Start(startCtx); err != nil {
 		// Check if this is an OAuth authorization error
 		if c.config.IsOAuthEnabled() && c.isOAuthAuthorizationError(err) {
 			if authErr := c.handleOAuthAuthorization(ctx, err); authErr != nil {
 				return fmt.Errorf("OAuth authorization failed for server %s: %w", c.config.Name, authErr)
 			}
 			// Retry start after OAuth flow with the same client instance
-			if err := c.client.Start(ctx); err != nil {
+			if err := c.client.Start(startCtx); err != nil {
 				return fmt.Errorf("failed to start mcp client for server %s after OAuth: %w", c.config.Name, err)
 			}
 		} else {
@@ -509,6 +533,9 @@ func (c *Client) IsConnected() bool {
 // transport (and terminating the child process for stdio servers).
 func (c *Client) Close() error {
 	c.connected = false
+	if c.stopStream != nil {
+		defer c.stopStream()
+	}
 	if c.client != nil {
 		return c.client.Close()
 	}

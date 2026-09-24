@@ -6,6 +6,7 @@ toolchain go1.26.8
 
 require (
 	github.com/deepnoodle-ai/dive v1.32.0
+	github.com/deepnoodle-ai/dive/experimental/mcp v1.9.0
 	github.com/deepnoodle-ai/dive/providers/google v1.32.0
 	github.com/deepnoodle-ai/dive/providers/grok v1.32.0
 	github.com/deepnoodle-ai/dive/providers/meta v1.32.0
@@ -27,17 +28,21 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gobwas/glob v1.0.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.21 // indirect
 	github.com/googleapis/gax-go/v2 v2.24.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/kr/text v0.2.0 // indirect
+	github.com/mark3labs/mcp-go v1.0.0 // indirect
 	github.com/openai/openai-go/v3 v3.56.0 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
+	github.com/spf13/cast v1.10.0 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.8.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
@@ -58,6 +63,7 @@ require (
 
 replace (
 	github.com/deepnoodle-ai/dive => ../../..
+	github.com/deepnoodle-ai/dive/experimental/mcp => ../../mcp
 	github.com/deepnoodle-ai/dive/providers/google => ../../../providers/google
 	github.com/deepnoodle-ai/dive/providers/grok => ../../../providers/grok
 	github.com/deepnoodle-ai/dive/providers/meta => ../../../providers/meta

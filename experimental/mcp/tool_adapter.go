@@ -15,6 +15,7 @@ type ToolAdapter struct {
 	mcpClient  *Client
 	toolInfo   mcp.Tool
 	serverName string
+	name       string // exposed name; the MCP tool name when empty
 }
 
 // NewToolAdapter creates a new MCP tool adapter
@@ -26,9 +27,27 @@ func NewToolAdapter(client *Client, tool mcp.Tool, serverName string) *ToolAdapt
 	}
 }
 
-// Name returns the name of the MCP tool
+// NewQualifiedToolAdapter creates an adapter exposed to the model as
+// QualifiedToolName(serverName, tool.Name), so tools from different servers
+// cannot collide. Calls still reach the server under the tool's own name.
+func NewQualifiedToolAdapter(client *Client, tool mcp.Tool, serverName string) *ToolAdapter {
+	adapter := NewToolAdapter(client, tool, serverName)
+	adapter.name = QualifiedToolName(serverName, tool.Name)
+	return adapter
+}
+
+// Name returns the tool name exposed to the model: the MCP tool name, or the
+// qualified name for adapters built with NewQualifiedToolAdapter.
 func (t *ToolAdapter) Name() string {
+	if t.name != "" {
+		return t.name
+	}
 	return t.toolInfo.Name
+}
+
+// ServerName returns the name of the MCP server that provides the tool.
+func (t *ToolAdapter) ServerName() string {
+	return t.serverName
 }
 
 // Description returns the description of the MCP tool
@@ -50,7 +69,8 @@ func (t *ToolAdapter) Schema() *schema.Schema {
 	}
 	// Create a Schema from the MCP schema
 	diveSchema := &schema.Schema{
-		Type: schema.SchemaType(t.toolInfo.InputSchema.Type),
+		Type:     schema.SchemaType(t.toolInfo.InputSchema.Type),
+		Required: t.toolInfo.InputSchema.Required,
 	}
 	if t.toolInfo.InputSchema.Properties != nil {
 		diveSchema.Properties = make(map[string]*schema.Property)
@@ -95,12 +115,19 @@ func (t *ToolAdapter) Call(ctx context.Context, input any) (*dive.ToolResult, er
 	switch v := input.(type) {
 	case map[string]interface{}:
 		arguments = v
-	case json.RawMessage:
+	case json.RawMessage, []byte:
+		// The agent passes the call's raw JSON input as []byte.
+		var raw []byte
+		if r, ok := v.(json.RawMessage); ok {
+			raw = r
+		} else {
+			raw = v.([]byte)
+		}
 		// Handle empty JSON input
-		if len(v) == 0 || string(v) == `""` {
+		if len(raw) == 0 || string(raw) == `""` || string(raw) == "null" {
 			arguments = make(map[string]interface{})
 		} else {
-			if err := json.Unmarshal(v, &arguments); err != nil {
+			if err := json.Unmarshal(raw, &arguments); err != nil {
 				return dive.NewToolResultError(fmt.Sprintf("Failed to unmarshal input: %v", err)), nil
 			}
 		}

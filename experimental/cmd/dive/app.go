@@ -298,6 +298,7 @@ type App struct {
 	workspaceDir string
 	modelName    string
 	skills       *skill.Loader
+	mcp          *mcpRuntime // connected MCP servers; nil when none configured
 
 	// Session management
 	resumeSessionID string           // Session ID to resume (from --resume flag)
@@ -2289,6 +2290,9 @@ func (a *App) appendIntro() int {
 	if !a.contextDemos.empty() {
 		content += "\ncontext: " + a.contextDemos.displaySummary() + " · /context to inspect"
 	}
+	if line := a.mcp.summary(); line != "" {
+		content += "\nmcp: " + line
+	}
 	if a.resumeSessionID != "" {
 		content += "\nResuming session: " + a.resumeSessionID
 	}
@@ -2587,6 +2591,10 @@ func (a *App) handleCommand(input string, attachments []attachment) bool {
 	case "context":
 		a.printContextDemoReport()
 		return true
+
+	case "mcp":
+		a.printMCPReport()
+		return true
 	}
 
 	// Check for custom slash commands and skills
@@ -2750,6 +2758,7 @@ func (a *App) printHelp() {
 		tui.Text("  /todos, /t     Toggle todo list"),
 		tui.Text("  /usage [full|brief]  Show usage breakdown; full/brief toggles the live panel"),
 		tui.Text("  /context       Inspect context-demo reminders from the latest turn"),
+		tui.Text("  /mcp           Show MCP servers and their tools"),
 		tui.Text("  /copy [N|all]  Copy the selection, or a code block from the last reply"),
 		tui.Text("  /mouse         Toggle mouse reporting"),
 		tui.Text("  /scrollback    Show the conversation in your terminal, for find and bulk copy"),
@@ -3206,7 +3215,7 @@ func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
 	builtins := []string{
 		"clear", "compact", "context", "copy", "cost", "effort", "help",
-		"model", "mouse", "quit", "scrollback", "status", "thinking",
+		"mcp", "model", "mouse", "quit", "scrollback", "status", "thinking",
 		"todos", "usage",
 	}
 
