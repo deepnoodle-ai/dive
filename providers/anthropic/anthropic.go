@@ -292,6 +292,11 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 			}
 			switch c := content.(type) {
 			case *llm.TextContent:
+				// Gemini can leave an empty text block carrying only a thought
+				// signature in history. Anthropic rejects empty text blocks.
+				if c.Text == "" {
+					continue
+				}
 				text := c.CloneContent().(*llm.TextContent)
 				text.Metadata = nil
 				copiedContent = append(copiedContent, text)

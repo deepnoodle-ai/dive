@@ -309,6 +309,60 @@ func TestDocumentContentHandling(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesSkipsEmptyGeminiText(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		emptyOnly  bool
+		roundTrip  bool
+		wantLength int
+	}{
+		{name: "trailing signed block", wantLength: 3},
+		{name: "trailing signed block after JSON round trip", roundTrip: true, wantLength: 3},
+		{name: "empty-only message", emptyOnly: true, wantLength: 2},
+		{name: "empty-only message after JSON round trip", emptyOnly: true, roundTrip: true, wantLength: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			empty := &llm.TextContent{Text: "", Metadata: llm.ProviderMetadata{"google.thought_signature": "c2ln"}}
+			assistantContent := []llm.Content{empty}
+			if !tc.emptyOnly {
+				assistantContent = append([]llm.Content{llm.NewTextContent("3 purple")}, assistantContent...)
+			}
+			messages := []*llm.Message{
+				llm.NewUserTextMessage("start"),
+				{Role: llm.Assistant, Content: assistantContent},
+				llm.NewUserTextMessage("continue"),
+			}
+			if tc.roundTrip {
+				data, err := json.Marshal(messages)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(data, &messages); err != nil {
+					t.Fatal(err)
+				}
+			}
+			converted, err := convertMessages(messages)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, converted, tc.wantLength)
+			assert.Equal(t, "start", converted[0].Text())
+			assert.Equal(t, "continue", converted[len(converted)-1].Text())
+			if !tc.emptyOnly {
+				assert.Equal(t, llm.Assistant, converted[1].Role)
+				assert.Len(t, converted[1].Content, 1)
+				text, ok := converted[1].Content[0].(*llm.TextContent)
+				if !ok {
+					t.Fatalf("expected text block, got %T", converted[1].Content[0])
+				}
+				assert.Equal(t, "3 purple", text.Text)
+				assert.Nil(t, text.Metadata)
+			}
+			assert.Equal(t, "c2ln", messages[1].Content[len(messages[1].Content)-1].(*llm.TextContent).Metadata["google.thought_signature"])
+		})
+	}
+}
+
 // applyTestCaching builds a Request from system/messages and runs the hybrid
 // cache placement against a provider configured for the default endpoint
 // (automatic caching supported) unless overridden.
