@@ -54,6 +54,17 @@ func TestToolDeclarer(t *testing.T) {
 		assert.Equal(t, model.tools, [][]string{{"left_click", "search", "type"}})
 	})
 
+	t.Run("a declarer that declares its own name is still sent", func(t *testing.T) {
+		model := &batchLLM{}
+		self := &declarerTool{countingTool: countingTool{name: "computer"}, declares: []string{"computer", "left_click"}}
+		agent, err := NewAgent(AgentOptions{Model: model, Tools: []Tool{self, click, search}})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("go"))
+		assert.NoError(t, err)
+		assert.Equal(t, model.tools, [][]string{{"computer", "search"}})
+	})
+
 	t.Run("a declarer from a dynamic toolset hides static tools", func(t *testing.T) {
 		model := &batchLLM{}
 		agent, err := NewAgent(AgentOptions{
