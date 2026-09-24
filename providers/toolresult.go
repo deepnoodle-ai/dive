@@ -96,11 +96,16 @@ func ToolResultImageMediaType(b *dive.ToolResultContent) string {
 // of its tool result and into ordinary image content at the end of the same
 // message, for APIs that cannot carry an image inside a tool result (Chat
 // Completions tool messages are text-only; Gemini 2.5 rejects media in a
-// function response). Every encoder already emits a message's tool results
-// before its other content, so on the wire the images land immediately after
-// the run of tool results, in a user turn:
+// function response).
+//
+// The caller's encoder must emit a message's tool results before its other
+// content, as every Dive encoder does. The images then land immediately after
+// the run of tool results on the wire, in a user turn:
 //
 //	assistant(tool_calls) → tool(text + pointer) … → user[label, image, …]
+//
+// An encoder that interleaves tool results with other content would separate
+// an image from the pointer that announces it.
 //
 // The tool result keeps its text and gains a line saying where its image went,
 // and each image is preceded by a label naming the tool call it came from, so
@@ -204,10 +209,7 @@ func liftMessageImages(m *llm.Message, errorsOnly bool) (*llm.Message, bool) {
 	if len(images) == 0 {
 		return nil, false
 	}
-	return &llm.Message{
-		ID:      m.ID,
-		Role:    m.Role,
-		Content: append(content, images...),
-		Effort:  m.Effort,
-	}, true
+	cp := *m
+	cp.Content = append(content, images...)
+	return &cp, true
 }
