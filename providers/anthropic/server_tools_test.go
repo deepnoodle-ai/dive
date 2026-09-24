@@ -61,6 +61,7 @@ func TestRequestDropsForeignServerToolContent(t *testing.T) {
 		&llm.Message{Role: llm.Assistant, Content: []llm.Content{
 			&llm.MCPToolUseContent{ID: "mcp_1", Name: "lookup", ServerName: "docs", Input: json.RawMessage(`{}`)},
 			&llm.MCPToolResultContent{ToolUseID: "mcp_1", Content: []*llm.ContentChunk{{Type: "text", Text: "result"}}},
+			&llm.MCPListToolsContent{ServerLabel: "docs"},
 		}},
 		llm.NewUserTextMessage("Thanks"),
 	)

@@ -256,7 +256,9 @@ const openAIMCPCallIDPrefix = "mcp_"
 // "web_search_call" (Anthropic names its calls after the tool, such as
 // "web_search"). An mcp_call decodes to an MCPToolUseContent and, when it has
 // output, an MCPToolResultContent, both keyed by the item ID, which OpenAI
-// starts with "mcp_".
+// starts with "mcp_". An mcp_list_tools item is not replayed, even OpenAI's
+// own: the decoder does not keep its item ID, and without the item the API
+// lists the server's tools again.
 func isOpenAIServerToolContent(content llm.Content) bool {
 	switch c := content.(type) {
 	case *llm.ServerToolUseContent:

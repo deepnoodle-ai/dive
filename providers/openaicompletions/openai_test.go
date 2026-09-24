@@ -858,6 +858,7 @@ func TestConvertMessagesSkipsForeignServerToolBlocks(t *testing.T) {
 			Content: []llm.Content{
 				&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
 				&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
+				&llm.MCPListToolsContent{ServerLabel: "deepwiki"},
 				&llm.TextContent{Text: "Found it."},
 			},
 		},

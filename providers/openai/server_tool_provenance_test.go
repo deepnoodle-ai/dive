@@ -28,6 +28,21 @@ func TestEncodeAssistantMessageSkipsForeignMCPBlocks(t *testing.T) {
 	assert.NotNil(t, items[1].OfOutputMessage)
 }
 
+// An mcp_list_tools listing is left out, since it cannot be replayed without
+// its item ID; before, it failed the whole request.
+func TestEncodeAssistantMessageSkipsMCPListTools(t *testing.T) {
+	items, err := encodeAssistantMessage(&llm.Message{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.MCPListToolsContent{ServerLabel: "deepwiki"},
+			&llm.TextContent{Text: "Listed."},
+		},
+	})
+	assert.NoError(t, err)
+	assert.Len(t, items, 1)
+	assert.NotNil(t, items[0].OfOutputMessage)
+}
+
 // OpenAI's own server tool items round-trip: a decoded mcp_call and
 // web_search_call are sent back as the items they came from.
 func TestEncodeAssistantMessageReplaysOwnServerToolItems(t *testing.T) {

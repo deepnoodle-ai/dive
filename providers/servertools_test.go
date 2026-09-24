@@ -17,6 +17,7 @@ func TestIsServerToolContent(t *testing.T) {
 		&llm.TextEditorCodeExecutionToolResultContent{ToolUseID: "srvtoolu_1"},
 		&llm.MCPToolUseContent{ID: "mcptoolu_1"},
 		&llm.MCPToolResultContent{ToolUseID: "mcptoolu_1"},
+		&llm.MCPListToolsContent{ServerLabel: "deepwiki"},
 	}
 	for _, c := range serverSide {
 		assert.True(t, IsServerToolContent(c), "%T", c)

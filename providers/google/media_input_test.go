@@ -193,10 +193,10 @@ func TestMessagesToContentsSkipsEffortMessages(t *testing.T) {
 // dropped block.
 func TestMessagesToContentsUnknownContentErrors(t *testing.T) {
 	_, err := messagesToContents([]*llm.Message{
-		userMessage(&llm.MCPListToolsContent{ServerLabel: "srv"}),
+		userMessage(&llm.MCPApprovalRequestContent{ID: "mcpr_1", Name: "lookup", ServerLabel: "srv"}),
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported content type for google provider: mcp_list_tools")
+	assert.Contains(t, err.Error(), "unsupported content type for google provider: mcp_approval_request")
 }
 
 // An Anthropic turn that used web search keeps its server tool blocks in
@@ -209,6 +209,7 @@ func TestMessagesToContentsSkipsForeignServerToolBlocks(t *testing.T) {
 				&llm.TextContent{Text: "Searching."},
 				&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
 				&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
+				&llm.MCPListToolsContent{ServerLabel: "deepwiki"},
 				&llm.TextContent{Text: "Found it."},
 			},
 		},

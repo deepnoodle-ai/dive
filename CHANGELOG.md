@@ -8,14 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Provider-defined toolsets declare their members.** `dive.ToolDeclarer`
-  (`DeclaredTools() []string`); `anthropic.ComputerToolset` implements it. Member
-  tools are left out of the request while the toolset is present, saving ~1.3k
-  input tokens per request, and are sent as ordinary tools without it.
-- **Batch halting.** `ToolAnnotations.HaltsBatch` runs a response's calls in
-  order and answers later halting calls after a failure without running them;
-  `ToolCallResult.Error` is `dive.ErrBatchHalted`. Automatic for toolset calls
-  (`ToolsetName` set), which get Anthropic's `ComputerToolsetHaltText`.
+- **Provider-defined toolsets declare their members.** `dive.ToolDeclarer`;
+  `anthropic.ComputerToolset` implements it. Member tools are left out of the
+  request while the toolset is present and sent as ordinary tools without it.
+- **Batch halting.** `ToolAnnotations.HaltsBatch`: after a failure, later
+  halting calls in the response are not run and carry `dive.ErrBatchHalted`.
+  Automatic for toolset calls, with `anthropic.ComputerToolsetHaltText`.
 - **Tool-result image helpers for encoders.** `providers.LiftToolResultImages`,
   `providers.LiftErrorToolResultImages` and `providers.ToolResultImageMediaType`.
 - **Server tool results without a dedicated type.** `llm.ServerToolResultContent`
@@ -36,10 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Streamed responses keep server tool blocks.** Web search calls and results
   (including encrypted content) stay in history as with `Generate`, so history
   grows. Providers that cannot replay a block leave it out.
-- **Tool-result images reach every provider.** Natively on Gemini 3; in the
-  following user turn on Gemini 2.5, Chat Completions, Mistral and OpenRouter.
-  A text-only model now returns the provider's API error; don't give it tools
-  that return images.
+- **Tool-result images reach every provider**, including Gemini, Chat
+  Completions, Mistral and OpenRouter. A text-only model now returns the
+  provider's API error; don't give it tools that return images.
 - **Toolset calls run in order and halt at the first failure**, even with
   `ParallelToolExecution`.
 - **Unknown content blocks no longer fail `Generate`.** They are skipped, as in
@@ -55,8 +52,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Anthropic web fetch and tool search work with `Generate`** and replay on the
   next turn, instead of failing with "unsupported content type".
 - **Server tool history from another provider is left out.** Anthropic MCP
-  connector blocks no longer reach the OpenAI Responses API, and OpenAI
-  search/MCP items no longer reach Anthropic.
+  connector blocks no longer reach OpenAI, nor OpenAI search/MCP items other
+  providers. OpenAI MCP tool listings no longer fail the next request.
 
 ## [1.32.0] - 2026-09-23
 
