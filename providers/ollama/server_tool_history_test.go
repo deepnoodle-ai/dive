@@ -24,18 +24,37 @@ func TestHistoryFromAnthropicWebSearchOmitsServerToolBlocks(t *testing.T) {
 	}))
 	defer server.Close()
 
+	answer := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
+		&llm.TextContent{Text: "Searching."},
+		&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
+		&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
+		&llm.TextContent{Text: "April 30, 1916."},
+	}}
 	_, err := New(WithEndpoint(server.URL)).Generate(context.Background(), llm.WithMessages(
 		llm.NewUserTextMessage("When was Claude Shannon born?"),
-		&llm.Message{Role: llm.Assistant, Content: []llm.Content{
-			&llm.TextContent{Text: "Searching."},
-			&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
-			&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
-			&llm.TextContent{Text: "April 30, 1916."},
-		}},
+		answer,
 		llm.NewUserTextMessage("Thanks"),
 	))
 	assert.NoError(t, err)
 	assert.False(t, strings.Contains(body, "server_tool_use"))
 	assert.False(t, strings.Contains(body, "web_search_tool_result"))
+	assert.True(t, strings.Contains(body, "Searching."))
 	assert.True(t, strings.Contains(body, "April 30, 1916."))
+
+	// The caller's history is not modified.
+	assert.Len(t, answer.Content, 4)
+}
+
+// A message holding only server tool blocks is dropped entirely.
+func TestWithoutServerToolsDropsEmptiedMessages(t *testing.T) {
+	opts := withoutServerTools([]llm.Option{llm.WithMessages(
+		llm.NewUserTextMessage("hi"),
+		&llm.Message{Role: llm.Assistant, Content: []llm.Content{
+			&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search"},
+		}},
+	)})
+	config := &llm.Config{}
+	config.Apply(opts...)
+	assert.Len(t, config.Messages, 1)
+	assert.Equal(t, llm.User, config.Messages[0].Role)
 }

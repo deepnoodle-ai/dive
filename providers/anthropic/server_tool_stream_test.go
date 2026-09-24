@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -91,88 +90,6 @@ data: {"type":"message_stop"}
 
 `
 
-// redirectClient sends every request to target, keeping the path. It lets a
-// test use the first-party DefaultEndpoint while talking to a local server.
-func redirectClient(target string) *http.Client {
-	targetURL, err := url.Parse(target)
-	if err != nil {
-		panic(err)
-	}
-	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		r = r.Clone(r.Context())
-		r.URL.Scheme = targetURL.Scheme
-		r.URL.Host = targetURL.Host
-		r.Host = targetURL.Host
-		return http.DefaultTransport.RoundTrip(r)
-	})}
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-// assistantBlockTypes returns the content block types of the assistant
-// messages in an Anthropic request body.
-func assistantBlockTypes(t *testing.T, body string) []string {
-	t.Helper()
-	var request struct {
-		Messages []struct {
-			Role    string           `json:"role"`
-			Content []map[string]any `json:"content"`
-		} `json:"messages"`
-	}
-	assert.NoError(t, json.Unmarshal([]byte(body), &request))
-	var types []string
-	for _, message := range request.Messages {
-		if message.Role != "assistant" {
-			continue
-		}
-		for _, block := range message.Content {
-			types = append(types, block["type"].(string))
-		}
-	}
-	return types
-}
-
-// An Anthropic-compatible server (Ollama, a custom endpoint) did not run
-// Anthropic's server tools, so their blocks from an earlier turn are not
-// sent to it. The text around them is.
-func TestNonFirstPartyEndpointDropsServerToolBlocks(t *testing.T) {
-	var body string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		body = string(raw)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"msg_2","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
-	}))
-	defer server.Close()
-
-	history := []*llm.Message{
-		llm.NewUserTextMessage("When was Claude Shannon born?"),
-		{Role: llm.Assistant, Content: []llm.Content{
-			&llm.TextContent{Text: "Searching."},
-			&llm.ServerToolUseContent{ID: "srvtoolu_1", Name: "web_search", Input: map[string]any{"query": "q"}},
-			&llm.WebSearchToolResultContent{ToolUseID: "srvtoolu_1"},
-			&llm.TextContent{Text: "April 30, 1916."},
-		}},
-		llm.NewUserTextMessage("Thanks"),
-	}
-
-	_, err := New(WithAPIKey("k"), WithEndpoint(server.URL)).
-		Generate(context.Background(), llm.WithMessages(history...))
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"text", "text"}, assistantBlockTypes(t, body))
-
-	// The caller's history is not modified.
-	assert.Len(t, history[1].Content, 4)
-
-	// The first-party endpoint keeps them.
-	_, err = New(WithAPIKey("k"), WithClient(redirectClient(server.URL))).
-		Generate(context.Background(), llm.WithMessages(history...))
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"text", "server_tool_use", "web_search_tool_result", "text"}, assistantBlockTypes(t, body))
-}
-
 func serveBody(contentType, body string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", contentType)
@@ -233,10 +150,10 @@ func TestAgentWebSearchStreamOutputTextAndReplay(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Keep the first-party endpoint, where server tool blocks replay, and
-	// route its requests to the test server.
+	// A custom endpoint (a gateway or proxy to Anthropic) replays the blocks
+	// too; only the ollama provider strips them.
 	agent, err := dive.NewAgent(dive.AgentOptions{
-		Model:   New(WithAPIKey("k"), WithClient(redirectClient(server.URL))),
+		Model:   New(WithAPIKey("k"), WithEndpoint(server.URL)),
 		Session: session.New("web-search"),
 	})
 	assert.NoError(t, err)
