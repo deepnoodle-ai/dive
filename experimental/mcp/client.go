@@ -176,11 +176,11 @@ func (c *Client) connectWithOAuth() error {
 	// Custom headers are still sent on OAuth requests; the OAuth handler sets
 	// the Authorization header after custom headers, so it remains authoritative.
 	var opts []transport.StreamableHTTPCOption
-	if len(c.config.Headers) > 0 {
-		opts = append(opts, transport.WithHTTPHeaders(c.config.Headers))
+	if headers := expandEnvMap(c.config.Headers); len(headers) > 0 {
+		opts = append(opts, transport.WithHTTPHeaders(headers))
 	}
 	var err error
-	c.client, err = client.NewOAuthStreamableHttpClient(c.config.URL, client.OAuthConfig{
+	c.client, err = client.NewOAuthStreamableHttpClient(ExpandEnv(c.config.URL), client.OAuthConfig{
 		ClientID:     c.oauthConfig.ClientID,
 		ClientSecret: c.oauthConfig.ClientSecret,
 		RedirectURI:  c.oauthConfig.RedirectURI,
