@@ -77,6 +77,18 @@ func (b *EventContentBlock) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON encodes the content block. A block whose JSON UnmarshalJSON
+// kept is written back as that JSON, so an event that is encoded (for example
+// to relay or record a stream) and decoded again still carries the whole
+// block, such as a server tool result.
+func (b EventContentBlock) MarshalJSON() ([]byte, error) {
+	if len(b.raw) > 0 {
+		return b.raw, nil
+	}
+	type plain EventContentBlock
+	return json.Marshal(plain(b))
+}
+
 // EventDeltaType indicates the type of delta in an LLM event.
 type EventDeltaType string
 
@@ -111,6 +123,10 @@ type ResponseAccumulator struct {
 	response      *Response
 	contentBlocks map[int]Content // Map of content blocks by index
 	skippedBlocks map[int]bool    // Indices of unrecognized content block types
+	// skippedResultIDs holds the tool_use_id of each skipped block that
+	// named one. A server tool call whose result was skipped is dropped from
+	// the response (see dropServerToolCalls).
+	skippedResultIDs map[string]bool
 	// serverInputs buffers input_json_delta fragments for server-side tool
 	// calls (ServerToolUseContent, MCPToolUseContent) until the block stops.
 	serverInputs map[int][]byte
@@ -121,8 +137,9 @@ type ResponseAccumulator struct {
 func NewResponseAccumulator() *ResponseAccumulator {
 	return &ResponseAccumulator{
 		contentBlocks: make(map[int]Content),
-		skippedBlocks: make(map[int]bool),
-		serverInputs:  make(map[int][]byte),
+		skippedBlocks:    make(map[int]bool),
+		skippedResultIDs: make(map[string]bool),
+		serverInputs:     make(map[int][]byte),
 	}
 }
 
@@ -181,9 +198,15 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			// Unrecognized content block type (for example one that
 			// UnmarshalContent does not support). Skip it rather than
 			// storing a nil entry, and remember the index so subsequent delta
-			// events for this block are ignored.
+			// events for this block are ignored. When the skipped block is
+			// the result of a server tool call, that call is dropped too:
+			// a call without its result is rejected when the history is
+			// sent back.
 			if event.Index != nil {
 				r.skippedBlocks[*event.Index] = true
+			}
+			if id := blockToolUseID(event.ContentBlock.raw); id != "" {
+				r.skippedResultIDs[id] = true
 			}
 			return nil
 		}
@@ -360,7 +383,36 @@ func (r *ResponseAccumulator) finalizeContent() {
 		content[i] = r.contentBlocks[index]
 	}
 
-	r.response.Content = content
+	r.response.Content = dropServerToolCalls(content, r.skippedResultIDs)
+}
+
+// dropServerToolCalls removes the server-side tool calls
+// (ServerToolUseContent, MCPToolUseContent) whose IDs are in ids. It is used
+// for calls whose result block was skipped because Dive cannot decode it.
+// Such a call must not stay in the history on its own: Anthropic rejects a
+// server tool call that has no result, except at the very end of a paused
+// turn (stop reason pause_turn), where the call is legitimately still
+// running and its result was never sent. Only calls with a skipped result
+// are removed, so that case is untouched.
+func dropServerToolCalls(content []Content, ids map[string]bool) []Content {
+	if len(ids) == 0 {
+		return content
+	}
+	kept := content[:0]
+	for _, c := range content {
+		switch call := c.(type) {
+		case *ServerToolUseContent:
+			if ids[call.ID] {
+				continue
+			}
+		case *MCPToolUseContent:
+			if ids[call.ID] {
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	return kept
 }
 
 func (r *ResponseAccumulator) IsComplete() bool {

@@ -75,7 +75,7 @@ func TestResponseAccumulatorKeepsDecodedServerToolBlocks(t *testing.T) {
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://example.com","title":"Example"}]}}`,
 		`{"type":"content_block_stop","index":1}`,
-		`{"type":"content_block_start","index":2,"content_block":{"type":"future_tool_result","tool_use_id":"srvtoolu_1"}}`,
+		`{"type":"content_block_start","index":2,"content_block":{"type":"future_block","data":"x"}}`,
 		`{"type":"content_block_stop","index":2}`,
 		`{"type":"message_stop"}`,
 	}

@@ -355,6 +355,8 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 			nonEmpty = append(nonEmpty, message)
 		}
 	}
+	// Never send a server tool call without its result, or the reverse.
+	nonEmpty = dropUnpairedServerToolBlocks(nonEmpty)
 	if len(nonEmpty) == 0 {
 		return nil, fmt.Errorf("all messages are empty after provider conversion")
 	}
