@@ -255,21 +255,29 @@ func TestConvertMessagesJoinsToolCallText(t *testing.T) {
 	assert.Len(t, converted[0].ToolCalls, 1)
 }
 
-// TestToolResultImageBlockPlaceholder verifies non-text tool result blocks
-// are represented with a placeholder rather than dropped silently.
+// TestToolResultImageBlockPlaceholder verifies a tool-result image that
+// cannot be shown (no data, or no MIME type and undetectable data) is
+// represented with a placeholder rather than dropped silently or lifted.
 func TestToolResultImageBlockPlaceholder(t *testing.T) {
-	converted, err := convertMessages([]*llm.Message{
-		llm.NewToolResultMessage(&llm.ToolResultContent{
-			ToolUseID: "call_1",
-			Content: []*dive.ToolResultContent{
-				{Type: dive.ToolResultContentTypeText, Text: "captured screenshot"},
-				{Type: dive.ToolResultContentTypeImage, Data: "aW1n", MimeType: "image/png"},
-			},
-		}),
-	})
-	assert.NoError(t, err)
-	assert.Len(t, converted, 1)
-	assert.Equal(t, "captured screenshot\n[image content omitted]", converted[0].Content)
+	for name, image := range map[string]*dive.ToolResultContent{
+		"no data":           {Type: dive.ToolResultContentTypeImage, MimeType: "image/png"},
+		"undetectable type": {Type: dive.ToolResultContentTypeImage, Data: "aW1n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			converted, err := convertMessages([]*llm.Message{
+				llm.NewToolResultMessage(&llm.ToolResultContent{
+					ToolUseID: "call_1",
+					Content: []*dive.ToolResultContent{
+						{Type: dive.ToolResultContentTypeText, Text: "captured screenshot"},
+						image,
+					},
+				}),
+			})
+			assert.NoError(t, err)
+			assert.Len(t, converted, 1)
+			assert.Equal(t, "captured screenshot\n[image content omitted]", converted[0].Content)
+		})
+	}
 }
 
 // TestToolResultEmptyPlaceholder verifies a tool result with no renderable

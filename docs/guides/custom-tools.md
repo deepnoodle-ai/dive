@@ -178,6 +178,25 @@ func (t *MyTool) Call(ctx context.Context, input MyInput) (*dive.ToolResult, err
 
 Tool panics are automatically recovered and converted to error results — the LLM sees the error and can adapt. The stack trace is logged but not sent to the model.
 
+## Returning Images
+
+A tool can return an image, such as a screenshot or a chart, as a content
+block next to its text. Give base64 data and a MIME type; if `MimeType` is
+empty, Dive detects PNG, JPEG, GIF and WebP from the data.
+
+```go
+return dive.NewToolResult(
+    &dive.ToolResultContent{Type: dive.ToolResultContentTypeText, Text: "Screenshot of the checkout page"},
+    &dive.ToolResultContent{Type: dive.ToolResultContentTypeImage, Data: pngBase64, MimeType: "image/png"},
+), nil
+```
+
+The model sees the image on every provider, in error results too. Where an
+API cannot carry an image inside a tool result, the provider moves it to the
+user turn right after the tool results. See
+[Images in tool results](llm-guide.md#images-in-tool-results) for how each
+provider sends it.
+
 ## Suspending Mid-Call
 
 A tool can pause the agent by returning `NewSuspendResult` instead of a

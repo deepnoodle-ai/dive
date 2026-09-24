@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 )
 
 // dynamicThinkingBudget asks the model to choose its own budget.
@@ -33,6 +34,15 @@ type modelCapabilities struct {
 	// than by generation. Models that always think answer 400, so a request to
 	// disable thinking has to degrade instead.
 	canDisableThinking bool
+
+	// imagesInFunctionResponses reports whether the model takes images inside
+	// a function response (FunctionResponse.Parts). The 3.x generation does;
+	// 2.5 answers 400 "Multimodal function responses are not supported for
+	// this model", so its tool-result images are lifted into the user turn
+	// instead. Probed live against the public Gemini API on 2026-09-24 by
+	// returning a PNG of coloured squares from a tool and checking that the
+	// model counted them.
+	imagesInFunctionResponses bool
 
 	// unverified marks a model whose thinking parameters have not been
 	// confirmed against the live API — either a retired model that now
@@ -86,7 +96,8 @@ var modelCapabilityTable = []capabilityEntry{
 	// 2026-09-02.
 	{prefix: "gemini-3.8-flash", caps: modelCapabilities{
 		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
-		canDisableThinking: true,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
 	}},
 	// 3.7 Flash rejects MINIMAL ("Thinking level is unsupported:
 	// THINKING_LEVEL_MINIMAL") and its budget ceiling is lower than the rest
@@ -96,32 +107,40 @@ var modelCapabilityTable = []capabilityEntry{
 	// probed against the public Gemini API.
 	{prefix: "gemini-3.7-flash", caps: modelCapabilities{
 		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 32768,
-		canDisableThinking: true,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
 	}},
 	{prefix: "gemini-3.6-flash", caps: modelCapabilities{
 		efforts: effortsThroughHigh, minBudget: 1, maxBudget: 65535,
+		imagesInFunctionResponses: true,
 	}},
 	{prefix: "gemini-3.5-flash", caps: modelCapabilities{
 		efforts: effortsThroughHigh, minBudget: 1, maxBudget: 65535,
-		canDisableThinking: true,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
 	}},
 	{prefix: "gemini-3.5-flash-lite", caps: modelCapabilities{
 		efforts: effortsThroughHigh, minBudget: 1, maxBudget: 65535,
+		imagesInFunctionResponses: true,
 	}},
 	{prefix: "gemini-3.1-flash-lite", caps: modelCapabilities{
 		efforts: effortsThroughHigh, minBudget: 1, maxBudget: 65535,
-		canDisableThinking: true,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
 	}},
 	{prefix: "gemini-3-flash", caps: modelCapabilities{
 		efforts: effortsThroughHigh, minBudget: 1, maxBudget: 65535,
-		canDisableThinking: true,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
 	}},
 	// Pro rejects MINIMAL and cannot turn thinking off.
 	{prefix: "gemini-3.1-pro", caps: modelCapabilities{
 		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		imagesInFunctionResponses: true,
 	}},
 
 	// --- 2.5: budgets only. "Thinking level is not supported for this model." ---
+	// No images in function responses either; see imagesInFunctionResponses.
 	{prefix: "gemini-2.5-pro", caps: modelCapabilities{
 		minBudget: 128, maxBudget: 32768,
 	}},
@@ -194,4 +213,17 @@ func lookupEntry(model string) (capabilityEntry, bool) {
 // is correct.
 func modelAcceptsTemperature(model string) bool {
 	return !shouldOmitTemperature(model)
+}
+
+// liftToolResultImages prepares messages for a model that cannot take images
+// inside a function response, by moving each tool-result image into the user
+// turn that follows the function responses (providers.LiftToolResultImages).
+// A model that takes them natively gets messages unchanged. An unknown or
+// unverified model is lifted too: an image in the user turn works on every
+// Gemini model, while one in a function response is rejected by 2.5.
+func liftToolResultImages(model string, messages []*llm.Message) []*llm.Message {
+	if caps, ok := lookupCapabilities(model); ok && caps.imagesInFunctionResponses {
+		return messages
+	}
+	return providers.LiftToolResultImages(messages)
 }

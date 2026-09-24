@@ -339,28 +339,24 @@ func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.Respo
 
 // encodeFunctionCallOutput renders a tool result as a Responses API
 // function_call_output item. Typed tool result blocks are flattened to plain
-// text rather than JSON-marshaled; results carrying images are emitted as a
-// content-part list so the model can actually see them.
+// text rather than JSON-marshaled; results carrying images, error results
+// included, are emitted as a content-part list so the model can actually see
+// them.
 func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInputItemUnionParam, error) {
 	blocks := providers.ToolResultBlocks(c)
-	if blocks == nil || c.IsError || !blocksContainImage(blocks) {
+	if blocks == nil || !blocksContainImage(blocks) {
 		output, err := toolResultOutputText(c)
 		if err != nil {
 			return responses.ResponseInputItemUnionParam{}, err
 		}
 		return functionCallOutputItem(c.ToolUseID, output), nil
 	}
-	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(blocks))
+	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(blocks)+1)
 	for _, b := range blocks {
 		switch b.Type {
 		case dive.ToolResultContentTypeImage:
-			mediaType := b.MimeType
+			mediaType := providers.ToolResultImageMediaType(b)
 			if mediaType == "" {
-				if detected, err := llm.DetectImageType(b.Data); err == nil {
-					mediaType = string(detected)
-				}
-			}
-			if mediaType == "" || b.Data == "" {
 				items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
 					OfInputText: &responses.ResponseInputTextContentParam{Text: "[image content omitted]"},
 				})
@@ -384,7 +380,28 @@ func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInput
 			})
 		}
 	}
+	if c.IsError {
+		items = markErrorOutputItems(items)
+	}
 	return functionCallOutputItem(c.ToolUseID, items), nil
+}
+
+// markErrorOutputItems applies toolResultOutputText's "Error: " signal to an
+// item-list output. The prefix goes on the leading text item; when the output
+// opens with an image instead, a text item carrying only the prefix is put in
+// front of it, so the model reads that the call failed before what it shows.
+func markErrorOutputItems(items responses.ResponseFunctionCallOutputItemListParam) responses.ResponseFunctionCallOutputItemListParam {
+	if len(items) > 0 && items[0].OfInputText != nil {
+		text := items[0].OfInputText.Text
+		hasErrorEnvelope := strings.HasPrefix(text, "<error>") && strings.HasSuffix(text, "</error>")
+		if !strings.HasPrefix(text, "Error:") && !hasErrorEnvelope {
+			items[0].OfInputText.Text = "Error: " + text
+		}
+		return items
+	}
+	return append(responses.ResponseFunctionCallOutputItemListParam{{
+		OfInputText: &responses.ResponseInputTextContentParam{Text: "Error:"},
+	}}, items...)
 }
 
 // functionCallOutputItem builds a function_call_output item for a tool call.

@@ -58,6 +58,36 @@ func TestConvertToolResultImageBlocks(t *testing.T) {
 	assert.Contains(t, string(wire), `"source":{"type":"base64","media_type":"image/png","data":"aW1nZGF0YQ=="}`)
 }
 
+// TestConvertErrorToolResultImageFollowsResults verifies an error result's
+// image moves after the tool results, since Anthropic rejects an is_error
+// tool_result holding anything but text, while the result keeps its flag.
+func TestConvertErrorToolResultImageFollowsResults(t *testing.T) {
+	converted, err := convertMessages([]*llm.Message{
+		llm.NewToolResultMessage(&llm.ToolResultContent{
+			ToolUseID: "toolu_1",
+			IsError:   true,
+			Content: []*dive.ToolResultContent{
+				{Type: dive.ToolResultContentTypeText, Text: "click missed"},
+				{Type: dive.ToolResultContentTypeImage, Data: "aW1nZGF0YQ==", MimeType: "image/png"},
+			},
+		}),
+	})
+	assert.NoError(t, err)
+	assert.Len(t, converted, 1)
+	content := converted[0].Content
+	assert.Len(t, content, 3)
+
+	trc := content[0].(*llm.ToolResultContent)
+	assert.True(t, trc.IsError)
+	wire, err := json.Marshal(trc)
+	assert.NoError(t, err)
+	assert.Contains(t, string(wire),
+		`"content":[{"type":"text","text":"click missed"},{"type":"text","text":"(The image this call returned follows the tool results.)"}]`)
+
+	assert.Equal(t, "The image from tool call toolu_1:", content[1].(*llm.TextContent).Text)
+	assert.Equal(t, "aW1nZGF0YQ==", content[2].(*llm.ImageContent).Source.Data)
+}
+
 // TestConvertToolResultTextBlocksWire verifies text-only typed blocks keep
 // the same wire shape they had when marshaled directly.
 func TestConvertToolResultTextBlocksWire(t *testing.T) {
