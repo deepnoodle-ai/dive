@@ -199,23 +199,32 @@ func TestMessagesToContentsUnknownContentErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported content type for google provider: server_tool_use")
 }
 
-// TestJoinToolResultTextPlaceholders verifies non-text tool result blocks are
-// represented with a placeholder rather than dropped silently.
-func TestJoinToolResultTextPlaceholders(t *testing.T) {
-	joined := joinToolResultText([]*dive.ToolResultContent{
+// TestToolResultPartsPlaceholders verifies tool result blocks that cannot be
+// shown are represented with a placeholder rather than dropped silently.
+func TestToolResultPartsPlaceholders(t *testing.T) {
+	text, parts, err := toolResultParts([]*dive.ToolResultContent{
 		{Type: dive.ToolResultContentTypeText, Text: "captured screenshot"},
-		{Type: dive.ToolResultContentTypeImage, Data: "aW1n", MimeType: "image/png"},
+		{Type: dive.ToolResultContentTypeImage, Data: "aW1n"}, // no MIME type, undetectable
+		{Type: dive.ToolResultContentTypeImage, MimeType: "image/png"},
+		{Type: dive.ToolResultContentTypeAudio, Data: "aW1n", MimeType: "audio/wav"},
 	})
-	assert.Equal(t, "captured screenshot\n\n[image content omitted]", joined)
+	assert.NoError(t, err)
+	assert.Equal(t, "captured screenshot\n\n[image content omitted]\n\n[image content omitted]\n\n[audio content omitted]", text)
+	assert.Len(t, parts, 0)
 }
 
-// TestJoinToolResultTextEmpty verifies a result with no renderable text says
+// TestToolResultPartsEmpty verifies a result with no renderable text says
 // so explicitly instead of producing an empty function response.
-func TestJoinToolResultTextEmpty(t *testing.T) {
-	assert.Equal(t, "(no output)", joinToolResultText(nil))
-	assert.Equal(t, "(no output)", joinToolResultText([]*dive.ToolResultContent{
-		{Type: dive.ToolResultContentTypeText, Text: ""},
-	}))
+func TestToolResultPartsEmpty(t *testing.T) {
+	for _, blocks := range [][]*dive.ToolResultContent{
+		nil,
+		{{Type: dive.ToolResultContentTypeText, Text: ""}},
+	} {
+		text, parts, err := toolResultParts(blocks)
+		assert.NoError(t, err)
+		assert.Equal(t, "(no output)", text)
+		assert.Len(t, parts, 0)
+	}
 }
 
 // TestFunctionResponseNilContent verifies nil tool result content (reachable

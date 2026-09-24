@@ -124,13 +124,38 @@ Notes:
 - A content block a provider cannot encode is a request-building error, never
   a silent drop.
 
-Tool results can also carry media (e.g. an MCP tool returning a screenshot).
-Anthropic and OpenAI (Responses) receive tool-result images natively; on
-providers whose tool messages are text-only (google, openaicompletions,
-mistral, openrouter), non-text blocks are replaced with a
-`[image content omitted]` placeholder so the model knows content was elided.
 A tool result with nothing to render is sent as `(no output)` rather than an
 empty block or empty array, which are variously rejected or ambiguous.
+
+### Images in tool results
+
+A tool result can carry images (a screenshot, a chart, an image from an MCP
+tool), and every provider shows them to the model. Where the API takes an
+image inside a tool result, it goes there. Where it cannot, the provider
+moves the image into the user turn that follows the tool results. The tool
+result keeps its text plus the line
+`(The image this call returned follows the tool results.)`, and a label such
+as `The image from tool call call_1:` comes before the image.
+
+| Provider                               | Tool-result images                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------- |
+| anthropic, ollama                      | Inside the tool result. An error result moves them after the results, because Anthropic takes only text in an `is_error` result |
+| openai (Responses), grok, meta         | Inside the function call output. An error result starts with `Error:`            |
+| google, Gemini 3.x                     | Inside the function response (`FunctionResponse.Parts`). The text goes under `output`, or `error` for a failed call |
+| google, Gemini 2.5 and unknown models  | Moved after the function responses, because 2.5 rejects images in a function response |
+| openaicompletions, mistral, openrouter | Moved to a user message after the `tool` messages. Tool messages take only text  |
+
+Only the request changes. The conversation history keeps each image in its
+tool result, so a session can switch between providers.
+
+The `[image content omitted]` placeholder is used only when there is no image
+to send: the block has no data, or it has no `MimeType` and Dive cannot detect
+the type from the data. A model that cannot read images at all returns an API
+error, for example Mistral's "Image input is not enabled for this model" or
+OpenRouter's "No endpoints found that support image input". Dive does not
+replace the image with a placeholder, because a model that cannot see the
+image would guess what it shows. To use such a model, give it no tools that
+return images.
 
 ## Provider Options
 
