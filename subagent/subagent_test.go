@@ -172,6 +172,67 @@ func TestFilterTools(t *testing.T) {
 	})
 }
 
+// mockDeclarer is a tool whose definition declares other tools, like
+// anthropic.ComputerToolset.
+type mockDeclarer struct {
+	mockTool
+	declared []string
+}
+
+func (m *mockDeclarer) DeclaredTools() []string { return m.declared }
+
+func TestFilterToolsWithDeclarer(t *testing.T) {
+	allTools := []dive.Tool{
+		&mockTool{name: "Read"},
+		&mockDeclarer{mockTool: mockTool{name: "computer"}, declared: []string{"left_click", "screenshot"}},
+		&mockTool{name: "left_click"},
+		&mockTool{name: "screenshot"},
+	}
+	names := func(tools []dive.Tool) []string {
+		out := make([]string, len(tools))
+		for i, t := range tools {
+			out[i] = t.Name()
+		}
+		return out
+	}
+
+	t.Run("allowing a declarer allows the tools it declares", func(t *testing.T) {
+		filtered := FilterTools(&Definition{Tools: []string{"computer"}}, allTools)
+		assert.Equal(t, []string{"computer", "left_click", "screenshot"}, names(filtered))
+	})
+
+	t.Run("allowing a declared tool alone does not allow the declarer", func(t *testing.T) {
+		filtered := FilterTools(&Definition{Tools: []string{"screenshot"}}, allTools)
+		assert.Equal(t, []string{"screenshot"}, names(filtered))
+	})
+
+	t.Run("disallowing a declarer removes the tools it declares", func(t *testing.T) {
+		filtered := FilterTools(&Definition{DisallowedTools: []string{"Computer"}}, allTools)
+		assert.Equal(t, []string{"Read"}, names(filtered))
+	})
+
+	t.Run("disallowing a declarer wins over allowing its tools", func(t *testing.T) {
+		filtered := FilterTools(&Definition{
+			Tools:           []string{"Read", "screenshot"},
+			DisallowedTools: []string{"computer"},
+		}, allTools)
+		assert.Equal(t, []string{"Read"}, names(filtered))
+	})
+
+	t.Run("a disallowed declared tool is removed from an allowed declarer", func(t *testing.T) {
+		filtered := FilterTools(&Definition{
+			Tools:           []string{"computer"},
+			DisallowedTools: []string{"left_click"},
+		}, allTools)
+		assert.Equal(t, []string{"computer", "screenshot"}, names(filtered))
+	})
+
+	t.Run("a declarer that is not among the tools declares nothing", func(t *testing.T) {
+		filtered := FilterTools(&Definition{Tools: []string{"computer"}}, allTools[2:])
+		assert.Equal(t, 0, len(filtered))
+	})
+}
+
 func TestMapLoader(t *testing.T) {
 	t.Run("Load returns definitions", func(t *testing.T) {
 		loader := &MapLoader{
