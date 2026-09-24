@@ -1,88 +1,55 @@
 package anthropic
 
-import "github.com/deepnoodle-ai/dive/llm"
+import (
+	"strings"
 
-// dropUnpairedServerToolBlocks removes server tool calls that have no result
-// in the same assistant message, and server tool results that have no call.
-// Anthropic rejects either with a 400 ("`web_fetch` tool use with id ... was
-// found without a corresponding `web_fetch_tool_result` block"). Dive's own
-// responses keep calls and results paired, but a stored session can hold a
-// call whose result an older Dive dropped while decoding a stream, and would
-// otherwise fail on every later request.
-//
-// A call that is the very last block of the last message is kept: that is how
-// a paused turn (stop reason pause_turn) ends, and sending it back is how the
-// turn resumes. The messages are convertMessages' copies, so they are edited
-// in place. Assistant messages left empty are removed.
-func dropUnpairedServerToolBlocks(messages []*llm.Message) []*llm.Message {
-	out := messages[:0]
-	for i, message := range messages {
-		if message.Role == llm.Assistant {
-			message.Content = pairServerToolBlocks(message.Content, i == len(messages)-1)
-			if len(message.Content) == 0 && message.Effort == "" {
-				continue
-			}
-		}
-		out = append(out, message)
-	}
-	return out
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
+)
+
+// Anthropic starts the ID of every server tool call with one of these
+// prefixes: "srvtoolu_" for server tools such as web search and web fetch,
+// and "mcptoolu_" for MCP connector calls. Results carry the same ID as
+// their tool_use_id.
+const (
+	serverToolIDPrefix = "srvtoolu_"
+	mcpToolIDPrefix    = "mcptoolu_"
+)
+
+// isForeignServerToolContent reports whether content is a server tool call or
+// result that another provider ran, such as an OpenAI web_search_call or
+// mcp_call. Anthropic cannot replay those, so the encoder leaves them out.
+func isForeignServerToolContent(content llm.Content) bool {
+	return providers.IsServerToolContent(content) && !isAnthropicServerToolContent(content)
 }
 
-// pairServerToolBlocks returns content without its unpaired server tool
-// calls and results (see dropUnpairedServerToolBlocks). When last is true, a
-// call in the final position is kept.
-func pairServerToolBlocks(content []llm.Content, last bool) []llm.Content {
-	calls := map[string]bool{}
-	results := map[string]bool{}
-	for _, c := range content {
-		if id, ok := serverToolCallID(c); ok {
-			calls[id] = true
-		} else if id, ok := serverToolResultID(c); ok {
-			results[id] = true
-		}
-	}
-	if len(calls) == 0 && len(results) == 0 {
-		return content
-	}
-	kept := content[:0]
-	for i, c := range content {
-		if id, ok := serverToolCallID(c); ok && !results[id] && !(last && i == len(content)-1) {
-			continue
-		}
-		if id, ok := serverToolResultID(c); ok && !calls[id] {
-			continue
-		}
-		kept = append(kept, c)
-	}
-	return kept
+// isAnthropicServerToolContent reports whether server tool content came from
+// an Anthropic response, judged by the prefix of its tool use ID.
+func isAnthropicServerToolContent(content llm.Content) bool {
+	id := serverToolUseID(content)
+	return strings.HasPrefix(id, serverToolIDPrefix) || strings.HasPrefix(id, mcpToolIDPrefix)
 }
 
-// serverToolCallID returns the ID of a server tool call.
-func serverToolCallID(content llm.Content) (string, bool) {
+// serverToolUseID returns the tool use ID of a server tool call, or of the
+// call a server tool result answers.
+func serverToolUseID(content llm.Content) string {
 	switch c := content.(type) {
 	case *llm.ServerToolUseContent:
-		return c.ID, true
+		return c.ID
 	case *llm.MCPToolUseContent:
-		return c.ID, true
-	}
-	return "", false
-}
-
-// serverToolResultID returns the ID of the call a server tool result answers.
-func serverToolResultID(content llm.Content) (string, bool) {
-	switch c := content.(type) {
+		return c.ID
 	case *llm.ServerToolResultContent:
-		return c.ToolUseID, true
+		return c.ToolUseID
 	case *llm.WebSearchToolResultContent:
-		return c.ToolUseID, true
+		return c.ToolUseID
 	case *llm.CodeExecutionToolResultContent:
-		return c.ToolUseID, true
+		return c.ToolUseID
 	case *llm.BashCodeExecutionToolResultContent:
-		return c.ToolUseID, true
+		return c.ToolUseID
 	case *llm.TextEditorCodeExecutionToolResultContent:
-		return c.ToolUseID, true
+		return c.ToolUseID
 	case *llm.MCPToolResultContent:
-		return c.ToolUseID, true
+		return c.ToolUseID
 	}
-	return "", false
+	return ""
 }
