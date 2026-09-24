@@ -19,8 +19,9 @@ type TaskResult struct {
 	ContextID string
 	State     string
 	// Text is the answer: the text parts of the latest artifact with text,
-	// joined with a blank line. For a Dive server it equals the server's
-	// Response.OutputText.
+	// concatenated. A Dive server sends the whole answer as one text part, so
+	// Text equals the server's Response.OutputText; a server that streams the
+	// answer as appended chunks gets them joined back together.
 	Text string
 }
 
@@ -149,10 +150,8 @@ func (r *RemoteAgent) SendTextOnTask(ctx context.Context, taskID string, prompt 
 // arrives. Returns the final TaskResult when the stream ends. Cancellation is
 // handled via the context.
 //
-// Each text part of an artifact is a separate passage (see
-// TaskResult.Text), so a chunk that follows an earlier chunk of the same
-// artifact begins with a blank line ("\n\n"). Concatenating the chunks of
-// the final artifact then gives TaskResult.Text.
+// Each text part of an artifact update is passed to onChunk unchanged, so
+// concatenating the chunks of the final artifact gives TaskResult.Text.
 func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk func(string)) (*TaskResult, error) {
 	if prompt == "" {
 		return nil, fmt.Errorf("a2a: StreamText: empty prompt")
@@ -162,7 +161,6 @@ func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk fun
 	stream := r.client.SendStreamingMessage(ctx, &a2asdk.SendMessageRequest{Message: msg})
 
 	var lastTask *a2asdk.Task
-	streamed := map[a2asdk.ArtifactID]bool{}
 	for event, err := range stream {
 		if err != nil {
 			return nil, err
@@ -177,15 +175,9 @@ func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onChunk fun
 		case *a2asdk.TaskArtifactUpdateEvent:
 			if onChunk != nil {
 				for _, p := range v.Artifact.Parts {
-					t := p.Text()
-					if t == "" {
-						continue
+					if t := p.Text(); t != "" {
+						onChunk(t)
 					}
-					if streamed[v.Artifact.ID] {
-						t = "\n\n" + t
-					}
-					streamed[v.Artifact.ID] = true
-					onChunk(t)
 				}
 			}
 		case *a2asdk.Task:
@@ -274,14 +266,14 @@ func normalizeState(s a2asdk.TaskState) string {
 }
 
 // extractText returns the answer text of a task: all text parts of the latest
-// artifact that has text, joined with a blank line. Without such an artifact
-// it uses the text parts of the last agent message in history.
+// artifact that has text, concatenated. Without such an artifact it uses the
+// text parts of the last agent message in history.
 //
-// Dive's A2A server emits one artifact per turn and gives each passage of the
-// final message its own text part (adjacent text blocks, such as citation
-// fragments, share one part), so the result equals Response.OutputText on the
-// server. Other servers may emit several artifacts, in which case the most
-// recent one is taken as the final answer.
+// Dive's A2A server emits one artifact per turn whose single text part is
+// Response.OutputText. A server that streams an artifact in appended chunks
+// leaves one part per chunk, which concatenation joins back together. Other
+// servers may emit several artifacts, in which case the most recent one is
+// taken as the final answer.
 func extractText(task *a2asdk.Task) string {
 	if task == nil {
 		return ""
@@ -303,13 +295,11 @@ func extractText(task *a2asdk.Task) string {
 	return ""
 }
 
-// joinTextParts joins the non-empty text parts with a blank line.
+// joinTextParts concatenates the text parts.
 func joinTextParts(parts []*a2asdk.Part) string {
-	var texts []string
+	var sb strings.Builder
 	for _, p := range parts {
-		if t := p.Text(); t != "" {
-			texts = append(texts, t)
-		}
+		sb.WriteString(p.Text())
 	}
-	return strings.Join(texts, "\n\n")
+	return sb.String()
 }

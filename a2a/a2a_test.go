@@ -426,12 +426,12 @@ func TestRemoteAgentReturnsWholeCitedAnswer(t *testing.T) {
 	ts, client := startServer(t, agent)
 	const want = "I'll search for that.\n\nAccording to the report, revenue grew 12% in 2025."
 
-	// One text part per passage: the citation fragments share a part.
+	// The whole answer travels as one text part.
 	msg := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart("Revenue?"))
 	task := sendAndExpectTask(t, client, msg)
 	assert.Len(t, task.Artifacts, 1)
-	assert.Len(t, task.Artifacts[0].Parts, 2)
-	assert.Equal(t, "According to the report, revenue grew 12% in 2025.", task.Artifacts[0].Parts[1].Text())
+	assert.Len(t, task.Artifacts[0].Parts, 1)
+	assert.Equal(t, want, task.Artifacts[0].Parts[0].Text())
 
 	remote, err := a2a.NewRemoteAgentFromURL(context.Background(), ts.URL)
 	assert.NoError(t, err)

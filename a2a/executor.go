@@ -429,36 +429,15 @@ func contentFromPart(p *a2asdk.Part) llm.Content {
 // partsFromContent converts Dive LLM content to a2a parts. Internal content
 // types (tool use, tool result, thinking) are skipped.
 //
-// Each text passage becomes one text part, by the rule of
-// llm.Message.AnswerText (which Response.OutputText uses): adjacent text
-// blocks are fragments of one passage (Anthropic splits text at citation
-// boundaries) unless their phases differ (OpenAI commentary, then the final
-// answer), and any other content between text blocks, even content that is
-// skipped, starts a new passage. A client that joins an artifact's text parts
-// with a blank line therefore gets OutputText.
+// The answer text, as llm.Message.AnswerText gives it (which
+// Response.OutputText uses), becomes one text part, followed by a part for
+// each image, document and refusal.
 func partsFromContent(content []llm.Content) []*a2asdk.Part {
 	var parts []*a2asdk.Part
-	var passage []llm.Content
-	var phase string
-	flush := func() {
-		if len(passage) > 0 {
-			parts = append(parts, a2asdk.NewTextPart((&llm.Message{Content: passage}).AnswerText()))
-			passage = nil
-		}
+	if text := (&llm.Message{Content: content}).AnswerText(); text != "" {
+		parts = append(parts, a2asdk.NewTextPart(text))
 	}
 	for _, c := range content {
-		if v, ok := c.(*llm.TextContent); ok {
-			if v.Text == "" {
-				continue
-			}
-			if textPhase := v.Metadata[llm.TextPhaseMetadataKey]; textPhase != phase {
-				flush()
-				phase = textPhase
-			}
-			passage = append(passage, v)
-			continue
-		}
-		flush()
 		switch v := c.(type) {
 		case *llm.ImageContent:
 			if v.Source != nil {
@@ -480,7 +459,6 @@ func partsFromContent(content []llm.Content) []*a2asdk.Part {
 			}
 		}
 	}
-	flush()
 	return parts
 }
 
