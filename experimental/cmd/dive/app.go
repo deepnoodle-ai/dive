@@ -1241,8 +1241,9 @@ func (a *App) captureSubmittedFiles(value string) string {
 	if trimmed == "" {
 		return value
 	}
-	firstToken := strings.Fields(trimmed)[0]
-	if strings.HasPrefix(firstToken, "/") && !strings.Contains(strings.TrimPrefix(firstToken, "/"), "/") && filepath.Ext(firstToken) == "" {
+	fields := strings.Fields(trimmed)
+	firstToken := fields[0]
+	if len(fields) == 1 && strings.HasPrefix(firstToken, "/") && !strings.Contains(strings.TrimPrefix(firstToken, "/"), "/") && filepath.Ext(firstToken) == "" {
 		return value // Preserve ordinary slash commands such as /help.
 	}
 	if path, ok := resolveDroppedPath(trimmed); ok {
@@ -1264,7 +1265,7 @@ func (a *App) captureSubmittedFiles(value string) string {
 		}
 		return a.captureDroppedFiles(trimmed)
 	}
-	if strings.HasPrefix(trimmed, "/") || strings.Contains(trimmed, "\n") {
+	if strings.Contains(trimmed, "\n") {
 		return value
 	}
 

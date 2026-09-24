@@ -340,6 +340,28 @@ func TestSubmitInput_AttachesTypedImagePaths(t *testing.T) {
 	}
 }
 
+func TestSubmitInput_AttachesImageInUnknownSlashMessage(t *testing.T) {
+	a := newTestApp()
+	a.processing = true // Keep submission at the draft boundary.
+	path := writeTempFile(t, "shot.png", pngBytes)
+	input := "/what is in this? " + path
+
+	for i := 1; i <= len(input); i++ {
+		simulateInput(a, input[:i])
+	}
+	a.submitInput(input)
+
+	assert.Equal(t, "/what is in this? [Image #1]", a.inputText)
+	assert.Len(t, a.attachments, 1)
+	text, blocks, err := expandAttachments(a.inputText, a.attachments)
+	assert.NoError(t, err)
+	assert.Equal(t, "/what is in this? [image: "+path+"]", text)
+	assert.Len(t, blocks, 1)
+	image, ok := blocks[0].(*llm.ImageContent)
+	assert.True(t, ok, "image must reach the model as native content")
+	assert.Equal(t, "image/png", image.Source.MediaType)
+}
+
 func TestSubmitInput_AttachesUnquotedStandalonePathWithSpaces(t *testing.T) {
 	path := writeTempFile(t, "my shot.png", pngBytes)
 	for _, tc := range []struct {
