@@ -47,11 +47,11 @@ The CLI (`experimental/cmd/dive`) starts MCP servers at launch, in both interact
 
 ### Where servers come from
 
-| Source | Scope |
-| --- | --- |
-| `"mcpServers"` in `~/.dive/settings.json` | Your servers, in every workspace |
-| `.mcp.json` in the workspace directory | Project servers, checked in with the repo; must be approved |
-| `--mcp-config <file>` (repeatable) | Servers for this run |
+| Source                                    | Scope                                                       |
+| ----------------------------------------- | ----------------------------------------------------------- |
+| `"mcpServers"` in `~/.dive/settings.json` | Your servers, in every workspace                            |
+| `.mcp.json` in the workspace directory    | Project servers, checked in with the repo; must be approved |
+| `--mcp-config <file>` (repeatable)        | Servers for this run                                        |
 
 When the same server name appears in more than one source, the later row wins: `--mcp-config` beats `.mcp.json`, which beats `~/.dive/settings.json`. Among several `--mcp-config` files, the last one wins.
 
