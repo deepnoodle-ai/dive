@@ -2434,6 +2434,16 @@ func extractToolResultText(result *llm.ToolResultContent) string {
 		return content
 	case []byte:
 		return string(content)
+	case []*dive.ToolResultContent:
+		// Typed blocks from an in-memory session: keep the text and skip
+		// image or audio data, which would otherwise be dumped as base64.
+		var texts []string
+		for _, block := range content {
+			if block != nil && block.Type == dive.ToolResultContentTypeText {
+				texts = append(texts, block.Text)
+			}
+		}
+		return strings.Join(texts, "\n")
 	case []interface{}:
 		// Array of content objects
 		var texts []string

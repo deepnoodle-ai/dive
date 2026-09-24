@@ -1,8 +1,13 @@
 package toolkit
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,7 +15,28 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/media"
 	"github.com/deepnoodle-ai/wonton/schema"
+	"golang.org/x/image/draw"
 )
+
+// maxInlineImageBase64 caps the base64 size of the image returned to the
+// model. Anthropic rejects a tool-result image over 5 MB, the tightest limit
+// among the providers, so an image under it is accepted everywhere.
+const maxInlineImageBase64 = 5 * 1024 * 1024
+
+// inlineImageMaxEdge is the long edge an oversized image is scaled down to.
+// Anthropic downsizes anything larger before the model sees it, so a smaller
+// copy loses nothing the model could use.
+const inlineImageMaxEdge = 1568
+
+// maxDecodePixels bounds the source image downscaleJPEG will decode. A small
+// compressed file can declare huge dimensions, and decoding it would allocate
+// width*height*4 bytes; above this the image is left out instead. 64M pixels
+// (about 256 MB decoded) is well above any image generator's output.
+const maxDecodePixels = 64 << 20
+
+// errImageTooLarge reports that an image's declared dimensions exceed
+// maxDecodePixels.
+var errImageTooLarge = errors.New("image dimensions too large to decode")
 
 var _ dive.TypedTool[*ImageGenerationInput] = &imageGenerationTool{}
 
@@ -61,7 +87,8 @@ func (t *imageGenerationTool) Name() string { return "ImageGeneration" }
 
 func (t *imageGenerationTool) Description() string {
 	return fmt.Sprintf("Generate an image from a text prompt using %s. "+
-		"Saves the image to disk and returns the file path. "+
+		"Saves the image to disk and returns both the file path and the image itself, "+
+		"so you can see and check what was generated. "+
 		"Use descriptive, detailed prompts for best results.", t.model)
 }
 
@@ -147,7 +174,79 @@ func (t *imageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 
 	absPath, _ := filepath.Abs(outPath)
 	display := fmt.Sprintf("Generated image: %s (%dx%d %s)", absPath, result.Width, result.Height, result.Format)
-	return dive.NewToolResultText(absPath).WithDisplay(display), nil
+	text := display
+	img, note := inlineImage(result)
+	if note != "" {
+		text += "\n" + note
+	}
+	content := []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: text}}
+	if img != nil {
+		content = append(content, img)
+	}
+	return dive.NewToolResult(content...).WithDisplay(display), nil
+}
+
+// inlineImage returns the image content block for the model, plus a note for
+// the text block when the image is not shown as generated.
+//
+// An image within maxInlineImageBase64 is sent unchanged. A larger one is
+// scaled to inlineImageMaxEdge and re-encoded as JPEG; if that fails or is
+// still too large, the image is left out and the note says so. The file on
+// disk is always the original.
+func inlineImage(result *media.ImageResult) (*dive.ToolResultContent, string) {
+	mimeType := result.MimeType
+	if mimeType == "" {
+		mimeType = result.Format.MIMEType()
+	}
+	if base64.StdEncoding.EncodedLen(len(result.Data)) <= maxInlineImageBase64 {
+		return imageContent(result.Data, mimeType), ""
+	}
+	small, w, h, err := downscaleJPEG(result.Data, inlineImageMaxEdge)
+	if err != nil || base64.StdEncoding.EncodedLen(len(small)) > maxInlineImageBase64 {
+		return nil, fmt.Sprintf("The image is too large to show inline (%d bytes); "+
+			"it is saved at the path above.", len(result.Data))
+	}
+	return imageContent(small, "image/jpeg"),
+		fmt.Sprintf("The image shown is a %dx%d JPEG preview; the full-size file is saved at the path above.", w, h)
+}
+
+// imageContent builds a tool result image block from raw image bytes.
+func imageContent(data []byte, mimeType string) *dive.ToolResultContent {
+	return &dive.ToolResultContent{
+		Type:     dive.ToolResultContentTypeImage,
+		Data:     base64.StdEncoding.EncodeToString(data),
+		MimeType: mimeType,
+	}
+}
+
+// downscaleJPEG decodes data, scales it so its long edge is at most maxEdge,
+// and encodes the result as JPEG. It checks the declared dimensions before
+// decoding and returns errImageTooLarge above maxDecodePixels.
+func downscaleJPEG(data []byte, maxEdge int) ([]byte, int, int, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxDecodePixels {
+		return nil, 0, 0, fmt.Errorf("%w: %dx%d", errImageTooLarge, cfg.Width, cfg.Height)
+	}
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	w, h := src.Bounds().Dx(), src.Bounds().Dy()
+	if long := max(w, h); long > maxEdge {
+		w, h = max(1, w*maxEdge/long), max(1, h*maxEdge/long)
+	}
+	// JPEG has no alpha, so transparent areas are flattened onto white.
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(dst, dst.Bounds(), image.White, image.Point{}, draw.Src)
+	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, 0, 0, err
+	}
+	return buf.Bytes(), w, h, nil
 }
 
 // validateOutputPath validates and resolves a user-provided output path,
