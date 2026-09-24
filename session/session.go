@@ -87,6 +87,7 @@ func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 		out.TurnMessages = make([]*llm.Message, len(src.TurnMessages))
 		copy(out.TurnMessages, src.TurnMessages)
 	}
+	out.BatchHalted = src.BatchHalted
 	return out
 }
 
@@ -286,6 +287,10 @@ type sessionData struct {
 	// suspending tools in the same iteration. Informational — the results
 	// are also present in the tool_result message on the last event.
 	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
+
+	// BatchHalted mirrors dive.SuspensionState.BatchHalted: a halting call
+	// in the suspended batch failed.
+	BatchHalted bool `json:"batch_halted,omitempty"`
 }
 
 // Session implements dive.Session with event-based persistence.
@@ -420,6 +425,7 @@ func (s *Session) LoadSuspension() *dive.SuspensionState {
 	state := &dive.SuspensionState{
 		PendingToolCalls:   s.data.PendingToolCalls,
 		CompletedToolCalls: s.data.CompletedToolCalls,
+		BatchHalted:        s.data.BatchHalted,
 	}
 	// TurnMessages carries the last event's messages (the in-progress
 	// suspended turn). The agent uses len(TurnMessages) to locate the turn
@@ -440,6 +446,7 @@ type sessionSnapshot struct {
 	suspended bool
 	pending   []*dive.PendingToolCall
 	completed []*dive.CompletedToolCall
+	halted    bool
 	updatedAt time.Time
 }
 
@@ -455,6 +462,7 @@ func (s *Session) snapshotMutated() sessionSnapshot {
 		suspended: s.data.Suspended,
 		pending:   s.data.PendingToolCalls,
 		completed: s.data.CompletedToolCalls,
+		halted:    s.data.BatchHalted,
 		updatedAt: s.data.UpdatedAt,
 	}
 }
@@ -465,6 +473,7 @@ func (s *Session) restoreSnapshot(snap sessionSnapshot) {
 	s.data.Suspended = snap.suspended
 	s.data.PendingToolCalls = snap.pending
 	s.data.CompletedToolCalls = snap.completed
+	s.data.BatchHalted = snap.halted
 	s.data.UpdatedAt = snap.updatedAt
 }
 
@@ -536,9 +545,11 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 		if cloned != nil {
 			s.data.PendingToolCalls = cloned.PendingToolCalls
 			s.data.CompletedToolCalls = cloned.CompletedToolCalls
+			s.data.BatchHalted = cloned.BatchHalted
 		} else {
 			s.data.PendingToolCalls = nil
 			s.data.CompletedToolCalls = nil
+			s.data.BatchHalted = false
 		}
 		s.data.UpdatedAt = now
 	})
@@ -578,6 +589,7 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		s.data.Suspended = false
 		s.data.PendingToolCalls = nil
 		s.data.CompletedToolCalls = nil
+		s.data.BatchHalted = false
 		s.data.UpdatedAt = now
 	})
 }
@@ -600,6 +612,7 @@ func (s *Session) CancelSuspension(ctx context.Context) error {
 		s.data.Suspended = false
 		s.data.PendingToolCalls = nil
 		s.data.CompletedToolCalls = nil
+		s.data.BatchHalted = false
 		s.data.UpdatedAt = time.Now()
 	})
 }

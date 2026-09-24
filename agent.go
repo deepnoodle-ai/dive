@@ -820,6 +820,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				}
 			}
 		}
+		batchHalted := resumedBatchHalted(rs, resumeToolsByName)
 		if len(rs.RemainingPending) > 0 {
 			// Partial resume: update session and return a new suspended response.
 			// This is not a fresh transition — the session was already suspended —
@@ -827,6 +828,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			snap := &suspendedSnapshot{
 				PendingToolCalls:   rs.RemainingPendingCalls,
 				CompletedToolCalls: rs.CompletedToolCalls(),
+				BatchHalted:        batchHalted,
 			}
 			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, true)
 		}
@@ -843,7 +845,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				resumeItemsMu.Unlock()
 				return eventCallback(ctx, item)
 			}
-			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback, resumedBatchHalted(rs, resumeToolsByName))
+			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback, batchHalted)
 			if err != nil {
 				// Mirror the generate loop: expose the items accumulated
 				// during the resume phase via a *GenerationError so callers
@@ -1138,6 +1140,7 @@ func (a *Agent) finishSuspended(
 		PendingToolCalls:   snap.PendingToolCalls,
 		CompletedToolCalls: snap.CompletedToolCalls,
 		TurnMessages:       turnMsgs,
+		BatchHalted:        snap.BatchHalted,
 	}
 	if len(extraItems) > 0 {
 		response.Items = append(extraItems, response.Items...)
@@ -1252,6 +1255,9 @@ type resumeState struct {
 	// RemainingPendingCalls is the PendingToolCall list matching
 	// RemainingPending, preserved from the original suspend's pending set.
 	RemainingPendingCalls []*PendingToolCall
+
+	// BatchHalted carries SuspensionState.BatchHalted from the suspend.
+	BatchHalted bool
 }
 
 func (rs *resumeState) CompletedToolCalls() []*CompletedToolCall {
@@ -1556,6 +1562,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		PreviouslyCompleted:       previouslyCompleted,
 		RemainingPending:          remaining,
 		RemainingPendingCalls:     remainingCalls,
+		BatchHalted:               state.BatchHalted,
 	}, nil
 }
 
@@ -2235,9 +2242,13 @@ func haltedToolCallResult(call *llm.ToolUseContent) *ToolCallResult {
 }
 
 // resumedBatchHalted reports whether a suspended batch being resumed is
-// already halted: a halting call answered before the not-started calls,
-// either before the suspension or by the caller on resume, failed.
+// already halted: the suspension recorded a failed halting call, or a result
+// the caller supplied on resume failed for a halting call. The recorded
+// decision is trusted over the current tools, which may have changed since.
 func resumedBatchHalted(rs *resumeState, toolsByName map[string]Tool) bool {
+	if rs.BatchHalted {
+		return true
+	}
 	if rs.ToolResultMessageIdx < 0 {
 		return false
 	}
@@ -2299,6 +2310,7 @@ func (a *Agent) executeToolCallsSequential(
 				Pending: toPendingToolCall(toolCall, result.Result.Suspend),
 			}
 			batch.Suspended = true
+			batch.Halted = halted
 			return batch, nil
 		}
 		if halts && result.isError() {
@@ -3147,6 +3159,7 @@ type generateResult struct {
 type suspendedSnapshot struct {
 	PendingToolCalls   []*PendingToolCall
 	CompletedToolCalls []*CompletedToolCall
+	BatchHalted        bool
 }
 
 // toolCallOutcome is the per-tool-call result of an executeToolCalls batch.
@@ -3163,6 +3176,9 @@ type toolCallOutcome struct {
 type toolBatchResult struct {
 	Outcomes  []toolCallOutcome
 	Suspended bool
+	// Halted reports that a halting call in the batch failed before it
+	// suspended, so the calls left for resume stay halted.
+	Halted bool
 }
 
 // Completed returns a slice of ToolCallResult for outcomes that completed
@@ -3182,7 +3198,7 @@ func (b *toolBatchResult) Completed() []*ToolCallResult {
 // intentionally omitted — they are re-scheduled from the assistant tool_use
 // blocks on resume, not carried in the suspended response.
 func buildSuspendedSnapshot(toolCalls []*llm.ToolUseContent, batch *toolBatchResult) *suspendedSnapshot {
-	snap := &suspendedSnapshot{}
+	snap := &suspendedSnapshot{BatchHalted: batch.Halted}
 	for i, o := range batch.Outcomes {
 		switch {
 		case o.Pending != nil:

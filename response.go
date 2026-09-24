@@ -189,6 +189,12 @@ type SuspensionState struct {
 	// final assistant message), so stateless callers can append it to
 	// their pre-turn history in one operation.
 	TurnMessages []*llm.Message `json:"turn_messages,omitempty"`
+
+	// BatchHalted records that a halting call in the suspended batch failed
+	// (see ToolAnnotations.HaltsBatch), so the batch's later halting calls
+	// are answered with ErrBatchHalted on resume. It is recorded rather than
+	// worked out again on resume, where the agent's tools may have changed.
+	BatchHalted bool `json:"batch_halted,omitempty"`
 }
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.

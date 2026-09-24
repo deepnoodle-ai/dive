@@ -163,6 +163,7 @@ for _, pending := range resp.Suspension.PendingToolCalls {
 | `PendingToolCalls`   | Tool calls awaiting external results. Contains ID, name, input JSON, prompt, metadata.                                                                                                 |
 | `CompletedToolCalls` | Sibling tool calls that ran to completion in the same iteration as the suspender (parallel execution). Informational — their results are already merged into the persisted turn.       |
 | `TurnMessages`       | Snapshot of the in-progress turn (user input + any assistant/tool_result messages produced so far). Stateless callers pass this back via `WithResume` to reconstruct the conversation. |
+| `BatchHalted`        | A halting call in the suspended batch failed (see below). Recorded so the batch stays halted on resume.                                                                                |
 
 Decode a pending call's input with either the method or the generic
 helper:
@@ -279,6 +280,8 @@ suspension or because the caller resumed a suspended halting call with an
 `IsError` result, the batch stays halted: the remaining halting calls are
 answered with an error and not run, and their `ToolCallResult.Error` is
 `dive.ErrBatchHalted`. Calls to tools without the annotation still run.
+A failure before the suspension is recorded in `SuspensionState.BatchHalted`,
+so it holds even if the resuming agent's tools have changed since.
 
 ## The `OnSuspend` hook
 

@@ -125,3 +125,87 @@ func TestBatchHaltAcrossResume(t *testing.T) {
 		assert.True(t, isError)
 	})
 }
+
+// The suspension records that the batch halted, so a resume keeps it halted
+// even when the agent resuming it no longer has the failed tool, or has it
+// without HaltsBatch, as after a deploy while the turn waited.
+func TestBatchHaltSurvivesToolChangesAcrossResume(t *testing.T) {
+	script := func() *scriptedLLM {
+		return &scriptedLLM{script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("c1", "click", `{}`), // fails
+				newScriptedToolUse("c2", "ask", `{}`),   // plain; suspends
+				newScriptedToolUse("c3", "type", `{}`),  // not started, then halted
+			),
+			finalTextTurn("done"),
+		}}
+	}
+	suspend := func(t *testing.T, mock *scriptedLLM, sess *session.Session) *SuspensionState {
+		click := haltingTool{&scriptedTool{name: "click", outcomes: []toolOutcome{{result: NewToolResultError("missed")}}}}
+		ask := &scriptedTool{name: "ask", outcomes: []toolOutcome{{result: NewSuspendResult("which one?", nil)}}}
+		typ := haltingTool{&scriptedTool{name: "type"}}
+		opts := AgentOptions{Model: mock, Tools: []Tool{click, ask, typ}}
+		if sess != nil {
+			opts.Session = sess
+		}
+		agent, err := NewAgent(opts)
+		assert.NoError(t, err)
+		resp, err := agent.CreateResponse(context.Background(), WithInput("go"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status, ResponseStatusSuspended)
+		assert.True(t, resp.Suspension.BatchHalted)
+		return resp.Suspension
+	}
+	const haltText = "Not executed: an earlier tool call in this response failed."
+
+	for name, clickTool := range map[string]Tool{
+		"failed tool unregistered": nil,
+		"failed tool unannotated":  &scriptedTool{name: "click"},
+	} {
+		t.Run("session, "+name, func(t *testing.T) {
+			mock := script()
+			sess := session.New("halt-registry-" + name)
+			suspend(t, mock, sess)
+
+			ask := &scriptedTool{name: "ask"}
+			typ := haltingTool{&scriptedTool{name: "type", outcomes: []toolOutcome{{result: NewToolResultText("typed")}}}}
+			tools := []Tool{ask, typ}
+			if clickTool != nil {
+				tools = append(tools, clickTool)
+			}
+			resumer, err := NewAgent(AgentOptions{Model: mock, Tools: tools, Session: sess})
+			assert.NoError(t, err)
+			resp, err := resumer.CreateResponse(context.Background(), WithToolResults(map[string]*ToolResult{
+				"c2": NewToolResultText("the left one"),
+			}))
+			assert.NoError(t, err)
+			assert.Equal(t, resp.Status, ResponseStatusCompleted)
+			assert.Equal(t, typ.CallCount(), 0)
+			text, isError := lastToolResultText(mock, "c3")
+			assert.Equal(t, text, haltText)
+			assert.True(t, isError)
+		})
+	}
+
+	t.Run("stateless, state round-tripped through JSON", func(t *testing.T) {
+		mock := script()
+		state := suspend(t, mock, nil)
+		data, err := json.Marshal(state)
+		assert.NoError(t, err)
+		var restored SuspensionState
+		assert.NoError(t, json.Unmarshal(data, &restored))
+
+		ask := &scriptedTool{name: "ask"}
+		typ := haltingTool{&scriptedTool{name: "type", outcomes: []toolOutcome{{result: NewToolResultText("typed")}}}}
+		resumer, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{ask, typ}})
+		assert.NoError(t, err)
+		resp, err := resumer.CreateResponse(context.Background(), WithResume(&restored, map[string]*ToolResult{
+			"c2": NewToolResultText("the left one"),
+		}))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status, ResponseStatusCompleted)
+		assert.Equal(t, typ.CallCount(), 0)
+		text, _ := lastToolResultText(mock, "c3")
+		assert.Equal(t, text, haltText)
+	})
+}
