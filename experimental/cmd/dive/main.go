@@ -808,60 +808,19 @@ func getInput(args []string) (string, error) {
 }
 
 func runPrintText(ctx context.Context, agent *dive.Agent, input string, showThinking bool, operatorReminders []dive.Reminder) error {
-	var outputText strings.Builder
-	var thinkingText strings.Builder
-	thinkingStarted := false
-	textStarted := false
-
+	printer := newTextPrinter(os.Stdout, showThinking)
 	inputMessages := reminderInputMessages(input, nil, operatorReminders)
 	resp, err := agent.CreateResponse(ctx,
 		dive.WithMessages(inputMessages...),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-			if item.Type == dive.ResponseItemTypeModelEvent && item.Event != nil {
-				if item.Event.Delta != nil {
-					if showThinking && item.Event.Delta.Thinking != "" {
-						if !thinkingStarted {
-							fmt.Println("Thinking:")
-							thinkingStarted = true
-						}
-						fmt.Print(item.Event.Delta.Thinking)
-						thinkingText.WriteString(item.Event.Delta.Thinking)
-					}
-					if item.Event.Delta.Text != "" {
-						if showThinking && thinkingStarted && !textStarted {
-							if thinkingText.Len() > 0 && !strings.HasSuffix(thinkingText.String(), "\n") {
-								fmt.Println()
-							}
-							fmt.Println()
-							fmt.Println("Response:")
-							textStarted = true
-						}
-						fmt.Print(item.Event.Delta.Text)
-						outputText.WriteString(item.Event.Delta.Text)
-					}
-				}
-			}
+			printer.handle(item)
 			return nil
 		}),
 	)
 	if err != nil {
 		return fmt.Errorf("agent error: %w", err)
 	}
-
-	if showThinking && thinkingStarted && outputText.Len() == 0 {
-		if thinkingText.Len() > 0 && !strings.HasSuffix(thinkingText.String(), "\n") {
-			fmt.Println()
-		}
-		fmt.Println()
-		fmt.Println("Response:")
-	}
-
-	if outputText.Len() > 0 && !strings.HasSuffix(outputText.String(), "\n") {
-		fmt.Println()
-	} else if outputText.Len() == 0 {
-		fmt.Println(resp.OutputText())
-	}
-
+	printer.finish(resp.OutputText())
 	return nil
 }
 

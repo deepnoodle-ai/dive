@@ -181,6 +181,34 @@ func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
 	assert.True(t, reasoningIdx < answerIdx, "reasoning should render before answer")
 }
 
+func TestStreamedPassagesAcrossTurnsStaySeparateMessages(t *testing.T) {
+	app, _ := newFakeApp(t)
+	app.handleProcessingStart(processingStartEvent{baseEvent: newBaseEvent(), userInput: "read note.txt"})
+
+	app.handleStreamThinking("I should read the file.")
+	app.handleStreamText("Finding your note.")
+	app.flushStreamBuffer()
+	app.handleToolCall(toolUse("t1", "Read", `{"file_path":"note.txt"}`))
+	app.handleStreamThinking("It says hello.")
+	app.handleStreamText("note.txt says hello.")
+	app.flushStreamBuffer()
+
+	var reasoning, answers []string
+	for _, msg := range app.messages {
+		if msg.Type != MessageTypeText || msg.Content == "" {
+			continue
+		}
+		switch msg.Role {
+		case roleReasoning:
+			reasoning = append(reasoning, msg.Content)
+		case roleAssistant:
+			answers = append(answers, msg.Content)
+		}
+	}
+	assert.Equal(t, []string{"I should read the file.", "It says hello."}, reasoning)
+	assert.Equal(t, []string{"Finding your note.", "note.txt says hello."}, answers)
+}
+
 func TestConvertLLMMessageShowsThinkingContent(t *testing.T) {
 	app, _ := newFakeApp(t)
 	msgs := app.convertLLMMessage(&llm.Message{

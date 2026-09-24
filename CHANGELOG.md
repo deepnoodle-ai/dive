@@ -54,6 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Server tool history from another provider is left out.** Anthropic MCP
   connector blocks no longer reach OpenAI, nor OpenAI search/MCP items other
   providers. OpenAI MCP tool listings no longer fail the next request.
+- **CLI `-p` text output separates turns.** Text and thinking from successive
+  LLM turns are split by a blank line instead of running together.
+- **CLI `dive models` columns align** across all provider sections.
 
 ## [1.32.0] - 2026-09-23
 
