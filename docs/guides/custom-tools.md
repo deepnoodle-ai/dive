@@ -147,12 +147,15 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 
 `Toolset.Tools(ctx context.Context)` is called before each LLM request, returning `([]Tool, error)`, so the tool set can change between iterations. Tools from toolsets are merged with static `Tools`.
 
+A `dive.Toolset` is Dive's own mechanism for resolving tools at runtime. It is unrelated to a provider-defined toolset such as `anthropic.ComputerToolset`, a single tool definition that declares several tools to the model (see below).
+
 ## Tools Another Tool Declares
 
-Some provider tools declare other tools: Anthropic's computer toolset declares
-`left_click`, `screenshot` and the rest. The model calls those by name, so you
-register an ordinary tool per name to run them. A tool that declares others
-implements `dive.ToolDeclarer`:
+Some provider tools declare other tools. The provider-defined toolset
+`anthropic.ComputerToolset` declares `left_click`, `screenshot` and the rest of
+Anthropic's computer actions. The model calls those by name, so you register an
+ordinary tool per name to run them. A tool that declares others implements
+`dive.ToolDeclarer`:
 
 ```go
 type ToolDeclarer interface {
@@ -160,8 +163,8 @@ type ToolDeclarer interface {
 }
 ```
 
-While a declarer is among the tools sent to the model (static or from a
-`Toolset`), the agent leaves the tools it declares out of the request, since
+While a declarer is among the tools sent to the model (static or resolved by
+a `dive.Toolset`), the agent leaves the tools it declares out of the request, since
 the provider already has their definitions. Calls still route to them by name,
 and hooks and permission rules see them as usual. Without the declarer they are
 sent as ordinary tools, so one set of tools works for every provider. See
@@ -211,7 +214,7 @@ response is answered with an error saying it was not executed:
   suspension stays halted if a call answered before the resume failed.
 
 Calls to a provider-defined toolset's members (`ToolUseContent.ToolsetName`
-set, as with Anthropic's computer toolset) behave this way without the
+set, as with `anthropic.ComputerToolset`) behave this way without the
 annotation, as the provider's contract requires.
 
 ## Error Handling
@@ -242,11 +245,28 @@ return dive.NewToolResult(
 ), nil
 ```
 
+An error result can carry an image too, such as a screenshot of the error
+dialog that made an action fail. Build the `ToolResult` directly and set
+`IsError`:
+
+```go
+return &dive.ToolResult{
+    Content: []*dive.ToolResultContent{
+        {Type: dive.ToolResultContentTypeText, Text: "Checkout failed: card declined"},
+        {Type: dive.ToolResultContentTypeImage, Data: pngBase64, MimeType: "image/png"},
+    },
+    IsError: true,
+}, nil
+```
+
 The model sees the image on every provider, in error results too. Where an
 API cannot carry an image inside a tool result, the provider moves it to the
 user turn right after the tool results. See
 [Images in tool results](llm-guide.md#images-in-tool-results) for how each
-provider sends it.
+provider sends it. A text-only model rejects a request with an image in it; on
+Chat Completions providers (`openaicompletions`, `mistral`, `openrouter`),
+create the provider with `WithoutToolResultImages()` to send the placeholder
+`[image content omitted]` instead.
 
 ## Suspending Mid-Call
 

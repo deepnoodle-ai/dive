@@ -16,6 +16,11 @@ model := anthropic.New() // defaults to claude-opus-4-8
 **Models:** See `providers/anthropic/models.go` for available models.
 **Features:** Streaming, tool calling, prompt caching, reasoning control
 
+A streamed Anthropic response keeps its server tool blocks (web search calls
+and results, code execution results and the like) in the message, as `Generate`
+does, so they replay to Anthropic on the next turn; providers that cannot
+replay another provider's server tool blocks leave them out of the request.
+
 ### OpenAI
 
 ```go
@@ -148,14 +153,45 @@ as `The image from tool call call_1:` comes before the image.
 Only the request changes. The conversation history keeps each image in its
 tool result, so a session can switch between providers.
 
-The `[image content omitted]` placeholder is used only when there is no image
-to send: the block has no data, or it has no `MimeType` and Dive cannot detect
-the type from the data. A model that cannot read images at all returns an API
-error, for example Mistral's "Image input is not enabled for this model" or
-OpenRouter's "No endpoints found that support image input". Dive does not
-replace the image with a placeholder, because a model that cannot see the
-image would guess what it shows. To use such a model, give it no tools that
-return images.
+By default the `[image content omitted]` placeholder is used only when there
+is no image to send: the block has no data, or it has no `MimeType` and Dive
+cannot detect the type from the data. A model that cannot read images at all
+returns an API error, for example Mistral's "Image input is not enabled for
+this model" or OpenRouter's "No endpoints found that support image input".
+Because the image stays in the conversation history, every later request in
+the conversation fails the same way. For such a model on a Chat Completions
+provider, create the provider with `WithoutToolResultImages()`
+(`openaicompletions`, `mistral` and `openrouter` each have it):
+
+```go
+model := mistral.New(
+    mistral.WithModel("codestral-latest"),
+    mistral.WithoutToolResultImages(),
+)
+```
+
+Each image is then replaced by the placeholder in its tool message. The model
+learns that the tool returned an image but cannot see it, so it may guess
+what the image shows; prefer giving a text-only model tools that return text.
+
+## Reading Message Text
+
+`llm.Message` has three text helpers. All of them skip empty text blocks and
+ignore non-text content.
+
+- `AnswerText()` returns a model-written message as the model wrote it. A
+  provider can split one answer into several text blocks (Anthropic splits at
+  citation boundaries; Gemini gives a part carrying a thought signature its
+  own block). Adjacent text blocks are joined with no separator. Blocks that
+  are separate passages are joined with a blank line: those with other
+  content between them, such as reasoning or a server tool call, and adjacent
+  blocks from different OpenAI output messages (different `phase`
+  metadata). `dive.Response.OutputText` returns the `AnswerText` of the
+  turn's final message.
+- `Text()` joins every text block with a blank line. Use it for messages built
+  from separate passages, such as a system reminder followed by a prompt.
+- `LastText()` returns only the last text block, which for a split answer is
+  just its last fragment.
 
 ## Provider Options
 
@@ -277,11 +313,11 @@ Each of these sends its beta header automatically.
 
 ### Computer Use On Claude
 
-`anthropic.NewComputerToolset` declares the `computer_toolset_20260801`
-toolset, the only computer use Opus 5.5 accepts on the Claude API. Each action
-is its own tool call: `ToolUseContent.Name` is the member (`left_click`,
-`screenshot`) and `ToolsetName` is `"computer"`. Your application runs the
-actions, with one ordinary tool per member, named for it:
+`anthropic.NewComputerToolset` declares the provider-defined toolset
+`computer_toolset_20260801`, the only computer use Opus 5.5 accepts on the
+Claude API. Each action is its own tool call: `ToolUseContent.Name` is the
+member (`left_click`, `screenshot`) and `ToolsetName` is `"computer"`. Your
+application runs the actions, with one ordinary tool per member, named for it:
 
 ```go
 member := dive.WithFuncToolAnnotations(&dive.ToolAnnotations{HaltsBatch: true})
@@ -291,7 +327,10 @@ tools := []dive.Tool{
     dive.FuncTool("type", "Type text.", screen.Type, member),
     // ... one per member you run
 }
-if takesComputerToolset { // e.g. Claude Opus 5.5
+// Add the toolset only for a model that takes it. The anthropic.ComputerToolset
+// doc lists the supported models (Opus 4.8 and later, Sonnet 5, Fable 5 and
+// 5.1, Mythos 5 and 5.1).
+if modelName == anthropic.ModelClaudeOpus55 {
     tools = append(tools, anthropic.NewComputerToolset(anthropic.ComputerToolsetOptions{}))
 }
 agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Tools: tools})

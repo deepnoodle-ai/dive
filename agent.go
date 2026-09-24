@@ -3086,12 +3086,16 @@ func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Op
 }
 
 // toolDefinitions returns the tools to declare to the model, in order: every
-// tool except those a ToolDeclarer among them already declares.
+// tool except those another ToolDeclarer among them already declares. A
+// declarer that lists its own name is still sent.
 func toolDefinitions(tools []Tool) []llm.Tool {
 	var declared map[string]bool
 	for _, tool := range tools {
 		if d, ok := tool.(ToolDeclarer); ok {
 			for _, name := range d.DeclaredTools() {
+				if name == tool.Name() {
+					continue
+				}
 				if declared == nil {
 					declared = map[string]bool{}
 				}

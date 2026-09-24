@@ -32,6 +32,8 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 All hooks run in order. If any hook returns an error, the tool is denied and the error message is sent to the LLM. A `*dive.HookAbortError` aborts generation entirely.
 
+A call halted by an earlier failure in its batch (see `ToolAnnotations.HaltsBatch`; automatic for provider-defined toolsets such as Anthropic's computer toolset) never reaches `PreToolUse`, so the permission manager never evaluates it and an ask rule never prompts for it. A denial counts as a failure: denying one computer action halts the actions after it in the same response.
+
 ## Permission Manager
 
 The `permission` package provides a `Manager` with declarative rules and modes:

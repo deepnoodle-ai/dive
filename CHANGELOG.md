@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Provider-defined toolsets declare their members.** `dive.ToolDeclarer`
+  (`DeclaredTools() []string`); `anthropic.ComputerToolset` implements it. Member
+  tools are left out of the request while the toolset is present, saving ~1.3k
+  input tokens per request, and are sent as ordinary tools without it.
+  `subagent.FilterTools` treats a declarer as its declared tools.
+- **Batch halting.** `ToolAnnotations.HaltsBatch` runs a response's calls in
+  order and answers later halting calls after a failure without running them;
+  `ToolCallResult.Error` is `dive.ErrBatchHalted`. Automatic for toolset calls
+  (`ToolsetName` set), which get Anthropic's `ComputerToolsetHaltText`.
+- **Tool-result image helpers for encoders.** `providers.LiftToolResultImages`,
+  `providers.LiftErrorToolResultImages` and `providers.ToolResultImageMediaType`.
+<!-- core-fix entries -->
+- **Opt out of tool-result images on text-only models.**
+  `WithoutToolResultImages()` on `openaicompletions`, `mistral` and `openrouter`
+  restores the `[image content omitted]` placeholder.
+- **`llm.Message.AnswerText`.** Returns a model-written message's text the way
+  `Response.OutputText` does.
+
+### Changed
+
+- **`OutputText` returns the whole answer.** All text of the final message:
+  adjacent fragments joined as-is, separate passages by a blank line. It
+  previously returned the last text block. `a2a` `TaskResult.Text` matches.
+- **Streamed responses keep server tool blocks.** Web search calls and results
+  (including encrypted content) stay in history as with `Generate`, so history
+  grows. Ollama, Google, OpenAI and Chat Completions omit foreign ones.
+- **Tool-result images reach every provider.** Natively on Gemini 3; in the
+  following user turn on Gemini 2.5, Mistral and OpenRouter. Text-only models
+  now return an API error; use `WithoutToolResultImages`.
+- **Toolset calls run in order and halt at the first failure**, even with
+  `ParallelToolExecution`.
+
+### Fixed
+
+- **Gemini `OutputText` no longer returns `""`** when the final part only
+  carries a thought signature; subagents on Gemini no longer return empty.
+- **Error tool results with images.** No more Anthropic 400; the OpenAI
+  Responses API no longer drops the images.
+- **`Message.Text` and `LastText` skip empty text blocks.**
+
 ## [1.32.0] - 2026-09-23
 
 ### Changed

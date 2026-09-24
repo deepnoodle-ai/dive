@@ -29,6 +29,7 @@ type Provider struct {
 	maxRetries    int
 	retryBaseWait time.Duration
 	client        *http.Client
+	noToolImages  bool
 
 	// Embedded OpenAI completions provider
 	*openaic.Provider
@@ -49,7 +50,7 @@ func New(opts ...Option) *Provider {
 		opt(p)
 	}
 	// Pass the options through to the wrapped OpenAI provider
-	p.Provider = openaic.New(
+	providerOpts := []openaic.Option{
 		openaic.WithName(fmt.Sprintf("mistral-%s", p.model)),
 		openaic.WithAPIKey(p.apiKey),
 		openaic.WithClient(p.client),
@@ -59,7 +60,11 @@ func New(opts ...Option) *Provider {
 		openaic.WithBaseWait(p.retryBaseWait),
 		openaic.WithModel(p.model),
 		openaic.WithSystemRole("system"),
-	)
+	}
+	if p.noToolImages {
+		providerOpts = append(providerOpts, openaic.WithoutToolResultImages())
+	}
+	p.Provider = openaic.New(providerOpts...)
 	return p
 }
 

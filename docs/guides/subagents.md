@@ -149,6 +149,16 @@ agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
 })
 ```
 
+### Provider-defined toolsets
+
+A tool that implements `dive.ToolDeclarer`, such as `anthropic.ComputerToolset`, declares other tools to the model: the model calls `left_click` or `screenshot` by their own names, and the agent runs them with your member tools of those names. `FilterTools` treats such a tool as standing for the tools it declares:
+
+- Naming it in `Tools` also allows its member tools. `Tools: []string{"computer", "Read"}` gives the subagent the toolset, every member tool, and `Read`.
+- Naming it in `DisallowedTools` also removes its member tools, so `DisallowedTools: []string{"computer"}` does not leave `left_click` and the rest behind as plain tools.
+- Naming a member alone (`Tools: []string{"screenshot"}`) keeps just that tool, sent to the model as an ordinary tool.
+
+To withhold one action from a subagent that keeps the toolset, disable it in the toolset itself (`anthropic.ComputerToolsetOptions{Disabled: []string{"zoom"}}`). Removing only the member tool with `DisallowedTools` leaves the model a declared action it cannot run: its calls fail as unknown tools, which halts the rest of the batch.
+
 ### Background results
 
 When a sub-agent runs in the background, the Agent tool returns immediately and Dive delivers the result on a later turn through its background-task machinery (`Response.BackgroundTasks` + `dive.ContinueWithBackground`). See the [Agents guide](agents.md) for the background-result loop.
