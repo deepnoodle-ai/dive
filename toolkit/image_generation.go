@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -26,6 +27,16 @@ const maxInlineImageBase64 = 5 * 1024 * 1024
 // Anthropic downsizes anything larger before the model sees it, so a smaller
 // copy loses nothing the model could use.
 const inlineImageMaxEdge = 1568
+
+// maxDecodePixels bounds the source image downscaleJPEG will decode. A small
+// compressed file can declare huge dimensions, and decoding it would allocate
+// width*height*4 bytes; above this the image is left out instead. 64M pixels
+// (about 256 MB decoded) is well above any image generator's output.
+const maxDecodePixels = 64 << 20
+
+// errImageTooLarge reports that an image's declared dimensions exceed
+// maxDecodePixels.
+var errImageTooLarge = errors.New("image dimensions too large to decode")
 
 var _ dive.TypedTool[*ImageGenerationInput] = &imageGenerationTool{}
 
@@ -209,8 +220,16 @@ func imageContent(data []byte, mimeType string) *dive.ToolResultContent {
 }
 
 // downscaleJPEG decodes data, scales it so its long edge is at most maxEdge,
-// and encodes the result as JPEG.
+// and encodes the result as JPEG. It checks the declared dimensions before
+// decoding and returns errImageTooLarge above maxDecodePixels.
 func downscaleJPEG(data []byte, maxEdge int) ([]byte, int, int, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxDecodePixels {
+		return nil, 0, 0, fmt.Errorf("%w: %dx%d", errImageTooLarge, cfg.Width, cfg.Height)
+	}
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, 0, 0, err

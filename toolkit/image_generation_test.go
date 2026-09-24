@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"errors"
+	"hash/crc32"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -137,6 +140,42 @@ func TestImageGenerationTool_OversizedUndecodableImageIsOmitted(t *testing.T) {
 	assert.Equal(t, dive.ToolResultContentTypeText, result.Content[0].Type)
 	assert.Contains(t, result.Content[0].Text, "too large to show inline")
 	assert.False(t, strings.Contains(result.Display, "too large"))
+}
+
+// pngWithDimensions encodes a tiny PNG and rewrites its IHDR to declare
+// width x height, fixing the chunk CRC so DecodeConfig accepts it.
+func pngWithDimensions(t *testing.T, width, height uint32) []byte {
+	t.Helper()
+	data := encodePNG(t, image.NewGray(image.Rect(0, 0, 1, 1)), png.DefaultCompression)
+	// Signature (8), IHDR length (4), "IHDR" (4), then width and height.
+	binary.BigEndian.PutUint32(data[16:20], width)
+	binary.BigEndian.PutUint32(data[20:24], height)
+	binary.BigEndian.PutUint32(data[29:33], crc32.ChecksumIEEE(data[12:29]))
+	return data
+}
+
+// An image declaring huge dimensions is rejected from its header, before a
+// full decode would allocate width*height pixels.
+func TestDownscaleJPEG_RejectsHugeDimensions(t *testing.T) {
+	data := pngWithDimensions(t, 30000, 30000)
+	cfg, err := png.DecodeConfig(bytes.NewReader(data))
+	assert.NoError(t, err)
+	assert.Equal(t, 30000, cfg.Width)
+
+	_, _, _, err = downscaleJPEG(data, inlineImageMaxEdge)
+	assert.True(t, errors.Is(err, errImageTooLarge))
+}
+
+// An oversized result declaring huge dimensions is left out, and the text says so.
+func TestImageGenerationTool_OversizedHugeDimensionsImageIsOmitted(t *testing.T) {
+	// Pad past the inline limit so the downscale path runs.
+	data := append(pngWithDimensions(t, 30000, 30000), make([]byte, maxInlineImageBase64)...)
+	result, _ := callFakeImageTool(t, &media.ImageResult{
+		Data: data, Format: media.FormatPNG, Width: 30000, Height: 30000,
+	}, &ImageGenerationInput{Prompt: "a vast plain"})
+
+	assert.Equal(t, 1, len(result.Content))
+	assert.Contains(t, result.Content[0].Text, "too large to show inline")
 }
 
 func mustEvalSymlinks(t *testing.T, path string) string {
