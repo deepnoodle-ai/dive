@@ -63,9 +63,8 @@ var ErrSuspendedSession = errors.New("session is suspended")
 var ErrNotSuspended = errors.New("session is not suspended")
 
 // cloneSuspensionState returns a deep copy of a SuspensionState so callers
-// cannot mutate the session's internal state through the returned pointer.
-// The TurnMessages slice is copied shallowly by pointer — individual messages
-// are treated as immutable once produced.
+// cannot mutate the session's internal state through the returned pointer,
+// and the session cannot be changed through the state it was handed.
 func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 	if src == nil {
 		return nil
@@ -84,8 +83,10 @@ func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 		}
 	}
 	if src.TurnMessages != nil {
-		out.TurnMessages = make([]*llm.Message, len(src.TurnMessages))
-		copy(out.TurnMessages, src.TurnMessages)
+		out.TurnMessages = copyMessages(src.TurnMessages)
+		if out.TurnMessages == nil {
+			out.TurnMessages = []*llm.Message{}
+		}
 	}
 	out.BatchHalted = src.BatchHalted
 	return out
@@ -123,10 +124,38 @@ func cloneCompletedToolCall(c *dive.CompletedToolCall) *dive.CompletedToolCall {
 	if c.Input != nil {
 		cp.Input = append(json.RawMessage(nil), c.Input...)
 	}
-	// Result is not deep-cloned; tool results are treated as immutable
-	// once produced.
-	cp.Result = c.Result
+	cp.Result = cloneToolResult(c.Result)
 	return cp
+}
+
+// cloneToolResult returns a deep copy of a completed call's result. The
+// unexported background payload is not persisted and is carried by pointer.
+func cloneToolResult(r *dive.ToolResult) *dive.ToolResult {
+	if r == nil {
+		return nil
+	}
+	cp := *r
+	if r.Content != nil {
+		cp.Content = make([]*dive.ToolResultContent, len(r.Content))
+		for i, c := range r.Content {
+			if c == nil {
+				continue
+			}
+			cc := *c
+			if c.Annotations != nil {
+				cc.Annotations = deepCopyJSONValue(c.Annotations).(map[string]any)
+			}
+			cp.Content[i] = &cc
+		}
+	}
+	if r.Suspend != nil {
+		sr := *r.Suspend
+		if r.Suspend.Metadata != nil {
+			sr.Metadata = deepCopyJSONValue(r.Suspend.Metadata).(map[string]any)
+		}
+		cp.Suspend = &sr
+	}
+	return &cp
 }
 
 // deepCopyJSONValue returns a deep copy of a JSON-like value so callers
@@ -403,8 +432,10 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 	s.data.UpdatedAt = evt.Timestamp
 	if s.appender != nil {
 		if err := s.appender.appendEvent(ctx, s.data.ID, evt); err != nil {
-			s.data.Events = s.data.Events[:prevLen]
-			s.data.UpdatedAt = prevUpdatedAt
+			s.resyncAfterWriteError(ctx, func() {
+				s.data.Events = s.data.Events[:prevLen]
+				s.data.UpdatedAt = prevUpdatedAt
+			})
 			return err
 		}
 	}
@@ -476,8 +507,9 @@ func (s *Session) restoreSnapshot(snap sessionSnapshot) {
 }
 
 // withRollback runs mutate to apply state changes, then asks the store to
-// persist them. On store failure the pre-mutation state is restored so the
-// in-memory session stays consistent with what is actually durable.
+// persist them. On store failure the session resyncs from the store (see
+// resyncAfterWriteError) so the in-memory session stays consistent with what
+// is actually durable.
 //
 // When the session has no appender (in-memory mode), mutate still runs but
 // no rollback is performed — there is nothing to recover from.
@@ -488,10 +520,38 @@ func (s *Session) withRollback(ctx context.Context, mutate func()) error {
 		return nil
 	}
 	if err := s.appender.putSession(ctx, s.data); err != nil {
-		s.restoreSnapshot(snap)
+		s.resyncAfterWriteError(ctx, func() { s.restoreSnapshot(snap) })
 		return err
 	}
 	return nil
+}
+
+// storeReloader is implemented by stores whose writes can fail after
+// reaching storage, so a session can read back what the store holds.
+type storeReloader interface {
+	reloadSession(ctx context.Context, id string) (*sessionData, error)
+}
+
+// resyncAfterWriteError runs with s.mu held after a store write returned an
+// error. A write error does not prove that nothing was written: FileStore can
+// fail after its rename has replaced the file, or after an appended line
+// reached the file. So the session reads its conversation and suspension
+// state back from the store rather than trusting its pre-write snapshot.
+// restore is the fallback when the store cannot be read back. Title and
+// metadata keep their in-memory values, which the store may not have yet.
+func (s *Session) resyncAfterWriteError(ctx context.Context, restore func()) {
+	if r, ok := s.appender.(storeReloader); ok {
+		if stored, err := r.reloadSession(ctx, s.data.ID); err == nil {
+			s.data.Events = stored.Events
+			s.data.Suspended = stored.Suspended
+			s.data.PendingToolCalls = stored.PendingToolCalls
+			s.data.CompletedToolCalls = stored.CompletedToolCalls
+			s.data.BatchHalted = stored.BatchHalted
+			s.data.UpdatedAt = stored.UpdatedAt
+			return
+		}
+	}
+	restore()
 }
 
 // SaveSuspendedTurn persists a partial turn: messages ending in an assistant

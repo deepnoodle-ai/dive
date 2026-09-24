@@ -354,6 +354,24 @@ func (s *FileStore) putSession(ctx context.Context, data *sessionData) error {
 	return s.writeSession(data)
 }
 
+// reloadSession implements storeReloader for FileStore. It reads the
+// session back from its file after a failed write. A trailing line torn by
+// the failed append is healed, so the next append cannot concatenate onto it.
+func (s *FileStore) reloadSession(ctx context.Context, id string) (*sessionData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, torn, err := s.readSession(id)
+	if err != nil {
+		return nil, err
+	}
+	if torn {
+		if err := s.writeSession(data); err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
+}
+
 // readSession parses a JSONL file into sessionData. Must be called with at
 // least a read lock held.
 //

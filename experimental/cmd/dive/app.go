@@ -2091,7 +2091,7 @@ func (a *App) handleProcessingEnd(err error) {
 	// Flush any remaining buffered model content.
 	a.flushStreamingBuffers()
 
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		a.appendMessage(Message{
 			Role:    roleSystem,
 			Content: "Error: " + err.Error(),

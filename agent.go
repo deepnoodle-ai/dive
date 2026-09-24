@@ -134,6 +134,27 @@ func acquireSessionLock(ctx context.Context, id string) (context.Context, func()
 	return context.WithValue(ctx, sessionLockHeldKey{id: id}, true), release, nil
 }
 
+// LockSession takes the per-session lock that CreateResponse holds for the
+// whole of a run on a session with this ID. A caller that changes a session
+// outside the agent (CancelSuspension, a rewind, an import) takes it so the
+// change is ordered with any run on that session: it waits for a run in
+// progress to finish, including that run's final session write.
+//
+// The returned context marks the lock as held; a CreateResponse on the same
+// session made with it fails with ErrReentrantSession instead of
+// deadlocking. unlock releases the lock; calls after the first do nothing.
+// LockSession returns ErrReentrantSession when ctx already holds the lock,
+// and ctx.Err() when ctx ends while waiting. The lock is per process: it
+// does not order runs in different processes.
+func LockSession(ctx context.Context, id string) (lockedCtx context.Context, unlock func(), err error) {
+	lockedCtx, release, err := acquireSessionLock(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	var once sync.Once
+	return lockedCtx, func() { once.Do(release) }, nil
+}
+
 // Hooks groups all agent hook slices.
 type Hooks struct {
 	// SessionStart hooks fire once per session, before the first LLM call, when

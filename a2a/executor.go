@@ -185,10 +185,16 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 		e.cancelInflight(execCtx.TaskID)
 
 		// If the session supports cancellation, clean up suspension state.
+		// Take the session lock first: the cancelled run may still be
+		// writing the session, and a suspension it persists must be removed
+		// after that write, not raced by it.
 		if e.sessions != nil && execCtx.ContextID != "" {
 			if sess, err := e.sessions(ctx, execCtx.ContextID); err == nil && sess != nil {
 				if suspendable, ok := sess.(dive.SuspendableSession); ok {
-					_ = suspendable.CancelSuspension(ctx)
+					if lockedCtx, unlock, err := dive.LockSession(ctx, sess.ID()); err == nil {
+						_ = suspendable.CancelSuspension(lockedCtx)
+						unlock()
+					}
 				}
 			}
 		}
