@@ -153,26 +153,14 @@ as `The image from tool call call_1:` comes before the image.
 Only the request changes. The conversation history keeps each image in its
 tool result, so a session can switch between providers.
 
-By default the `[image content omitted]` placeholder is used only when there
+The `[image content omitted]` placeholder is used only when there
 is no image to send: the block has no data, or it has no `MimeType` and Dive
 cannot detect the type from the data. A model that cannot read images at all
 returns an API error, for example Mistral's "Image input is not enabled for
 this model" or OpenRouter's "No endpoints found that support image input".
 Because the image stays in the conversation history, every later request in
-the conversation fails the same way. For such a model on a Chat Completions
-provider, create the provider with `WithoutToolResultImages()`
-(`openaicompletions`, `mistral` and `openrouter` each have it):
-
-```go
-model := mistral.New(
-    mistral.WithModel("codestral-latest"),
-    mistral.WithoutToolResultImages(),
-)
-```
-
-Each image is then replaced by the placeholder in its tool message. The model
-learns that the tool returned an image but cannot see it, so it may guess
-what the image shows; prefer giving a text-only model tools that return text.
+the conversation fails the same way. Don't give a text-only model tools that
+return images.
 
 ## Reading Message Text
 

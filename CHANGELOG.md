@@ -20,9 +20,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Tool-result image helpers for encoders.** `providers.LiftToolResultImages`,
   `providers.LiftErrorToolResultImages` and `providers.ToolResultImageMediaType`.
 <!-- core-fix entries -->
-- **Opt out of tool-result images on text-only models.**
-  `WithoutToolResultImages()` on `openaicompletions`, `mistral` and `openrouter`
-  restores the `[image content omitted]` placeholder.
 - **`llm.Message.AnswerText`.** Returns a model-written message's text the way
   `Response.OutputText` does.
 
@@ -35,8 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (including encrypted content) stay in history as with `Generate`, so history
   grows. Ollama, Google, OpenAI and Chat Completions omit foreign ones.
 - **Tool-result images reach every provider.** Natively on Gemini 3; in the
-  following user turn on Gemini 2.5, Mistral and OpenRouter. Text-only models
-  now return an API error; use `WithoutToolResultImages`.
+  following user turn on Gemini 2.5, Mistral and OpenRouter. A text-only model
+  now returns the provider's API error; don't give it tools that return images.
 - **Toolset calls run in order and halt at the first failure**, even with
   `ParallelToolExecution`.
 

@@ -263,10 +263,8 @@ The model sees the image on every provider, in error results too. Where an
 API cannot carry an image inside a tool result, the provider moves it to the
 user turn right after the tool results. See
 [Images in tool results](llm-guide.md#images-in-tool-results) for how each
-provider sends it. A text-only model rejects a request with an image in it; on
-Chat Completions providers (`openaicompletions`, `mistral`, `openrouter`),
-create the provider with `WithoutToolResultImages()` to send the placeholder
-`[image content omitted]` instead.
+provider sends it. A text-only model rejects a request with an image in it, so
+don't give one tools that return images.
 
 ## Suspending Mid-Call
 

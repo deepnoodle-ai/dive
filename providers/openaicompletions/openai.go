@@ -80,9 +80,6 @@ type Provider struct {
 	// reportedCostCurrency opts an OpenAI-compatible provider into trusting the
 	// authoritative usage.cost value it returns on every response.
 	reportedCostCurrency string
-	// omitToolResultImages keeps tool-result images out of requests (see
-	// WithoutToolResultImages).
-	omitToolResultImages bool
 }
 
 // New creates a new OpenAI Completions provider with the given options.
@@ -122,7 +119,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessagesWith(config.Messages, p.Name(), !p.omitToolResultImages)
+	msgs, err := convertMessagesForProvider(config.Messages, p.Name())
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -266,7 +263,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessagesWith(config.Messages, p.Name(), !p.omitToolResultImages)
+	msgs, err := convertMessagesForProvider(config.Messages, p.Name())
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -414,13 +411,6 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 }
 
 func convertMessagesForProvider(messages []*llm.Message, providerName string) ([]Message, error) {
-	return convertMessagesWith(messages, providerName, true)
-}
-
-// convertMessagesWith converts messages to Chat Completions messages. With
-// liftImages, tool-result images are sent in a user message after the tool
-// messages; without it, each is a placeholder in its tool message.
-func convertMessagesWith(messages []*llm.Message, providerName string, liftImages bool) ([]Message, error) {
 	// Chat Completions has no operator-authority role, so operator reminders
 	// always render as tagged user messages (nil resolver = no native authority).
 	messages, err := llm.RenderReminders(messages, nil)
@@ -429,9 +419,7 @@ func convertMessagesWith(messages []*llm.Message, providerName string, liftImage
 	}
 	// Tool messages are text-only, so tool-result images move to the user
 	// message this loop emits after the run of tool messages.
-	if liftImages {
-		messages = providers.LiftToolResultImages(messages)
-	}
+	messages = providers.LiftToolResultImages(messages)
 	var result []Message
 	for _, msg := range messages {
 		// Skip empty messages - they can occur in edge cases during long tool-calling loops
@@ -767,12 +755,11 @@ func toolResultContentString(c *llm.ToolResultContent) (string, error) {
 }
 
 // toolResultTextBlocks flattens tool result content blocks to a single
-// string. Chat Completions tool messages are text-only. Images have normally
+// string. Chat Completions tool messages are text-only. Images have already
 // been lifted out by providers.LiftToolResultImages, so a non-text block that
-// reaches here (audio, an image with no data or an undetectable type, or any
-// image under WithoutToolResultImages) is represented with a placeholder
-// rather than being dropped silently, as is a result with no renderable text
-// at all.
+// reaches here (audio, or an image with no data or an undetectable type) is
+// represented with a placeholder rather than being dropped silently, as is a
+// result with no renderable text at all.
 func toolResultTextBlocks(content []*dive.ToolResultContent) string {
 	var texts []string
 	for _, c := range content {

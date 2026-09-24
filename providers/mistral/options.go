@@ -57,14 +57,3 @@ func WithModel(model string) Option {
 		p.model = model
 	}
 }
-
-// WithoutToolResultImages keeps images that tools return out of requests,
-// replacing each with the text "[image content omitted]", so the model cannot
-// see them. Use it with text-only models, which reject a request carrying a
-// tool-result image, as does every later request once the image is in the
-// conversation history. See openaicompletions.WithoutToolResultImages.
-func WithoutToolResultImages() Option {
-	return func(p *Provider) {
-		p.noToolImages = true
-	}
-}

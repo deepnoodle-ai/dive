@@ -63,9 +63,8 @@ The abstractions that equip an agent with capabilities. See the
 - **Rich results** — tool results carry text, image, or audio content, an
   optional display variant, and error status. Every provider shows
   tool-result images to the model, inside the tool result where the API
-  allows it and in the following user turn where it doesn't. For text-only
-  models on Chat Completions, `WithoutToolResultImages` sends a placeholder
-  instead.
+  allows it and in the following user turn where it doesn't. A text-only
+  model returns the provider's API error instead.
 
 ## Built-in Toolkit
 

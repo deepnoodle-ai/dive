@@ -28,7 +28,6 @@ type Provider struct {
 	maxRetries    int
 	retryBaseWait time.Duration
 	client        *http.Client
-	noToolImages  bool
 	siteURL       string
 	siteName      string
 
@@ -69,7 +68,7 @@ func New(opts ...Option) *Provider {
 	}
 
 	// Pass the options through to the wrapped OpenAI provider
-	providerOpts := []openaic.Option{
+	p.Provider = openaic.New(
 		openaic.WithName("openrouter"),
 		openaic.WithAPIKey(p.apiKey),
 		openaic.WithClient(customClient),
@@ -80,11 +79,7 @@ func New(opts ...Option) *Provider {
 		openaic.WithModel(p.model),
 		openaic.WithSystemRole("system"),
 		openaic.WithReportedUsageCost("USD"),
-	}
-	if p.noToolImages {
-		providerOpts = append(providerOpts, openaic.WithoutToolResultImages())
-	}
-	p.Provider = openaic.New(providerOpts...)
+	)
 	return p
 }
 
