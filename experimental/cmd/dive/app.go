@@ -1241,6 +1241,9 @@ func (a *App) captureSubmittedFiles(value string) string {
 	if trimmed == "" {
 		return value
 	}
+	if strings.Contains(trimmed, "\n") {
+		return value
+	}
 	fields := strings.Fields(trimmed)
 	firstToken := fields[0]
 	if len(fields) == 1 && strings.HasPrefix(firstToken, "/") && !strings.Contains(strings.TrimPrefix(firstToken, "/"), "/") && filepath.Ext(firstToken) == "" {
@@ -1265,10 +1268,6 @@ func (a *App) captureSubmittedFiles(value string) string {
 		}
 		return a.captureDroppedFiles(trimmed)
 	}
-	if strings.Contains(trimmed, "\n") {
-		return value
-	}
-
 	// Only a final run of complete paths is an implicit attachment in prose.
 	// This keeps paths inside logs and ordinary slash commands as plain text.
 	start := len(tokens)

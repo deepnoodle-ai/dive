@@ -396,6 +396,22 @@ func TestSubmitInput_DoesNotAttachPathsInsidePastedLogs(t *testing.T) {
 	assert.Empty(t, a.attachments)
 }
 
+func TestSubmitInput_DoesNotAttachMultilinePaths(t *testing.T) {
+	a := newTestApp()
+	a.processing = true
+	first := writeTempFile(t, "first.png", pngBytes)
+	second := writeTempFile(t, "second.png", pngBytes)
+	input := first + "\n" + second
+
+	for i := 1; i <= len(input); i++ {
+		simulateInput(a, input[:i])
+	}
+	a.submitInput(input)
+
+	assert.Equal(t, input, a.inputText)
+	assert.Empty(t, a.attachments)
+}
+
 func TestSubmitInput_UnsupportedStandaloneFileStaysText(t *testing.T) {
 	a := newTestApp()
 	a.processing = true
