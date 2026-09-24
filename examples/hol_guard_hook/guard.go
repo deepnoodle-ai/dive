@@ -18,7 +18,10 @@ const guardTimeout = 9 * time.Second
 type guardRunner func(context.Context, []byte) ([]byte, error)
 
 type guardHookResponse struct {
-	SystemMessage      string `json:"systemMessage"`
+	PolicyAction string `json:"policy_action"`
+	ReasonCode   string `json:"reason_code"`
+	Reason       string `json:"reason"`
+	SystemMessage string `json:"systemMessage"`
 	HookSpecificOutput struct {
 		HookEventName            string `json:"hookEventName"`
 		PermissionDecision       string `json:"permissionDecision"`
@@ -55,16 +58,19 @@ func holGuardPreToolUse(run guardRunner) dive.PreToolUseHook {
 		if err != nil {
 			return fmt.Errorf("HOL Guard: %w", err)
 		}
-		if response.HookSpecificOutput.PermissionDecision == "allow" {
+		if authoritativeGuardAllow(response) {
 			return nil
 		}
 
 		reason := strings.TrimSpace(response.HookSpecificOutput.PermissionDecisionReason)
 		if reason == "" {
+			reason = strings.TrimSpace(response.Reason)
+		}
+		if reason == "" {
 			reason = strings.TrimSpace(response.SystemMessage)
 		}
 		if reason == "" {
-			reason = fmt.Sprintf("policy decision was %q", response.HookSpecificOutput.PermissionDecision)
+			reason = fmt.Sprintf("policy action %q returned decision %q (%s)", response.PolicyAction, response.HookSpecificOutput.PermissionDecision, response.ReasonCode)
 		}
 		return fmt.Errorf("HOL Guard: %s", reason)
 	}
@@ -111,5 +117,17 @@ func parseGuardHookResponse(out []byte) (guardHookResponse, error) {
 	if strings.TrimSpace(response.HookSpecificOutput.PermissionDecision) == "" {
 		return guardHookResponse{}, errors.New("hook response has no permission decision")
 	}
+	if strings.TrimSpace(response.PolicyAction) == "" {
+		return guardHookResponse{}, errors.New("hook response has no policy action")
+	}
+	if strings.TrimSpace(response.ReasonCode) == "" {
+		return guardHookResponse{}, errors.New("hook response has no reason code")
+	}
 	return response, nil
+}
+
+func authoritativeGuardAllow(response guardHookResponse) bool {
+	return response.HookSpecificOutput.PermissionDecision == "allow" &&
+		response.PolicyAction == "allow" &&
+		strings.TrimSpace(response.ReasonCode) != ""
 }
