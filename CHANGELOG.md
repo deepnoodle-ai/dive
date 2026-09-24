@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-09-24
+
+### Fixed
+
+- **Claude accepts conversations after Gemini.** Anthropic requests skip empty
+  text blocks that only carry Gemini thought signatures.
+
 ## [1.33.0] - 2026-09-24
 
 ### Added
