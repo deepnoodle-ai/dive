@@ -117,7 +117,7 @@ response, err := model.Generate(ctx,
     )),
     llm.WithMaxTokens(1024),
 )
-fmt.Println(response.Message().Text())
+fmt.Println(response.Message().AnswerText())
 ```
 
 ### Providers
@@ -280,7 +280,7 @@ agent.CreateResponse(ctx,
     dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
         switch item.Type {
         case dive.ResponseItemTypeMessage:
-            fmt.Println(item.Message.Text())
+            fmt.Println(item.Message.AnswerText())
         case dive.ResponseItemTypeModelEvent:
             fmt.Print(item.Event.Delta.Text) // streaming deltas
         case dive.ResponseItemTypeToolCall:

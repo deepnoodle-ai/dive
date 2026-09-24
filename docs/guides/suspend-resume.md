@@ -273,6 +273,13 @@ batch: earlier tools keep their results, later tools in the batch are
 **not** started. On resume, once the suspended call is satisfied, the
 agent runs the remaining sequential tools before the next LLM call.
 
+Batch halting (see `ToolAnnotations.HaltsBatch`) carries across a
+suspension. If a halting call in the batch failed, either before the
+suspension or because the caller resumed a suspended halting call with an
+`IsError` result, the batch stays halted: the remaining halting calls are
+answered with an error and not run, and their `ToolCallResult.Error` is
+`dive.ErrBatchHalted`. Calls to tools without the annotation still run.
+
 ## The `OnSuspend` hook
 
 `OnSuspend` fires when the agent transitions into a suspended state,

@@ -87,7 +87,7 @@ response, _ := model.Generate(ctx,
     )),
     llm.WithMaxTokens(1024),
 )
-fmt.Println(response.Message().Text())
+fmt.Println(response.Message().AnswerText())
 ```
 
 ## Custom tool (FuncTool — recommended for simple tools)
@@ -287,6 +287,9 @@ from custom sources. See [Skills Guide](docs/guides/skills.md).
 - `dive.FuncTool[T]` - create a Tool from a function with auto-generated schema from T's struct tags
 - `dive.Toolset` - interface: Name, Tools(ctx) — dynamic tool resolution per LLM request
 - `dive.ToolsetFunc` - adapts a function into a Toolset
+- `dive.ToolDeclarer` - interface: DeclaredTools; a tool whose provider definition declares other tools (e.g. `anthropic.ComputerToolset`); the agent routes calls to the declared tools by name and leaves them out of the request while the declarer is present
+- `dive.ToolAnnotations.HaltsBatch` - chains a tool's calls within one model response: after one fails, later HaltsBatch calls are answered with an error and not run (no hooks); implies SequentialOnlyHint; automatic for provider-toolset calls (`ToolUseContent.ToolsetName` set)
+- `dive.ErrBatchHalted` - `ToolCallResult.Error` of a call not run because an earlier call in its batch failed
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
 - `dive.Reminder` - validated, named runtime context with contextual or operator authority
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
@@ -297,7 +300,7 @@ from custom sources. See [Skills Guide](docs/guides/skills.md).
 - `dive.SuspendableSession` - optional `Session` extension: LoadSuspension, SaveSuspendedTurn, SaveResumedTurn
 - `llm.LLM` - interface: Name, Generate
 - `llm.StreamingLLM` - extends LLM with Stream()
-- `llm.Message` - create with NewUserTextMessage(), NewUserMessage(), NewAssistantMessage()
+- `llm.Message` - create with NewUserTextMessage(), NewUserMessage(), NewAssistantMessage(); read text with AnswerText() (a model's answer, as OutputText), Text() (blocks joined by a blank line) or LastText()
 - `llm.Content` - interface; primary types listed below
 - `dive.Dialog` - interface for user prompts; built-ins: AutoApproveDialog, DenyAllDialog
 
@@ -323,7 +326,7 @@ Set via `AgentOptions.ModelSettings`. All fields are optional (pointer types).
 `dive.Response` is returned by `agent.CreateResponse()`.
 
 ```go
-response.OutputText()       // text from the last assistant message
+response.OutputText()       // all text of the final assistant message (the answer)
 response.ToolCallResults()  // all tool call results
 response.Items              // []*ResponseItem in chronological order
 response.OutputMessages     // []*llm.Message — assistant + tool result messages for conversation continuation
