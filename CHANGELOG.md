@@ -23,6 +23,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   ran itself, so encoders can leave out history they cannot replay.
 - **`llm.Message.AnswerText`.** Returns a model-written message's text the way
   `Response.OutputText` does.
+- **MCP servers in the CLI.** Claude Code's `mcpServers` format from
+  `~/.dive/settings.json`, approved project `.mcp.json` servers, and
+  `--mcp-config`; tools are `mcp__<server>__<tool>` and prompt as usual. `/mcp`.
+- **`experimental/mcp` config helpers.** `ParseServersJSON`, `LoadServersFile`,
+  `QualifiedToolName`, `NewQualifiedToolAdapter`, `ExpandEnv`, and `sse` servers.
 
 ### Changed
 
@@ -44,6 +49,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `ParallelToolExecution`.
 - **Unknown content blocks no longer fail `Generate`.** They are skipped, as in
   streams, along with any server tool call whose result was skipped.
+- **`experimental/mcp` expands `${VAR}` and `${VAR:-default}`** in a server's
+  command, url and headers too, not only args and env. A failed `Connect` now
+  stops the stdio child it started.
 
 ### Fixed
 
@@ -60,6 +68,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **CLI `-p` text output separates turns.** Text and thinking from successive
   LLM turns are split by a blank line instead of running together.
 - **CLI `dive models` columns align** across all provider sections.
+- **`experimental/mcp` tools work when called by an agent.** `ToolAdapter`
+  accepts the `[]byte` input `dive.Agent` passes, and keeps the schema's
+  `required` list.
 
 ## [1.32.0] - 2026-09-23
 

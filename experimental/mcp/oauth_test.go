@@ -4,9 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/wonton/assert"
+	mcpclient "github.com/mark3labs/mcp-go/client"
 )
 
 func TestNewMCPClient_WithoutOAuth(t *testing.T) {
@@ -43,6 +46,49 @@ func TestNewMCPClient_WithOAuth(t *testing.T) {
 	assert.Equal(t, "http://localhost:8085/oauth/callback", client.oauthConfig.RedirectURI)
 	assert.True(t, client.oauthConfig.PKCEEnabled)
 	assert.Equal(t, []string{"mcp.read", "mcp.write"}, client.oauthConfig.Scopes)
+}
+
+// The OAuth path expands ${VAR} in the URL and custom headers, like the
+// other transports.
+func TestMCPClient_OAuth_ExpandsEnv(t *testing.T) {
+	var mu sync.Mutex
+	var gotPath, gotCustom string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if gotPath == "" {
+			gotPath = r.URL.Path
+			gotCustom = r.Header.Get("X-Custom-Header")
+		}
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	t.Setenv("MCP_OAUTH_TEST_URL", ts.URL)
+	t.Setenv("MCP_OAUTH_TEST_HEADER", "custom-value")
+
+	client, err := NewClient(&ServerConfig{
+		Type:    "http",
+		Name:    "oauth-env",
+		URL:     "${MCP_OAUTH_TEST_URL}/mcp",
+		Headers: map[string]string{"X-Custom-Header": "${MCP_OAUTH_TEST_HEADER}"},
+		OAuth:   &OAuthConfig{ClientID: "test-client"},
+	})
+	assert.NoError(t, err)
+	// A stored token skips discovery, so the first request is the MCP call.
+	store := mcpclient.NewMemoryTokenStore()
+	assert.NoError(t, store.SaveToken(context.Background(), &mcpclient.Token{
+		AccessToken: "tok", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour),
+	}))
+	client.tokenStore = store
+
+	// The server always fails, but the request it received proves the
+	// transport was built from the expanded values.
+	assert.Error(t, client.Connect(context.Background()))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, "/mcp", gotPath)
+	assert.Equal(t, "custom-value", gotCustom)
 }
 
 func TestMCPClient_OAuth_IsConnected(t *testing.T) {

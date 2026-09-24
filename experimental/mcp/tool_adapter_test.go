@@ -154,6 +154,24 @@ func TestMCPToolAdapter_Schema(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "required properties",
+			mcpTool: mcp.Tool{
+				Name: "test-tool",
+				InputSchema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]interface{}{
+						"q": map[string]interface{}{"type": "string"},
+					},
+					Required: []string{"q"},
+				},
+			},
+			expected: &schema.Schema{
+				Type:       "object",
+				Properties: map[string]*schema.Property{"q": {Type: "string"}},
+				Required:   []string{"q"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -246,6 +264,11 @@ func TestMCPToolAdapter_Call_InputFormats(t *testing.T) {
 		{
 			name:  "json raw message",
 			input: json.RawMessage(`{"param": "value"}`),
+		},
+		{
+			// dive.Agent passes the call's raw input as []byte.
+			name:  "raw bytes",
+			input: []byte(`{"param": "value"}`),
 		},
 		{
 			name: "struct input",

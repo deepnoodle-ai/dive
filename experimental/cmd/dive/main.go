@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
@@ -174,6 +175,8 @@ func main() {
 				Default(fallbackCompactionThreshold).
 				Env("DIVE_COMPACTION_THRESHOLD").
 				Help("Token threshold for automatic context compaction (default: half the model's context window)"),
+			cli.Strings("mcp-config").
+				Help("Load MCP servers from a JSON file in Claude Code's \"mcpServers\" format (repeatable)"),
 			dangerouslySkipPermissionsFlag(),
 		).
 		Run(runMain)
@@ -375,7 +378,15 @@ func runInteractive(ctx *cli.Context) error {
 		}
 	}
 
-	// Set up tool permission hook using the permission package
+	// Start MCP servers before the TUI takes over the terminal. A server that
+	// fails is reported by /mcp and never stops the CLI.
+	mcpServers := startMCPServers(ctx.Context(), workspaceDir, ctx.Strings("mcp-config"), true)
+	defer mcpServers.Close()
+
+	// Set up tool permission hook using the permission package. Default rules
+	// come from the built-in tools only: an MCP server's readOnlyHint is the
+	// server's own claim, so its tools always go through the normal prompt
+	// unless the user allows them (e.g. "Always allow" for the session).
 	permConfig := &permission.Config{
 		Mode:  permissionMode(ctx),
 		Rules: defaultPermissionRules(tools),
@@ -416,9 +427,11 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Create agent options with hooks and extensions
 	agentOpts := dive.AgentOptions{
-		SystemPrompt:  systemPrompt,
-		Model:         model,
-		Tools:         tools,
+		SystemPrompt: systemPrompt,
+		Model:        model,
+		// MCP tools go to the main agent only. Subagents run without the
+		// permission hook, so they get the built-in tools alone.
+		Tools:         append(slices.Clip(tools), mcpServers.Tools()...),
 		Toolsets:      []dive.Toolset{serverToolset},
 		Extensions:    []dive.Extension{skills},
 		ModelSettings: modelSettings,
@@ -488,6 +501,7 @@ func runInteractive(ctx *cli.Context) error {
 		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession
+	app.mcp = mcpServers
 	app.operatorReminders = operatorReminders
 	app.contextDemos = contextDemos
 	app.modelSettings = modelSettings
@@ -696,6 +710,14 @@ func runPrint(ctx *cli.Context) error {
 	}
 	tools := createTools(printValidator, nil)
 	tools = append(tools, grokServerSideTools(modelName)...)
+
+	// MCP servers: problems go to stderr so stdout stays the model's output.
+	mcpServers := startMCPServers(ctx.Context(), workspaceDir, ctx.Strings("mcp-config"), false)
+	defer mcpServers.Close()
+	for _, line := range mcpServers.problems() {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", line)
+	}
+	tools = append(tools, mcpServers.Tools()...)
 
 	// Create agent
 	printModelSettings, showThinking := newCLIModelSettingsWith(ctx, effPrintSettings)
