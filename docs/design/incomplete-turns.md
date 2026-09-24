@@ -1109,9 +1109,10 @@ const (
 
 // AnswerUnansweredToolCalls returns messages in which every tool_use block
 // is followed by a tool_result for its ID. A missing result is inserted as
-// an error result with ToolCallUnknownText, into the next user message when
-// there is one and otherwise as a new tool-result message after the
-// assistant message. The unknown text is used because history alone cannot
+// an error result with ToolCallUnknownText, into the next message when it is
+// a tool-result message and otherwise as a new tool-result message after the
+// assistant message, so a user message holding no results (a reminder an
+// encoder may render in a system or developer role) is never mixed with them. The unknown text is used because history alone cannot
 // say whether the call ran, and "unknown" is the safe claim. Server tool
 // calls are left alone. Copy-on-write: messages is returned as is when
 // nothing is missing.

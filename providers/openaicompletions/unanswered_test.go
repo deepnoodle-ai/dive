@@ -69,3 +69,24 @@ func TestCompletionsGenerateReportsToolUse(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, response.StopReason, "tool_use")
 }
+
+// TestCompletionsGenerateWithoutFinishReason verifies that a response whose
+// server omitted finish_reason reports the same fallback as the stream.
+func TestCompletionsGenerateWithoutFinishReason(t *testing.T) {
+	for want, body := range map[string]string{
+		"stop":     `{"id":"c","model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"done"}}]}`,
+		"tool_use": `{"id":"c","model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}}]}`,
+	} {
+		t.Run(want, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(server.Close)
+			provider := New(WithAPIKey("k"), WithEndpoint(server.URL), WithModel(ModelGPT55), WithMaxRetries(0))
+			response, err := provider.Generate(context.Background(), llm.WithMessages(llm.NewUserTextMessage("hi")))
+			assert.NoError(t, err)
+			assert.Equal(t, response.StopReason, want)
+		})
+	}
+}

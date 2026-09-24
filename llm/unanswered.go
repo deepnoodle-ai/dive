@@ -13,10 +13,12 @@ const ToolCallUnknownText = "Unknown result: the turn ended while this call was 
 // (ToolUseContent) is answered by a tool result in the message after it. A
 // missing result is added as an error result with ToolCallUnknownText: the
 // history alone cannot say whether the call ran, and "unknown" is the claim
-// that is safe either way. It goes into the next user message, after the
-// results already there and before any other content, or into a new
-// tool-result message after the assistant message when the next message is
-// not a user message or there is none.
+// that is safe either way. When the next message is a tool-result message (a
+// user message with results for some of the calls), the missing results join
+// it, after the results already there and before any other content.
+// Otherwise they go into a new tool-result message right after the assistant
+// message, so a user message that holds no results, such as a reminder that
+// an encoder may render in a system or developer role, is left as it is.
 //
 // Providers reject a history with an unanswered call, so encoders apply this
 // to the request as a backstop against a history saved by an older version,
@@ -38,7 +40,7 @@ func AnswerUnansweredToolCalls(messages []*Message) []*Message {
 		}
 
 		var next *Message
-		if i+1 < len(messages) && messages[i+1] != nil && messages[i+1].Role == User {
+		if i+1 < len(messages) && hasToolResults(messages[i+1]) {
 			next = messages[i+1]
 		}
 		missing := missingResults(calls, next)
@@ -65,6 +67,19 @@ func AnswerUnansweredToolCalls(messages []*Message) []*Message {
 		return messages
 	}
 	return out
+}
+
+// hasToolResults reports whether msg is a user message holding tool results.
+func hasToolResults(msg *Message) bool {
+	if msg == nil || msg.Role != User {
+		return false
+	}
+	for _, c := range msg.Content {
+		if _, ok := c.(*ToolResultContent); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // clientToolCalls returns the client tool calls of an assistant message.

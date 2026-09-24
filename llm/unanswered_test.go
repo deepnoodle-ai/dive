@@ -98,3 +98,19 @@ func TestAnswerUnansweredToolCallsKeepsToolsetName(t *testing.T) {
 	out := AnswerUnansweredToolCalls([]*Message{NewUserTextMessage("go"), call})
 	assert.Equal(t, out[2].Content[0].(*ToolResultContent).ToolsetName, "computer")
 }
+
+// TestAnswerUnansweredToolCallsBeforeUserMessageWithoutResults pins that
+// missing results never join a user message that holds none, such as a
+// reminder an encoder may render in a system or developer role: they get a
+// tool-result message of their own before it.
+func TestAnswerUnansweredToolCallsBeforeUserMessageWithoutResults(t *testing.T) {
+	reminder := &Message{Role: User, Content: []Content{&ReminderContent{
+		Name: "mode", Tier: ReminderTierOperator, Content: "Read only",
+	}}}
+	msgs := []*Message{NewUserTextMessage("hi"), toolUse("a"), reminder}
+	out := AnswerUnansweredToolCalls(msgs)
+	assert.Equal(t, len(out), 4)
+	assert.Equal(t, resultIDs(out[2]), []string{"a"})
+	assert.Equal(t, len(out[2].Content), 1)
+	assert.True(t, out[3] == reminder)
+}

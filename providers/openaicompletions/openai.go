@@ -234,7 +234,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		Model:      responseModel,
 		Role:       llm.Assistant,
 		Content:    contentBlocks,
-		StopReason: stopReasonFromFinish(choice.FinishReason),
+		StopReason: generateStopReason(choice),
 		Usage:      result.Usage.toLLMUsage(),
 	}
 	p.applyReportedUsageCost(result.Usage, &response.Usage, response.Model)
@@ -393,11 +393,24 @@ func applyReportedUsageCost(wire Usage, usage *llm.Usage, model, currency, field
 	}
 }
 
+// generateStopReason is the stop reason of a non-streaming response. A
+// server that omits finish_reason gets the same fallback as a stream that
+// ends at [DONE] without one: "tool_use" when the response made tool calls,
+// "stop" otherwise.
+func generateStopReason(choice Choice) string {
+	if choice.FinishReason == "" {
+		if len(choice.Message.ToolCalls) > 0 {
+			return "tool_use"
+		}
+		return "stop"
+	}
+	return stopReasonFromFinish(choice.FinishReason)
+}
+
 // stopReasonFromFinish maps a Chat Completions finish_reason to the stop
 // reason this provider reports. A response that ended to call tools reports
 // "tool_use", as Anthropic does, whether the server spelled it tool_calls or
-// the legacy function_call; other values pass through unchanged, including
-// an empty one from a server that omitted it.
+// the legacy function_call; other values pass through unchanged.
 func stopReasonFromFinish(finishReason string) string {
 	switch finishReason {
 	case "tool_calls", "function_call":
