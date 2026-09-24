@@ -3,7 +3,7 @@
 _Last updated: 2026-09-24_
 _Status: proposal, no code written. Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
-revision, after three reviews: the pull-request review (a running call must
+revision, after four reviews: the pull-request review (a running call must
 not be recorded as "not run"; the partial-resume rule; the error contract;
 outcome metadata), an independent review of how turns end today (the loop
 never reads a stop reason; retrying a resume reruns tools; the background
@@ -11,7 +11,11 @@ results message is missing from `OutputMessages`; the cancel/suspend race), and
 a colleague's design notes (the turn as the durable unit and `CreateResponse`
 as one invocation of it; the record versus the projection sent to the model;
 one status axis for what can happen next and a reason axis for what happened;
-checkpoints). Section references to `agent.go` are against v1.33.1._
+checkpoints). A fourth round of notes moved a refusal to a completed turn,
+kept PostGeneration's existing scope, added an unknown persistence state and
+the protocol-end rule for streams, and split Phase 2 into recoverable turns
+and per-step durability. Section references to `agent.go` are against
+v1.33.1._
 
 A turn that does not finish is recorded the way a turn that finishes is: what
 happened is kept, the history is valid to send again, and the record says how
@@ -49,16 +53,20 @@ projection is computed once, when the turn is closed, because the `Session`
 contract stores messages; the structured record rides along in the outcome
 reminder's details so the projection can be rebuilt, and `CloseTurn` is the
 one function that computes it. In Phase 2 the session stores the record and
-computes the projection on load, with the same function.
+computes the projection on load, with the same function. v1.34 is therefore
+*conversation preservation* and Phase 2 is *turn recovery*; the two names are
+used below so that neither promises what the other delivers.
 
 ## Summary of decisions
 
 - **One new status, `ResponseStatusIncomplete`, with a reason.** The status
   says what can happen next; `TurnOutcome.Reason` says what happened:
   cancelled, deadline, provider error, stream interrupted, hook abort,
-  callback error, output limit, iteration limit, refusal, pause. There is no
+  callback error, output limit, iteration limit, pause. There is no
   `Canceled` or `Failed` status: a cancellation and a provider error are both
-  turns that stopped short, and the application renders them by reason.
+  turns that stopped short, and the application renders them by reason. A
+  refusal is a completed turn: the model finished responding, and
+  `Response.StopReason` says how.
 - **`TurnOutcome.Next` says what the turn needs**: `continue` (another model
   call on the record as it stands), `reconcile` (a call with an unknown
   result must be checked first), or `input` (nothing to continue).
@@ -66,7 +74,7 @@ computes the projection on load, with the same function.
   limit or in a refusal runs none of its tool calls; a pause is continued a
   bounded number of times; the iteration limit ends the turn incomplete
   instead of running calls the model will never see; a stream that ends
-  without a terminal event is an interruption, not a finish.
+  without its protocol's end marker is an interruption, not a finish.
 - **`Response.Turn`** is the turn as this invocation left it: the messages a
   session saves (input and output, closed), cumulative usage, the outcome or
   the suspension, and whether it was persisted. It is set for every status.
@@ -238,6 +246,11 @@ type TurnOutcome struct {
     // Hook is the hook type ("PreToolUse", "Stop", ...) for TurnReasonHookAbort.
     Hook string `json:"hook,omitempty"`
 
+    // UsageUnknown is set when the invocation's usage could not be observed,
+    // as when a stream died before its usage frame, so a zero Usage is not
+    // a measurement.
+    UsageUnknown bool `json:"usage_unknown,omitempty"`
+
     // ToolCalls records every call of the batch in flight when the turn
     // stopped, in call order, with what is known about it. Empty when the
     // turn stopped between batches.
@@ -262,7 +275,6 @@ const (
     TurnReasonError             TurnReason = "error"              // any other error; Error says which
     TurnReasonOutputLimit       TurnReason = "output_limit"       // the model stopped at max_tokens
     TurnReasonIterationLimit    TurnReason = "iteration_limit"    // ToolIterationLimit reached with calls still requested
-    TurnReasonRefusal           TurnReason = "refusal"            // the model declined to continue
     TurnReasonPause             TurnReason = "pause"              // a server tool loop paused more than the agent continues
     TurnReasonProcessExit       TurnReason = "process_exit"       // Phase 2: the process ended with the turn open
 )
@@ -286,7 +298,7 @@ type ToolCallState string
 
 const (
     ToolCallStateCompleted ToolCallState = "completed" // a result is recorded, success or tool error
-    ToolCallStateNotRun    ToolCallState = "not_run"   // never started; it had no effect
+    ToolCallStateNotStarted ToolCallState = "not_started" // never started; it had no effect
     ToolCallStateUnknown   ToolCallState = "unknown"   // started, no result recorded; it may have taken effect
     ToolCallStateWaiting   ToolCallState = "waiting"   // Phase 2: suspended, awaiting an external result
 )
@@ -306,7 +318,6 @@ the default `Next`.
 | `error`              | non-nil | `input`        |                                                                                            |
 | `output_limit`       | nil     | `continue`     | the model's own stop; the answer is valid as far as it goes                                |
 | `iteration_limit`    | nil     | `continue`     | the requested calls were not run                                                           |
-| `refusal`            | nil     | `input`        | continuing the same request is pointless                                                   |
 | `pause`              | nil     | `continue`     | only after the agent's own pause continuations were spent                                  |
 | `process_exit`       | none    | `continue`     | Phase 2, set on load; no invocation returned it                                            |
 
@@ -353,9 +364,10 @@ provider accepts. The rules, in order:
    - **A call that never started** is answered "not run": a later call in a
      sequential batch, every call in a batch whose PreToolUse phase aborted,
      every call of a response that stopped at the output limit or in a
-     refusal, every call requested past the iteration limit, or a call the
-     agent refused to start because the context was already cancelled. It had
-     no effect, and the text says so. State `not_run`.
+     refusal (a refusal's calls are answered this way although the turn is
+     completed, section 4), every call requested past the iteration limit,
+     or a call the agent refused to start because the context was already
+     cancelled. It had no effect, and the text says so. State `not_started`.
    - **A call that had started and had not reported** is answered "unknown
      result". Only a parallel batch can leave a call in this state:
      sequential execution waits for the running call, as it does today, so
@@ -476,8 +488,12 @@ agent's rules:
   `Next == continue`: the recorded note tells the model to continue exactly
   where it stopped. Automatic continuation is left to the application, which
   knows whether more output is wanted; `WithContinue` is one call away.
-- **Refusal.** None of the response's tool calls run. Incomplete with
-  `refusal`, `Next == input`.
+- **Refusal.** None of the response's tool calls run; any it made are
+  answered "not run". The turn is completed, not incomplete: the model
+  finished responding and there is nothing to continue. `Response.StopReason`
+  is the provider's refusal value and `Response.StopDetails` carries the
+  category when the provider reports one, which is what an application
+  routes on. No outcome reminder is recorded.
 - **Pause.** The agent resends the conversation, with the assistant message
   and its trailing server tool call and no new user message, up to
   `pauseTurnLimit` (10) times per invocation, as the API documents. Beyond
@@ -491,13 +507,18 @@ agent's rules:
   incomplete with `iteration_limit`, the calls are answered "not run", and a
   continuation gives the model more iterations. `Response.OutputText()`
   being empty is no longer the only signal.
-- **Stream interrupted.** A stream that ends without a terminal event is an
-  error from the iterator, not a synthesized clean stop: the chat-completions
-  iterator's `endStream` returns `io.ErrUnexpectedEOF` in place of the
-  fabricated `message_stop`, and the retry wrapper's rule stands, no retry
-  after the first event. The agent keeps the partial response and its
-  observed usage and records `stream_interrupted`, `err` non-nil,
-  `Next == continue`.
+- **Stream interrupted.** A provider adapter distinguishes its protocol's
+  end from the transport's. The chat-completions iterator treats `[DONE]` as
+  a valid end even when no `finish_reason` arrived, since some compatible
+  servers omit it, and synthesizes the closing events as it does today; a
+  bare EOF with neither is an error, `io.ErrUnexpectedEOF`, in place of the
+  fabricated `message_stop`. The retry wrapper's rule stands, no retry after
+  the first event. The agent keeps the partial response and whatever usage
+  was observed, records `stream_interrupted` with `err` non-nil and
+  `Next == continue`, and sets `UsageUnknown` when no usage frame arrived, so
+  a zero `Usage` is not mistaken for a measurement. Tool-call fragments in
+  the partial message stay visible in the model events on `Response.Items`
+  and are never run.
 
 ### 5. Telling the model and the application
 
@@ -569,7 +590,6 @@ call that is not completed:
 | `hook_abort`                                                    | The previous turn was stopped by the application before it finished: `<error>`. Everything above this note happened as shown. Do not retry the stopped step unless the user asks.                  |
 | `output_limit`                                                  | The previous response was cut off at the output limit before it finished. Continue from exactly where it stopped, without repeating what was already written.                                        |
 | `iteration_limit`                                               | The previous turn reached its limit of tool calls before finishing. Finish with the information already gathered, or ask the user before continuing.                                                 |
-| `refusal`                                                       | The previous turn ended because the model declined to continue.                                                                                                                                    |
 | `pause`                                                         | The previous turn's server tool loop was paused before it finished. Its trailing call was not completed; start it again if the user still wants it.                                                  |
 | `process_exit` (Phase 2)                                        | The previous turn was interrupted: the process ended before it finished. Everything above this note happened as shown.                                                                             |
 
@@ -595,7 +615,10 @@ type Response struct {
 
     // StopReason is the raw stop reason of the last model response in this
     // invocation ("end_turn", "max_tokens", ...), or "" when there was none.
-    StopReason string `json:"stop_reason,omitempty"` // new
+    // StopDetails carries the provider's structured detail when it reports
+    // one, such as a refusal category.
+    StopReason  string           `json:"stop_reason,omitempty"`  // new
+    StopDetails *llm.StopDetails `json:"stop_details,omitempty"` // new
 
     // Turn is the turn as this invocation left it. It is set for every
     // status once the turn has begun, including Completed.
@@ -632,9 +655,10 @@ type Turn struct {
 type PersistenceState string
 
 const (
-    PersistenceNone   PersistenceState = "none"   // no session
-    PersistenceSaved  PersistenceState = "saved"
-    PersistenceFailed PersistenceState = "failed" // the returned error wraps the save error
+    PersistenceNone    PersistenceState = "none"    // no session
+    PersistenceSaved   PersistenceState = "saved"
+    PersistenceFailed  PersistenceState = "failed"  // the store refused the write; the returned error wraps its error
+    PersistenceUnknown PersistenceState = "unknown" // the write timed out or was cut off; it may or may not have landed
 )
 ```
 
@@ -651,17 +675,21 @@ and the background-results message is no longer lost.
 **The contract by exit class.** The `Response` is created before
 PreGeneration hooks run (today it is created after them), and every exit
 after the boundary goes through one function that closes the turn, saves,
-emits the terminal item, and builds the return:
+emits the terminal item, and builds the return. That function reads one
+accumulator for the turn, fed alike by the resume phase, the generation loop
+and Stop-hook continuations, into which every model response and every tool
+result is recorded before the callbacks and hooks that could fail run; today
+that state is spread over four slices and reassembled on the error path.
 
 | Exit                                                                  | Returns                                   | `Status`     | `Persistence`      |
 | --------------------------------------------------------------------- | ----------------------------------------- | ------------ | ------------------ |
 | Before the turn begins                                                | `(nil, err)`                              |              |                    |
 | Completed                                                             | `(resp, nil)`                             | `completed`  | `saved` or `none`  |
-| Completed, save failed                                                | `(resp, err)`                             | `completed`  | `failed`           |
+| Completed, save failed                                                | `(resp, err)`                             | `completed`  | `failed` or `unknown` |
 | Suspended                                                             | `(resp, nil)`                             | `suspended`  | `saved` or `none`  |
 | A new suspension whose `SaveSuspendedTurn` failed                     | `(resp, err)` (today `(nil, err)`), so the caller can persist `resp.Suspension` itself | `suspended`  | `failed`           |
-| Incomplete, error reason                                              | `(resp, err)`, `err` wraps `*GenerationError{Response: resp}` | `incomplete` | `saved`, `none`, or `failed` with `errors.Join` |
-| Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `refusal`, `pause`) | `(resp, nil)`             | `incomplete` | `saved` or `none`  |
+| Incomplete, error reason                                              | `(resp, err)`, `err` wraps `*GenerationError{Response: resp}` | `incomplete` | `saved`, `none`, or `failed`/`unknown` with `errors.Join` |
+| Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `pause`) | `(resp, nil)`                        | `incomplete` | `saved` or `none`  |
 | Partial resume failed                                                 | `(nil, err)`, `err` wraps `*GenerationError` with the items so far and `Response == nil` | | unchanged |
 
 The error reasons cover every exit that used to `return nil, err` on its own:
@@ -735,8 +763,8 @@ type Hooks struct {
 type IncompleteTurnHook func(ctx context.Context, hctx *HookContext) (*IncompleteTurnDecision, error)
 
 type IncompleteTurnDecision struct {
-    // Discard drops this turn: nothing is saved and PostGeneration does not
-    // run, as if IncompleteTurns.Discard were set for this call only.
+    // Discard drops this turn: nothing is saved, as if
+    // IncompleteTurns.Discard were set for this call only.
     Discard bool
 }
 
@@ -755,15 +783,16 @@ do not fail the same way), and dropping a turn a policy hook aborted (the
 hook reads `hctx.Turn.Outcome.Hook == "PostGeneration"` and the marker it left
 in `hctx.Values`, and returns `Discard: true`).
 
-**PostGeneration** fires on a kept incomplete turn after `OnIncompleteTurn`
-and before the save, with `hctx.Response.Status` set and `hctx.Turn`
-populated, as it already does for suspended turns, so metrics and usage
-loggers see every turn end once. A `HookAbortError` from PostGeneration on
-an already-incomplete turn is logged. For a turn the model finished, a
-PostGeneration abort makes the turn incomplete with `hook_abort`, the
-model's complete output saved; `OnIncompleteTurn` then runs and
-PostGeneration is not run a second time. An **OnSuspend** abort is the same
-kind of exit: the turn is incomplete with `hook_abort`, the completed
+**PostGeneration keeps its scope.** It fires on completed and suspended
+turns, as today, and not on incomplete ones; `OnIncompleteTurn` is the end
+hook for those. Every invocation therefore ends in exactly one of the two,
+and a metrics or usage hook that wants every end registers both. This is the
+conservative choice over broadening PostGeneration: existing hooks keep their
+meaning, and the incomplete path needs no "an abort here is only logged"
+special case. For a turn the model finished, a PostGeneration abort makes
+the turn incomplete with `hook_abort`, the model's complete output saved,
+and `OnIncompleteTurn` runs. An **OnSuspend** abort is the same kind of
+exit: the turn is incomplete with `hook_abort`, the completed
 siblings keep their results, and the suspending calls are answered "not
 run", since the external work the hook was to dispatch never started. Stop
 hooks never run on an incomplete turn.
@@ -771,7 +800,7 @@ hooks never run on an incomplete turn.
 ```text
 SessionLoad → SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration → SessionSave
    on suspend:      OnSuspend → PostGeneration → SaveSuspendedTurn
-   on incomplete:   OnIncompleteTurn → PostGeneration → SaveTurn / SaveResumedTurn
+   on incomplete:   OnIncompleteTurn → SaveTurn / SaveResumedTurn
 ```
 
 ### 9. Saving
@@ -784,7 +813,9 @@ span, the session-lock marker) and drops its cancellation. `FileStore` and
 `MemoryStore` ignore the context; a database-backed `Session` would otherwise
 refuse the write with the very cancellation that ended the turn, which is the
 trick all three applications had to invent. Making the completed-turn save
-use it too closes the save-error row in the table above.
+use it too closes the save-error row in the table above. A store error is
+`Persistence == failed`; a write that hit `SaveTimeout` is `unknown`, since
+it may have landed, and an error never implies that nothing was saved.
 
 **Cancellation versus suspension.** A new suspension is never persisted
 after a cancellation (a partial resume follows its own rule below and leaves
@@ -942,12 +973,12 @@ type AgentOptions struct {
 type IncompleteTurnOptions struct {
     // Discard restores the behaviour before v1.34 for the error reasons: an
     // invocation that ends in an error saves nothing, runs no
-    // OnIncompleteTurn or PostGeneration hook, emits no not-run, unknown or
-    // turn_ended items, and leaves a failed resume suspended. CreateResponse
-    // still returns the response alongside the error, with the raw partial
-    // messages GenerationError carries today and Turn.Persistence none.
-    // Turns the model itself stopped short (output limit, iteration limit,
-    // refusal, pause) were saved before v1.34 and still are. For
+    // OnIncompleteTurn hook, emits no not-run, unknown or turn_ended items,
+    // and leaves a failed resume suspended. CreateResponse still returns the
+    // response alongside the error, with the raw partial messages
+    // GenerationError carries today and Turn.Persistence none. Turns the
+    // model itself stopped short (output limit, iteration limit, pause) were
+    // saved before v1.34 and still are. For
     // applications that keep incomplete turns themselves and are not ready
     // to remove that code.
     Discard bool
@@ -1008,8 +1039,8 @@ Each of these is independent of the rest and can ship first:
   `Message.Copy` and a result clone, as `copyMessages` already does for
   events.
 - **Stop reason plumbing.** `Response.StopReason` and
-  `llm.ClassifyStopReason`, and the chat-completions iterator reporting EOF
-  without a finish reason as an error (section 4).
+  `llm.ClassifyStopReason`, and the chat-completions iterator reporting a
+  bare EOF, without `[DONE]` or a finish reason, as an error (section 4).
 - **`LockSession`** (section 9).
 - **The CLI** compares the error with `!=`; it should use `errors.Is`, and
   render the outcome reminder as a transcript marker on resume. It gets
@@ -1029,14 +1060,14 @@ Everything new or changed in v1.34, in one place:
 const ResponseStatusIncomplete ResponseStatus
 type  TurnReason string; const TurnReasonCanceled, TurnReasonDeadline, TurnReasonProviderError, TurnReasonStreamInterrupted,
       TurnReasonHookAbort, TurnReasonCallbackError, TurnReasonError, TurnReasonOutputLimit, TurnReasonIterationLimit,
-      TurnReasonRefusal, TurnReasonPause, TurnReasonProcessExit TurnReason
+      TurnReasonPause, TurnReasonProcessExit TurnReason
 type  TurnNext string; const TurnNextContinue, TurnNextReconcile, TurnNextInput TurnNext
-type  ToolCallState string; const ToolCallStateCompleted, ToolCallStateNotRun, ToolCallStateUnknown, ToolCallStateWaiting ToolCallState
+type  ToolCallState string; const ToolCallStateCompleted, ToolCallStateNotStarted, ToolCallStateUnknown, ToolCallStateWaiting ToolCallState
 type  ToolCallRecord struct{ ID, Name string; State ToolCallState }
-type  TurnOutcome struct{ Reason TurnReason; Error, Hook string; ToolCalls []ToolCallRecord; Next TurnNext }
+type  TurnOutcome struct{ Reason TurnReason; Error, Hook string; UsageUnknown bool; ToolCalls []ToolCallRecord; Next TurnNext }
 type  Turn struct{ Messages []*llm.Message; Usage *llm.Usage; Outcome *TurnOutcome; Suspension *SuspensionState; Persistence PersistenceState }
-type  PersistenceState string; const PersistenceNone, PersistenceSaved, PersistenceFailed PersistenceState
-type  Response struct{ ...; StopReason string; Turn *Turn }              // new fields
+type  PersistenceState string; const PersistenceNone, PersistenceSaved, PersistenceFailed, PersistenceUnknown PersistenceState
+type  Response struct{ ...; StopReason string; StopDetails *llm.StopDetails; Turn *Turn } // new fields
 type  GenerationError struct{ ...; Response *Response }                    // new field
 const ToolCallNotRunText, ToolCallUnknownText = llm.ToolCallNotRunText, llm.ToolCallUnknownText
 var   ErrToolCallNotRun, ErrToolCallUnknown error
@@ -1067,7 +1098,7 @@ func  AnswerUnansweredToolCalls(messages []*Message) []*Message
 // ResponseAccumulator: a way to get the partial response with per-block completeness
 
 // providers: each encoder calls llm.AnswerUnansweredToolCalls; the
-// chat-completions iterator reports EOF without a finish reason as an error
+// chat-completions iterator reports a bare EOF, without [DONE] or a finish reason, as an error
 // session: SaveTurn records Metadata["outcome"] when the turn carries an outcome reminder anywhere;
 // cloneSuspensionState and cloneCompletedToolCall deep-copy
 ```
@@ -1103,8 +1134,12 @@ From the proposal and the reviews:
   that, incomplete with `pause` and the trailing server tool call dropped.
 - **The iteration limit with a model that ignores `tool_choice: none`.** The
   requested calls are not run; incomplete with `iteration_limit`.
-- **A stream that ends at EOF with no finish reason.** Incomplete with
-  `stream_interrupted`, partial text kept, `err` non-nil.
+- **A stream that ends at bare EOF.** Incomplete with `stream_interrupted`,
+  partial text kept, `err` non-nil, `UsageUnknown` when no usage frame came.
+  A `[DONE]` without a finish reason is a normal end.
+- **A refusal.** Completed, with `Response.StopReason` and `StopDetails` for
+  the application to route on; any tool call it made is answered "not run"
+  and no reminder is recorded.
 - **Suspension.** A suspended turn is not incomplete; it is paused with
   external work outstanding, and stays as it is. A full resume that stops is
   closed (section 9). A cancellation that arrives while the agent is
@@ -1138,31 +1173,29 @@ What changes for an application that upgrades and changes nothing:
    says this in its first line.
 2. `CreateResponse` returns a non-nil response with the error. Code that
    checks `err` first is unaffected.
-3. A response the model cut at the output limit, a refusal, an exhausted
-   pause, and the iteration limit now return `Status == Incomplete` with
-   `err == nil`, and their tool calls are not run. Code that treated every
-   nil error as a finished answer sees the same text it saw before, plus a
-   status it can check.
+3. A response the model cut at the output limit, an exhausted pause, and the
+   iteration limit now return `Status == Incomplete` with `err == nil`, and
+   their tool calls are not run. A refusal stays completed, and its tool
+   calls are not run either. Code that treated every nil error as a finished
+   answer sees the same text it saw before, plus a status it can check.
 4. `GenerationError.OutputMessages` is the closed output, not the raw partial
    messages. Code that answered open calls itself from it would now answer
    them twice; `Discard` restores the raw messages.
-5. PostGeneration hooks fire on incomplete turns, with the status set.
-   Hooks that count completed turns should check `hctx.Response.Status`, as
-   they should already for suspended turns.
-6. A failed full resume no longer leaves the session suspended.
-7. Session writes at the end of an invocation use an uncancelled context
+5. A failed full resume no longer leaves the session suspended.
+6. Session writes at the end of an invocation use an uncancelled context
    bounded by a timeout. A custom session that relied on the cancellation to
    skip the write will now write.
-8. Event callbacks receive not-run and unknown result items and a
+7. Event callbacks receive not-run and unknown result items and a
    `turn_ended` item for every invocation, with an uncancelled context.
-9. A chat-completions stream that ends at EOF without a finish reason is an
-   error where it was a clean stop.
-10. A suspension whose save failed returns the response with the error where
-    it returned `(nil, err)`.
+8. A chat-completions stream that ends at bare EOF, without `[DONE]` or a
+   finish reason, is an error where it was a clean stop.
+9. A suspension whose save failed returns the response with the error where
+   it returned `(nil, err)`.
 
-Item 2, 3, 8's `turn_ended` on completed turns, 9 and 10 are what `Discard`
-does not undo; none of them can break a caller that checks `err` first or
-switches on known statuses.
+PostGeneration hooks are not on this list: they keep firing on completed and
+suspended turns only. Items 2, 3, 7's `turn_ended` on completed turns, 8 and
+9 are what `Discard` does not undo; none of them can break a caller that
+checks `err` first or switches on known statuses.
 
 What each of the three applications does after upgrading:
 
@@ -1187,11 +1220,11 @@ What each of the three applications does after upgrading:
   messages are the input, the assistant message, a tool-result message with
   the finished result and a not-run error for the call that was never
   started, then the `turn-incomplete` reminder whose details decode to a
-  `TurnOutcome` with `canceled`, that call `not_run`, and `Next == input`.
+  `TurnOutcome` with `canceled`, that call `not_started`, and `Next == input`.
   Parallel, with the second tool still running: the same shape with an
   unknown-result error, the call `unknown`, `Next == reconcile`, and a
   handle for it on `Response.BackgroundTasks`; a read-only tool in the same
-  position is `not_run`. Both histories encode without error on the
+  position is `not_started`. Both histories encode without error on the
   Anthropic, OpenAI Responses, Gemini and Chat Completions encoders.
 - A parallel tool that ignores cancellation and commits after the turn is
   saved: recorded as unknown, never as not run; the reminder does not say it
@@ -1213,8 +1246,9 @@ What each of the three applications does after upgrading:
 - `max_tokens` inside a `tool_use`: the tool never runs; the truncated block
   is absent from the saved message; a complete sibling is answered "not
   run".
-- A refusal with a tool call present: no tool runs; `refusal`, `Next ==
-  input`.
+- A refusal with a tool call present: no tool runs, the call is answered
+  "not run", `Status == Completed`, `Response.StopReason` is the refusal
+  value, `StopDetails` is carried, and no reminder is recorded.
 - `pause_turn`: a scripted model that pauses twice then finishes is called
   three times with no user message between; one that pauses eleven times
   ends `Incomplete` with `pause` and no trailing server tool call in the
@@ -1222,8 +1256,9 @@ What each of the three applications does after upgrading:
 - Iteration limit with a model that keeps requesting tools: the calls are not
   run, `iteration_limit`, and a continuation gives the model more
   iterations.
-- Chat-completions stream ending at EOF without a finish reason:
-  `stream_interrupted`, partial text kept, `err` non-nil.
+- Chat-completions stream ending at bare EOF: `stream_interrupted`, partial
+  text kept, `err` non-nil, `UsageUnknown` set when no usage frame arrived;
+  `[DONE]` without a finish reason is a normal end.
 - Hook aborts in PreToolUse, Stop, PostGeneration and OnSuspend:
   `Outcome.Hook` names the hook; Stop and PostGeneration save the model's
   complete output; OnSuspend saves the completed siblings and answers the
@@ -1270,8 +1305,9 @@ What each of the three applications does after upgrading:
   at the tail encodes on all four encoders with the inserted unknown-result
   block, and the caller's messages are unchanged.
 - Salvage context: a session whose `SaveTurn` returns `ctx.Err()` still
-  saves; a session that blocks trips `SaveTimeout`, the error is joined, and
-  `Persistence == failed`.
+  saves; a session that returns an error gives `Persistence == failed`; a
+  session that blocks trips `SaveTimeout`, the error is joined, and
+  `Persistence == unknown`.
 - Snapshot isolation: mutating a returned `SuspensionState` or its messages
   does not change the session.
 - Reminder details round-trip through `Message.Copy` and `FileStore`, and a
@@ -1296,12 +1332,12 @@ Changelog, under Changed:
 > or failed turn is recorded, closed so it can be sent again, with a
 > `turn-incomplete` reminder saying why; `CreateResponse` returns the
 > `Response` with the error, and `Response.Turn` is the turn as saved. A
-> response cut at `max_tokens`, a refusal, or the iteration limit now returns
-> `ResponseStatusIncomplete` and runs no tool. Set
+> response cut at `max_tokens` or the iteration limit now returns
+> `ResponseStatusIncomplete`, and neither it nor a refusal runs a tool. Set
 > `AgentOptions.IncompleteTurns.Discard` to keep the old error behaviour, or
 > if your application saves incomplete turns itself.
 
-Under Added: `Response.Turn` and `Response.StopReason`, `WithContinue`,
+Under Added: `Response.Turn`, `Response.StopReason` and `StopDetails`, `WithContinue`,
 `WithSoftCancel`, `OnIncompleteTurn`, `TurnOutcome` and `FindTurnOutcome`,
 `Reminder.Details`, `LockSession`, `turn_ended` items,
 `llm.AnswerUnansweredToolCalls` in every encoder, `llm.ClassifyStopReason`.
@@ -1320,28 +1356,41 @@ Three increments, each shippable and each leaving `main` consistent:
    backstop, the options. This is the behaviour change users notice, and it
    lands with the changelog entry above.
 
-## Phase 2: turn records and checkpoints
+Phase 2a and 2b below are the fourth and fifth stages.
 
-v1.34 saves at the end of an invocation, on every exit, and stores the record
-as messages. Two limits follow. A process that dies mid-invocation loses the
-invocation, and a continuation leaves a note in history because the record
-and the projection are the same thing. Phase 2 removes both by giving the
-turn a typed record with an identity and a revision, checkpointed as it runs,
-behind an optional session extension. The existing `Session` and
-`SuspendableSession` remain as compatibility adapters.
+## Phase 2: recoverable turns, then per-step durability
 
-### The turn record
+v1.34 is conversation preservation: the record is stored as messages, once
+per invocation, and the projection is fixed at save time. Two limits follow.
+A process that dies mid-invocation loses the invocation, and a continuation
+leaves a note in history because the record and the projection are the same
+thing. Phase 2 removes both in two steps that keep the default storage cost
+where it is: first a typed, versioned turn record persisted at the same
+invocation boundaries (turn recovery), then per-step checkpoints and
+execution ownership as opt-in capabilities (durability). The existing
+`Session` and `SuspendableSession` remain as compatibility adapters, and the
+legacy path is documented as conversation preservation, never as turn
+recovery.
 
-`Turn` grows in place, additively:
+### 2a. Recoverable turns
+
+**The turn record.** `Turn` grows in place, additively:
 
 ```go
 type Turn struct {
     // v1.34 fields: Messages, Usage, Outcome, Suspension, Persistence
 
-    // ID identifies the logical turn across invocations. Revision increases
-    // on every checkpoint and is the expected value a later write must carry.
+    // Schema versions the stored record.
+    Schema int `json:"schema,omitempty"`
+
+    // ID identifies the logical turn across invocations. Revision is the
+    // session revision at which the record was last checkpointed.
     ID       string `json:"id,omitempty"`
     Revision uint64 `json:"revision,omitempty"`
+
+    // Origin says what started the turn: new input, a continuation, or
+    // delivered background results, with a link to the turn they came from.
+    Origin *TurnOrigin `json:"origin,omitempty"`
 
     // Status of the turn: running (an invocation is advancing it; never
     // returned by CreateResponse), suspended, incomplete, or completed.
@@ -1350,32 +1399,40 @@ type Turn struct {
     // ToolCalls is the execution state of every call in the turn, not only
     // the batch in flight: not_started → running → completed | waiting | unknown.
     ToolCalls []ToolCallRecord `json:"tool_calls,omitempty"`
+
+    // Superseded is set when new input arrived while the turn was
+    // incomplete: the turn was abandoned, its record intact.
+    Superseded bool `json:"superseded,omitempty"`
 }
 ```
 
 `ResponseStatus` gains `ResponseStatusRunning` for the record only.
-`ToolCallState` gains `not_started` and `running`; `unknown` and `not_run`
-keep their v1.34 meaning, and `waiting` marks a call the turn is suspended
-on.
+`ToolCallState` gains `running`; `not_started`, `unknown` and `waiting` keep
+their v1.34 meaning. `dive.TurnIDFromContext(ctx)` exposes the turn ID to a
+tool next to the existing tool-call ID, so a tool or service that supports
+idempotency keys has a stable execution key; Dive's part ends at exposing
+it, and no annotation turns into a retry guarantee on its own.
 
-### The session extension
+**The session extension.**
 
 ```go
-// TurnStore is an optional Session extension that stores turn records and
-// checkpoints them as an invocation runs. Load takes a context and returns
-// an error, unlike LoadSuspension, so a remote store can implement it.
+// TurnStore is an optional Session extension that stores turn records. Load
+// takes a context and returns an error, unlike LoadSuspension, so a remote
+// store can implement it.
 type TurnStore interface {
     Session
 
     // Load returns the history needed to build context, the open turn if
-    // any (running, waiting or incomplete), and the revision a later
+    // any (suspended or incomplete), and the session revision a later
     // checkpoint must carry.
     Load(ctx context.Context) (*SessionSnapshot, error)
 
-    // CheckpointTurn records the turn's current state. It fails with
-    // ErrRevisionConflict when the stored revision is not expectedRevision,
-    // and the caller reloads.
-    CheckpointTurn(ctx context.Context, expectedRevision uint64, turn *Turn) error
+    // CheckpointTurn records the turn's state and returns the new session
+    // revision. It fails with ErrRevisionConflict when the stored revision
+    // is not expectedRevision, and the caller reloads. The revision is the
+    // session's, advanced by every write (a checkpoint, a compaction, a
+    // rewind), so a checkpoint fails when anything changed since the load.
+    CheckpointTurn(ctx context.Context, expectedRevision uint64, turn *Turn) (uint64, error)
 }
 
 type SessionSnapshot struct {
@@ -1385,44 +1442,21 @@ type SessionSnapshot struct {
 }
 ```
 
-`Messages()` on such a session is the projection: completed turns as saved,
-plus the open turn passed through `CloseTurn` with its current state. This is
-the point where the record and the projection separate: an incomplete draft
-stays available for display, completed results stay durable, and what the
-model sees of an unfinished turn is computed on load by an explicit policy
-rather than fixed at save time.
+By default the agent checkpoints at the same boundaries as v1.34: once, when
+the invocation completes, suspends or stops. What changes is what is
+stored. `Messages()` on such a session is the projection: completed turns as
+saved, plus the open turn passed through `CloseTurn` with its current state.
+This is where the record and the projection separate: an incomplete draft
+stays available for display, completed results stay durable, what the model
+sees of an unfinished turn is computed on load by an explicit policy rather
+than fixed at save time, and the placeholder results for unanswered calls
+exist only in the projection. A continuation of an open turn can therefore
+leave no note in history: the outcome lives on the record, and the
+projection for an invocation that continues the turn omits it.
 
-### Checkpoints
-
-The agent checkpoints at execution boundaries, each a single
-`CheckpointTurn`:
-
-1. The turn's input and identity, before the first model call.
-2. A completed model response, before its tools run.
-3. Each tool call marked `running` before the tool is called.
-4. Each tool result as it arrives; parallel results independently, without
-   waiting for the batch.
-5. The turn's status when the invocation stops.
-
-This is what makes a retried resume safe by construction: the write tool's
-result is checkpointed before the model call, so the next invocation retries
-the model step alone, with nothing to rerun. It is also why a continuation
-can leave no trace: the outcome lives on the turn record, and the projection
-for an invocation that continues an open turn omits the note.
-
-There is still a crash window between a tool's external effect and the
-checkpoint of its result. On load, a call recorded `running` is potentially
-executed: it becomes `unknown` (or `not_run` for a read-only tool), the turn
-is closed with `process_exit`, and `Next` is `reconcile`. Tools that support
-idempotency keys can make this window harmless; Dive's part is to expose the
-state honestly. A strict mode, refusing new input on a session whose open
-turn has unknown calls until the application reconciles, is possible on this
-foundation (`ErrUnreconciledToolCalls`), and stays opt-in.
-
-### Resume against a revision
-
-A session-backed resume names the turn and the revision it expects, plus the
-new results; a stale revision is a conflict and the caller reloads:
+**Resume against a revision.** A session-backed resume names the turn and
+the revision it expects, plus the new results; a stale revision is a
+conflict and the caller reloads:
 
 ```go
 type ResumeRequest struct {
@@ -1432,16 +1466,34 @@ type ResumeRequest struct {
 }
 ```
 
-Because supplied results are checkpointed as they are accepted, a partial
-resume that fails after accepting some results keeps them, which v1.34
-cannot do, and resubmitting an already-accepted result is idempotent: it
-runs no hook twice and emits no item twice. A conflicting second result for
-the same call fails clearly. Importing a caller-held `Turn` into a session
-(the stateless cross-process handoff) becomes an explicit operation with the
+Supplied results are checkpointed as they are accepted, so a partial resume
+that fails after accepting some results keeps them, which v1.34 cannot do,
+and resubmitting an already-accepted result is idempotent: it runs no hook
+twice and emits no item twice. A conflicting second result for the same
+call fails clearly. Importing a caller-held `Turn` into a session, the
+stateless cross-process handoff, becomes an explicit operation with the
 same conflict check, instead of `WithResume` silently replacing the stored
-state.
+state. A stale revision also covers the single-process case, where two
+callers hold snapshots of one session.
 
-### Closing, deleting, forking, hiding
+**Turn boundaries.** With turn identity, the rules become part of the
+contract:
+
+| Trigger                                | Turn                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------- |
+| New input                              | starts a new turn; an open incomplete turn is marked superseded, its record intact     |
+| Supplied results for a suspended turn  | continues the turn                                                                     |
+| `WithContinue`                         | continues the turn                                                                     |
+| A Stop-hook continuation               | continues the turn, inside the invocation                                              |
+| Delivered background results           | starts a new turn whose origin links to the turn that started the task                 |
+
+New input never silently supersedes a suspended turn
+(`ErrInputOnSuspendedSession` stands), and with the opt-in strict mode never
+supersedes a turn with unknown calls (`ErrUnreconciledToolCalls`); by default
+the unknown calls are projected with their placeholder results and the
+reminder, as in v1.34.
+
+**Closing, deleting, forking, hiding.**
 
 - **`Agent.CancelSuspendedTurn(ctx, opts...)`** closes a suspended turn
   without a model call: the pending calls are answered "not run", the
@@ -1460,9 +1512,33 @@ state.
 - **Hidden turns.** mobius-cloud leaves a cancelled turn out of the next
   request so the model does not answer a request the person moved away
   from. In v1.34 the cancelled wording covers that. On a `TurnStore`,
-  hiding is a projection policy: `Messages` skips turns whose outcome is
-  `canceled` when the policy is on, and the record keeps them. Deferred
-  until an application on Dive's own sessions asks for it.
+  hiding is a projection policy: `Messages` skips superseded turns when the
+  policy is on, and the record keeps them. Deferred until an application on
+  Dive's own sessions asks for it.
+
+### 2b. Per-step durability and execution ownership
+
+Opt-in capabilities for applications that need recovery from a process
+crash, or that run several processes against one session:
+
+- **Per-step checkpoints.** The agent checkpoints inside the invocation: the
+  input and identity before the first model call; a completed model
+  response before its tools run; each tool call marked `running` before the
+  tool is called; each result as it arrives, parallel results independently;
+  and the final status. On load, a call recorded `running` is potentially
+  executed: it becomes `unknown` (or `not_started` for a read-only tool), the
+  turn is closed with `process_exit`, and `Next` is `reconcile`. The window
+  between a tool's external effect and the checkpoint of its result remains;
+  it stays honest through the unknown state and the turn ID as an
+  idempotency key. A store that supports this appends step records rather
+  than rewriting the session: `FileStore` adds JSONL line types for them, so
+  the hot path stays a single appended line, and rewriting the whole file per
+  step is never the default.
+- **Execution ownership.** A revision check rejects a stale commit; it does
+  not stop two processes from running tools before one of them loses the
+  write race. Multi-process execution needs an ownership claim or lease on
+  the session before work begins, exposed as a capability of the store and
+  documented apart from the in-process lock's guarantee.
 
 ## A later breaking iteration
 
@@ -1510,6 +1586,14 @@ the contracts into them. Candidates, each independent:
 | Checkpoint every step in the same release (proposal, colleague) | end-of-invocation save now, checkpoints in Phase 2               | needs a new session extension and store format; the close function is shared either way             |
 | A stopped turn hidden from the next request                 | Phase 2, a projection policy                                         | the cancelled wording addresses the motivating case                                                 |
 | Stop at a step boundary via the callback                   | `WithSoftCancel` on the context                                      | reaches subagents and tools; no sentinel through the callback                                       |
+| A fourth status, `cancelled`, for an abandoned turn (round 4) | a reason on `Incomplete`; Phase 2 marks a superseded turn on the record | the status stays the next-action axis; the disposition is record metadata                        |
+| A refusal is completed with its reason preserved (round 4)  | adopted                                                              | the model finished responding; there is nothing to continue                                         |
+| A finalization hook instead of broadening PostGeneration (round 4) | adopted: PostGeneration keeps its scope; `OnIncompleteTurn` is the end hook for incomplete turns | one end hook per outcome, no semantic change to existing hooks             |
+| `interrupted` as the reason for a stop (round 4)            | `canceled`                                                           | matches `context.Canceled`                                                                          |
+| `awaiting_result`, `not_started` state names (round 4)      | `waiting` kept; `not_started` adopted for both phases                | one vocabulary across v1.34 and Phase 2                                                             |
+| `[DONE]` without a finish reason is a valid end (round 4)   | adopted                                                              | protocol end versus transport end                                                                   |
+| A fourth persistence state for an uncertain commit (round 4) | adopted, `unknown`                                                  | an error must not imply that nothing was saved                                                      |
+| Stages: defects, envelope, recoverable turns, durability (round 4) | adopted as the ordering of Phase 2                            | keeps the default storage cost where it is                                                          |
 
 ## Open questions
 
