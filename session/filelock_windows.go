@@ -9,6 +9,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// fileLocksSupported reports whether FileStore claims work here.
+const fileLocksSupported = true
+
 // tryLockFile takes an exclusive lock on f without waiting, reporting false
 // when another open file holds it.
 func tryLockFile(f *os.File) (bool, error) {

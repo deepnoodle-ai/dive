@@ -335,13 +335,13 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.Remove(claimPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
 	// Evict the cached instance so a subsequent Open creates fresh state
 	// instead of resurrecting the deleted session. Any handle still held
 	// by a caller keeps working in memory but is orphaned from the store.
 	delete(s.sessions, id)
+	if err := os.Remove(claimPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
 

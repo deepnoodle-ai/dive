@@ -14,6 +14,9 @@ import (
 // The claim lock excludes a second holder, even through another open file
 // in the same process, until it is released.
 func TestLockClaimExcludes(t *testing.T) {
+	if !fileLocksSupported {
+		t.Skip("no file locks on this platform")
+	}
 	path := filepath.Join(t.TempDir(), "s.claim")
 	unlock, err := lockClaim(context.Background(), path)
 	assert.NoError(t, err)
@@ -32,6 +35,9 @@ func TestLockClaimExcludes(t *testing.T) {
 // Delete waits for a claim change in progress, and leaves the lock file, so
 // that claims stay serialized through the same locked file.
 func TestDeleteSerializesWithClaims(t *testing.T) {
+	if !fileLocksSupported {
+		t.Skip("no file locks on this platform")
+	}
 	ctx := context.Background()
 	dir := t.TempDir()
 	store, err := NewFileStore(dir)

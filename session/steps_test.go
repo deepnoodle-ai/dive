@@ -271,6 +271,9 @@ func TestForkRunningTurn(t *testing.T) {
 // A claim excludes other owners until it is released or expires, and a
 // session claimed by another process reads back what that process wrote.
 func TestFileStoreClaims(t *testing.T) {
+	if !session.FileLocksSupported {
+		t.Skip("no file locks on this platform")
+	}
 	ctx := context.Background()
 	dir := t.TempDir()
 	storeA, err := session.NewFileStore(dir)
@@ -331,6 +334,9 @@ func TestMemoryClaims(t *testing.T) {
 // Owners racing to claim a session whose lock file an exited process left
 // behind: exactly one claim succeeds.
 func TestFileStoreClaimRace(t *testing.T) {
+	if !session.FileLocksSupported {
+		t.Skip("no file locks on this platform")
+	}
 	ctx := context.Background()
 	dir := t.TempDir()
 	old := time.Now().Add(-time.Hour)
@@ -368,4 +374,26 @@ func TestFileStoreClaimRace(t *testing.T) {
 		assert.True(t, errors.Is(err, dive.ErrSessionClaimed), "%v", err)
 	}
 	assert.Equal(t, won, 1)
+}
+
+// A Delete that removes the session file but not its claim still evicts
+// the session, so Open does not return the deleted one.
+func TestDeleteEvictsWhenClaimRemovalFails(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	sess, err := store.Open(ctx, "evicted")
+	assert.NoError(t, err)
+	_, err = sess.CheckpointTurn(ctx, 0, completedTurn("turn_1", "hi", "hello"))
+	assert.NoError(t, err)
+
+	// A claim path that cannot be removed: a directory with a file in it.
+	claim := filepath.Join(dir, "evicted.claim")
+	assert.NoError(t, os.MkdirAll(filepath.Join(claim, "x"), 0755))
+	assert.Error(t, store.Delete(ctx, "evicted"))
+
+	reopened, err := store.Open(ctx, "evicted")
+	assert.NoError(t, err)
+	assert.Equal(t, reopened.EventCount(), 0)
 }
