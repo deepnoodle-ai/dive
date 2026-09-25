@@ -1631,10 +1631,39 @@ would make neither reviewable.
    - Reasons from model stops (`output_limit` and the rest), `ToolCalls`,
      `reconcile` and `UsageUnknown` arrive with steps 5 and 6, and their
      constants with them.
-5. **Tool batch outcomes** (section 3, rule 3, and section 10). Both batch
-   paths return the partial batch with a state per call, the non-blocking
-   drain, the unknown-call handles and their forwarder, the not-run and
-   unknown items, and `WithSoftCancel`.
+5. **Tool batch outcomes** (section 3, rule 3, and section 10). Done: both
+   batch paths return the partial batch with a state per call
+   (`toolbatch.go`), the non-blocking drain, the unknown-call handles and
+   their forwarder, the not-run and unknown items, `TurnOutcome.ToolCalls`
+   with `reconcile`, and `WithSoftCancel` (`softcancel.go`). A parallel
+   goroutine always sends its tool's own result, including an error the tool
+   returned because the batch context was cancelled, and the drain records
+   it rather than aborting the batch. The background completion reminder
+   names each result's tool-use ID. Decided while building it:
+   - The answers go into the output now, as the stopped batch's
+     `tool_result` message (appended to the merged message on a resume), so
+     `Turn.Messages` is a history a provider accepts before `CloseTurn`
+     exists; step 6 adds the outcome reminder and saves it.
+   - The items a stopped batch still owes (a `tool_call` never announced, a
+     `tool_call_result` not delivered) are emitted by the exit on a context
+     that is not cancelled, and a callback error on them is logged, so it
+     cannot replace the error that ended the turn.
+   - A parallel call is started by the goroutine that wins its state from
+     pending; a batch that stops first abandons it, so a call launched but
+     not yet running is recorded as not started, never unknown.
+   - The drain emits through a serialized `emit` that reports whether the
+     item reached the callback: the gate that suppresses late stream events
+     from tool goroutines also dropped result items once the context ended.
+   - A soft cancel is checked at the top of every generation iteration and
+     again just before its model call (PreIteration hooks can wait on a
+     person), before each sequential call and again after its PreToolUse hooks (which
+     can wait on a person), and before each parallel call is prepared or
+     launched. Open question 1 is taken as recommended.
+   - No grace period (open question 3): a parallel tool that honours its
+     context is recorded as unknown or with its own cancellation result,
+     depending on whether its result landed before the drain stopped.
+   - An `OnSuspend` abort's suspending calls stay out of `ToolCalls` until
+     step 6, which answers them in the partial `tool_result` message.
 6. **Keeping the turn** (sections 3, 5, 7 to 9 and 12). `CloseTurn`,
    `Reminder.Details` and the outcome reminder, saving on every exit with
    the salvage context, `ErrSaveRejected` and `Persistence`,

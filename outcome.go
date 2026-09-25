@@ -72,8 +72,9 @@ type TurnOutcome struct {
 
 	// Next says what the turn needs: another model call on the record as it
 	// stands, reconciliation of a call with an unknown result first, or new
-	// input because there is nothing to continue. Advisory: the application
-	// decides.
+	// input because there is nothing to continue. It is TurnNextReconcile
+	// whenever a call in ToolCalls is unknown and its tool is not annotated
+	// ReadOnlyHint. Advisory: the application decides.
 	Next TurnNext `json:"next"`
 }
 
@@ -81,8 +82,8 @@ type TurnOutcome struct {
 type TurnReason string
 
 const (
-	// TurnReasonCanceled: the context was cancelled. The error wraps
-	// context.Canceled.
+	// TurnReasonCanceled: the context was cancelled, or a soft cancel was
+	// requested (WithSoftCancel). The error wraps context.Canceled.
 	TurnReasonCanceled TurnReason = "canceled"
 
 	// TurnReasonDeadline: the context's deadline passed, including
@@ -148,12 +149,15 @@ const (
 // failureOutcome classifies the error that ended an invocation. A context
 // error wins, since whatever failed may have failed because of it; then a
 // hook abort, the event callback, and the model call, identified by the
-// errors the turn record saw them return.
+// errors the turn record saw them return. Next is reconcile, whatever the
+// reason, when a call of the stopped batch has an unknown result and is not
+// read-only.
 func failureOutcome(err error, record *turnRecord) *TurnOutcome {
 	outcome := &TurnOutcome{Reason: TurnReasonError, Error: err.Error()}
 	var abortErr *HookAbortError
 	record.mu.Lock()
 	callbackErr, modelErr, streamStarted := record.callbackErr, record.modelErr, record.modelStreamStarted
+	toolCalls, reconcile := record.toolCalls, record.reconcile
 	record.mu.Unlock()
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -171,7 +175,11 @@ func failureOutcome(err error, record *turnRecord) *TurnOutcome {
 			outcome.Reason = TurnReasonStreamInterrupted
 		}
 	}
+	outcome.ToolCalls = toolCalls
 	outcome.Next = defaultNext(outcome.Reason)
+	if reconcile {
+		outcome.Next = TurnNextReconcile
+	}
 	return outcome
 }
 

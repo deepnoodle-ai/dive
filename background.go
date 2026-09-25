@@ -44,8 +44,11 @@ type backgroundResult struct {
 
 // BackgroundTaskHandle is the caller-facing handle for a background task.
 // It is returned on Response.BackgroundTasks after any turn in which one or
-// more tools returned a BackgroundResult. The Done channel delivers exactly
-// one *ToolResult when the background goroutine completes.
+// more tools returned a BackgroundResult, and after a turn that stopped while
+// a parallel tool call was still running: that call's result was recorded as
+// unknown (ToolCallUnknownText), and its handle delivers the tool's result
+// when it returns. The Done channel delivers exactly one *ToolResult when the
+// background goroutine completes.
 type BackgroundTaskHandle struct {
 	// TaskID is a unique identifier for this background task.
 	TaskID string
@@ -252,6 +255,9 @@ func backgroundCompletedMessage(handles []*BackgroundTaskHandle, results map[str
 		result := results[h.TaskID]
 		fmt.Fprintf(&sb, "Background task completed: %s\n", h.Description)
 		fmt.Fprintf(&sb, "Task ID: %s\n", h.TaskID)
+		if h.ToolUseID != "" {
+			fmt.Fprintf(&sb, "Tool use ID: %s\n", h.ToolUseID)
+		}
 		if result != nil && result.IsError {
 			sb.WriteString("Error:\n")
 		} else {

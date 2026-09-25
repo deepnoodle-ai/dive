@@ -42,6 +42,25 @@ var (
 	// PostToolUseFailure hook fires for such a call, but its tool_call and
 	// tool_call_result events are still emitted.
 	ErrBatchHalted = errors.New("dive: not executed because an earlier call in the batch failed")
+
+	// ErrToolCallNotRun is the ToolCallResult.Error of a call the turn ended
+	// before it started. Its result text is ToolCallNotRunText.
+	ErrToolCallNotRun = errors.New("dive: not run because the turn ended")
+
+	// ErrToolCallUnknown is the ToolCallResult.Error of a call that was
+	// running when the turn ended and had not reported. Its result text is
+	// ToolCallUnknownText.
+	ErrToolCallUnknown = errors.New("dive: result unknown because the turn ended")
+)
+
+const (
+	// ToolCallNotRunText answers a tool call the turn ended before it
+	// started. The call had no effect.
+	ToolCallNotRunText = llm.ToolCallNotRunText
+
+	// ToolCallUnknownText answers a tool call that was running when the turn
+	// ended and had not reported a result. Whether it took effect is unknown.
+	ToolCallUnknownText = llm.ToolCallUnknownText
 )
 
 // GenerationError wraps a failure after the turn began, carrying the usage,
@@ -883,10 +902,19 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		if len(rs.NotStartedToolCalls) > 0 {
 			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, eventCallback, batchHalted)
 			if err != nil {
-				// Mirror the generate loop: expose the items accumulated
-				// during the resume phase via a *GenerationError so callers
-				// can recover partial work (no LLM calls have happened yet,
-				// so usage is zero).
+				// Answer the calls of the stopped batch in the merged
+				// tool_result message. The batch in flight is the whole
+				// suspended batch; its other calls completed before the
+				// suspension or were supplied by the caller.
+				closed := closeToolBatch(rs.NotStartedToolCalls, resumeToolsByName, batch)
+				rs.AppendToolResults(getToolResultContent(closed.results))
+				for _, tc := range getAdditionalContextContent(closed.completed) {
+					rs.AppendToolResultTextContent(tc)
+				}
+				for _, result := range closed.completed {
+					queueReminderDeliveries(hctx.reminders, result.reminderDeliveries)
+				}
+				t.record.stopBatch(resumedBatchRecords(rs, closed), closed)
 				return t.end(ctx, failedExit(err))
 			}
 			// Merge completed outcomes into the tool_result message.
@@ -1688,6 +1716,12 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		hctx.SystemPrompt = systemPrompt
 		hctx.Messages = updatedMessages
 
+		// A soft cancel stops the turn before its next model call: here,
+		// and again below, since PreIteration hooks can wait on a person.
+		if err := stepStopErr(ctx); err != nil {
+			return nil, err
+		}
+
 		// Run PreIteration hooks
 		if len(a.hooks.PreIteration) > 0 {
 			for _, hook := range a.hooks.PreIteration {
@@ -1730,6 +1764,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
+		}
+
+		if err := stepStopErr(ctx); err != nil {
+			return nil, err
 		}
 
 		// Open chat span before invoking the model. The returned ctx carries
@@ -1811,6 +1849,14 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		// Execute all requested tool calls
 		batch, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, callback, false)
 		if err != nil {
+			// Every call of the stopped batch is answered by what is known
+			// about it, so the output stays a valid history.
+			closed := closeToolBatch(toolCalls, toolsByName, batch)
+			newMessage(closedToolResultMessage(closed))
+			for _, result := range closed.completed {
+				deliverReminders(result.reminderDeliveries)
+			}
+			record.stopBatch(closed.records, closed)
 			return nil, err
 		}
 
@@ -1944,6 +1990,10 @@ func eventHasContent(event *llm.Event) bool {
 // halted starts the batch already halted (see ToolAnnotations.HaltsBatch):
 // resuming a suspended batch passes true when a halting call answered
 // before the suspension failed.
+//
+// The batch is returned with an error too, recording how far each call got;
+// closeToolBatch answers the calls it did not finish. A soft cancel
+// (WithSoftCancel) starts no further call.
 func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	hctx *HookContext,
@@ -2045,6 +2095,10 @@ func resumedBatchHalted(rs *resumeState, toolsByName map[string]Tool) bool {
 // NOT executed; their outcomes stay zero-valued ("not started") and are
 // re-scheduled on resume. Once a halting call fails, the later halting calls
 // are answered with haltedToolCallResult instead of being run.
+//
+// On an error the batch is returned with it, recording each call's outcome:
+// the call running when the batch stopped always records its own result,
+// since the loop waits for it, and the calls after it are not started.
 func (a *Agent) executeToolCallsSequential(
 	ctx context.Context,
 	hctx *HookContext,
@@ -2059,38 +2113,35 @@ func (a *Agent) executeToolCallsSequential(
 		// the ToolCallResult, not as a Go error, so the loop has to look at
 		// ctx itself. Without these checks a cancelled batch went on to start
 		// the next call, running its side effects after the caller had
-		// stopped the run.
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		// stopped the run. A soft cancel stops here too.
+		if err := stepStopErr(ctx); err != nil {
+			return batch, err
 		}
+		outcome := &batch.Outcomes[i]
 		halts := callHaltsBatch(toolCall, toolsByName)
 		if halted && halts {
-			result, err := a.haltToolCall(ctx, toolCall, callback)
-			if err != nil {
-				return nil, err
+			if err := a.haltToolCall(ctx, toolCall, callback, outcome); err != nil {
+				return batch, err
 			}
-			batch.Outcomes[i] = toolCallOutcome{Result: result}
 			continue
 		}
-		result, err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback)
+		err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback, outcome)
+		if outcome.Result != nil && outcome.Result.Result != nil && outcome.Result.Result.Suspend != nil {
+			outcome.Pending = toPendingToolCall(toolCall, outcome.Result.Result.Suspend)
+			outcome.Pending.HaltsBatch = halts
+			outcome.Result = nil
+			if err == nil {
+				batch.Suspended = true
+				batch.Halted = halted
+				return batch, nil
+			}
+		}
 		if err != nil {
-			return nil, err
+			return batch, err
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if result != nil && result.Result != nil && result.Result.Suspend != nil {
-			pending := toPendingToolCall(toolCall, result.Result.Suspend)
-			pending.HaltsBatch = halts
-			batch.Outcomes[i] = toolCallOutcome{Pending: pending}
-			batch.Suspended = true
-			batch.Halted = halted
-			return batch, nil
-		}
-		if halts && result.isError() {
+		if halts && outcome.Result.isError() {
 			halted = true
 		}
-		batch.Outcomes[i] = toolCallOutcome{Result: result}
 	}
 	return batch, nil
 }
@@ -2098,24 +2149,23 @@ func (a *Agent) executeToolCallsSequential(
 // haltToolCall answers a halted call without running hooks or the tool,
 // emitting the same tool_call and tool_call_result events as a call that
 // ran, so event consumers see every call answered.
-func (a *Agent) haltToolCall(ctx context.Context, toolCall *llm.ToolUseContent, callback EventCallback) (*ToolCallResult, error) {
+func (a *Agent) haltToolCall(ctx context.Context, toolCall *llm.ToolUseContent, callback EventCallback, outcome *toolCallOutcome) error {
 	a.logger.Debug("tool call halted by an earlier failure in its batch",
 		"tool_id", toolCall.ID,
 		"tool_name", toolCall.Name)
+	outcome.announced = true
 	if err := callback(ctx, &ResponseItem{
 		Type:     ResponseItemTypeToolCall,
 		ToolCall: toolCall,
 	}); err != nil {
-		return nil, err
+		return err
 	}
-	result := haltedToolCallResult(toolCall)
-	if err := callback(ctx, &ResponseItem{
+	outcome.Result = haltedToolCallResult(toolCall)
+	outcome.reported = true
+	return callback(ctx, &ResponseItem{
 		Type:           ResponseItemTypeToolCallResult,
-		ToolCallResult: result,
-	}); err != nil {
-		return nil, err
-	}
-	return result, nil
+		ToolCallResult: outcome.Result,
+	})
 }
 
 // toolCallPrep holds the result of the PreToolUse phase for a single tool call.
@@ -2141,6 +2191,10 @@ type toolCallPrep struct {
 // Note: ToolCallResult events and PostToolUse hooks fire in completion order,
 // not tool-call declaration order. The results slice is indexed correctly
 // regardless of completion order.
+//
+// On an error the batch is returned with it, recording each call's outcome.
+// A cancellation does not wait for running tools: see stopParallelBatch. A
+// soft cancel lets the calls already started finish, and starts no other.
 func (a *Agent) executeToolCallsParallel(
 	ctx context.Context,
 	hctx *HookContext,
@@ -2176,6 +2230,27 @@ func (a *Agent) executeToolCallsParallel(
 	}
 	defer callbackClosed.Store(true)
 
+	// emit delivers an item from this goroutine, serialized with the tool
+	// goroutines' stream events. It reports whether the item reached the
+	// callback, which it does not when ctx ends while a stream event holds
+	// the callback; the call then still owes the item.
+	emit := func(ctx context.Context, item *ResponseItem) (bool, error) {
+		if originalCallback == nil {
+			return true, nil
+		}
+		select {
+		case <-callbackSlot:
+		default:
+			select {
+			case <-callbackSlot:
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
+		}
+		defer func() { callbackSlot <- struct{}{} }()
+		return true, originalCallback(ctx, item)
+	}
+
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -2185,19 +2260,23 @@ func (a *Agent) executeToolCallsParallel(
 	// childCtx directly.
 	childCtx = withBackgroundCtx(childCtx, ctx)
 
-	// Phase 1: PreToolUse hooks (sequential)
+	// Phase 1: PreToolUse hooks (sequential). A batch that stops here has
+	// started no call.
 	preps := make([]toolCallPrep, len(toolCalls))
 	for i, toolCall := range toolCalls {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if err := stepStopErr(ctx); err != nil {
+			return batch, err
 		}
+		outcome := &batch.Outcomes[i]
 		tool, ok := toolsByName[toolCall.Name]
 		if !ok {
-			if err := callback(childCtx, &ResponseItem{
+			delivered, err := emit(childCtx, &ResponseItem{
 				Type:     ResponseItemTypeToolCall,
 				ToolCall: toolCall,
-			}); err != nil {
-				return nil, err
+			})
+			outcome.announced = delivered
+			if err != nil {
+				return batch, err
 			}
 			result := unknownToolResult(toolCall, toolsByName)
 			unknownErr := result.Error.(*UnknownToolError)
@@ -2221,11 +2300,13 @@ func (a *Agent) executeToolCallsParallel(
 			preview = previewer.PreviewCall(childCtx, toolCall.Input)
 		}
 
-		if err := callback(childCtx, &ResponseItem{
+		delivered, err := emit(childCtx, &ResponseItem{
 			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
-		}); err != nil {
-			return nil, err
+		})
+		outcome.announced = delivered
+		if err != nil {
+			return batch, err
 		}
 
 		preHctx := &HookContext{
@@ -2247,7 +2328,7 @@ func (a *Agent) executeToolCallsParallel(
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PreToolUse"
 					a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
-					return nil, abortErr
+					return batch, abortErr
 				}
 				if denialErr == nil {
 					denialErr = err
@@ -2272,32 +2353,34 @@ func (a *Agent) executeToolCallsParallel(
 	}
 
 	// Phase 2: Tool execution (parallel) with streamed results
-	type completedTool struct {
-		index  int
-		result *ToolCallResult
-		err    error // fatal error (e.g. context cancellation)
-	}
-
-	ch := make(chan completedTool, len(toolCalls))
+	ch := make(chan parallelToolResult, len(toolCalls))
+	remaining := 0
 
 	// Send denied results immediately — no goroutine needed.
 	for i, prep := range preps {
 		if prep.denied {
-			ch <- completedTool{index: i, result: deniedResults[i]}
+			ch <- parallelToolResult{index: i, result: deniedResults[i]}
+			remaining++
 		}
 	}
 
-	// Launch tool executions.
+	// Launch tool executions. A goroutine starts its call only if it wins
+	// the call's state from callPending; a batch that stops first abandons
+	// the call, which then never starts. A soft cancel or a cancellation
+	// here leaves the calls not yet launched unstarted.
+	states := make([]atomic.Int32, len(toolCalls))
+	var stopErr error
 	for i, prep := range preps {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		if prep.denied {
 			continue
 		}
+		if err := stepStopErr(ctx); err != nil {
+			stopErr = err
+			break
+		}
+		remaining++
 		go func() {
-			if err := childCtx.Err(); err != nil {
-				ch <- completedTool{index: i, err: err}
+			if childCtx.Err() != nil || !states[i].CompareAndSwap(callPending, callRunning) {
 				return
 			}
 			toolCtx, toolSpan := a.tracer.StartToolCall(childCtx, ToolCallInfo{
@@ -2313,11 +2396,9 @@ func (a *Agent) executeToolCallsParallel(
 			} else {
 				toolSpan.End(nil)
 			}
-			if result.Error != nil && childCtx.Err() != nil {
-				ch <- completedTool{index: i, err: childCtx.Err()}
-				return
-			}
-			ch <- completedTool{index: i, result: result}
+			// Always the tool's own result, even one it returned because the
+			// batch was cancelled: that is what happened.
+			ch <- parallelToolResult{index: i, result: result}
 		}()
 	}
 
@@ -2330,37 +2411,37 @@ func (a *Agent) executeToolCallsParallel(
 	// if a tool ignores its context and keeps running. Waiting on ch alone
 	// held a cancelled run open until the slowest tool finished on its own.
 	// Stragglers can still send: ch is buffered for every call in the batch.
-	remaining := len(toolCalls)
+	stop := func(err error) (*toolBatchResult, error) {
+		a.stopParallelBatch(hctx, toolCalls, preps, states, batch, ch, remaining)
+		return batch, err
+	}
 	for remaining > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		var ct completedTool
+		var landed parallelToolResult
 		select {
-		case ct = <-ch:
+		case landed = <-ch:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return stop(ctx.Err())
 		}
 		remaining--
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 
-		if ct.err != nil {
-			cancel() // cancel remaining tools
-			return nil, ct.err
-		}
-
-		i := ct.index
-		result := ct.result
+		i := landed.index
+		result := landed.result
 		prep := preps[i]
+		outcome := &batch.Outcomes[i]
+		if err := ctx.Err(); err != nil {
+			// The turn is ending: keep the result without hooks.
+			keepUnhooked(hctx, toolCalls[i], prep.preHctx, result, outcome)
+			return stop(err)
+		}
+		outcome.Result = result
 		if prep.unknown {
-			batch.Outcomes[i] = toolCallOutcome{Result: result}
-			if err := callback(ctx, &ResponseItem{
+			delivered, err := emit(ctx, &ResponseItem{
 				Type:           ResponseItemTypeToolCallResult,
 				ToolCallResult: result,
-			}); err != nil {
-				return nil, err
+			})
+			outcome.reported = delivered
+			if err != nil {
+				return stop(err)
 			}
 			continue
 		}
@@ -2368,34 +2449,22 @@ func (a *Agent) executeToolCallsParallel(
 		// Suspend path: skip PostToolUse hooks but still emit a tool_call_result
 		// event so stream consumers can see the suspend signal.
 		if result != nil && result.Result != nil && result.Result.Suspend != nil {
-			batch.Outcomes[i] = toolCallOutcome{
-				Pending: toPendingToolCall(toolCalls[i], result.Result.Suspend),
-			}
+			outcome.Result = nil
+			outcome.Pending = toPendingToolCall(toolCalls[i], result.Result.Suspend)
 			batch.Suspended = true
-			if err := callback(ctx, &ResponseItem{
+			delivered, err := emit(ctx, &ResponseItem{
 				Type:           ResponseItemTypeToolCallResult,
 				ToolCallResult: result,
-			}); err != nil {
-				return nil, err
+			})
+			outcome.reported = delivered
+			if err != nil {
+				return stop(err)
 			}
 			continue
 		}
 
 		// Background path: synthesize "started" message, build handle.
-		var bgHandle *BackgroundTaskHandle
-		if result != nil && result.Result != nil && result.Result.Background != nil {
-			bg := result.Result.Background
-			bgHandle = &BackgroundTaskHandle{
-				TaskID:      bg.id,
-				ToolUseID:   toolCalls[i].ID,
-				Description: bg.description,
-				Done:        bg.done,
-			}
-			if hctx.backgroundTaskStarted != nil {
-				hctx.backgroundTaskStarted(bgHandle)
-			}
-			result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
-		}
+		bgHandle := startBackgroundTask(hctx, toolCalls[i], result)
 
 		failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
 
@@ -2412,6 +2481,9 @@ func (a *Agent) executeToolCallsParallel(
 			toolScoped:         true,
 			reminderDeliveries: slices.Clone(prep.preHctx.reminderDeliveries),
 		}
+		if bgHandle != nil {
+			bgHandle.hookCtx = postHctx
+		}
 
 		if failed {
 			for _, hook := range a.hooks.PostToolUseFailure {
@@ -2420,7 +2492,7 @@ func (a *Agent) executeToolCallsParallel(
 					if errors.As(err, &abortErr) {
 						abortErr.HookType = "PostToolUseFailure"
 						a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
-						return nil, abortErr
+						return stop(abortErr)
 					}
 					a.logger.Warn("post-tool-use-failure hook error", "error", err)
 				}
@@ -2432,7 +2504,7 @@ func (a *Agent) executeToolCallsParallel(
 					if errors.As(err, &abortErr) {
 						abortErr.HookType = "PostToolUse"
 						a.logger.Error("post-tool-use hook aborted", "error", abortErr)
-						return nil, abortErr
+						return stop(abortErr)
 					}
 					a.logger.Warn("post-tool-use hook error", "error", err)
 				}
@@ -2450,7 +2522,6 @@ func (a *Agent) executeToolCallsParallel(
 
 		// Re-attach background handle after hooks.
 		if bgHandle != nil {
-			bgHandle.hookCtx = postHctx
 			result.BackgroundHandle = bgHandle
 		}
 
@@ -2466,38 +2537,47 @@ func (a *Agent) executeToolCallsParallel(
 		}
 		result.reminderDeliveries = slices.Clone(postHctx.reminderDeliveries)
 
-		batch.Outcomes[i] = toolCallOutcome{Result: result}
-
-		if err := callback(ctx, &ResponseItem{
+		outcome.Result = result
+		delivered, err := emit(ctx, &ResponseItem{
 			Type:           ResponseItemTypeToolCallResult,
 			ToolCallResult: result,
-		}); err != nil {
-			return nil, err
+		})
+		outcome.reported = delivered
+		if err != nil {
+			return stop(err)
 		}
 	}
 
+	if stopErr != nil {
+		return batch, stopErr
+	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return batch, err
 	}
 	return batch, nil
 }
 
-// executeOneToolCall executes a single tool call including hooks and callbacks.
-// Used by the sequential path only.
+// executeOneToolCall executes a single tool call including hooks and
+// callbacks, recording in outcome how far it got: announced once its
+// tool_call item is emitted, Result once the tool returns, reported once its
+// tool_call_result item is emitted. A call whose tool returned keeps its
+// result even when a later step fails. Used by the sequential path only.
 func (a *Agent) executeOneToolCall(
 	ctx context.Context,
 	hctx *HookContext,
 	toolCall *llm.ToolUseContent,
 	toolsByName map[string]Tool,
 	callback EventCallback,
-) (*ToolCallResult, error) {
+	outcome *toolCallOutcome,
+) error {
 	tool, ok := toolsByName[toolCall.Name]
 	if !ok {
+		outcome.announced = true
 		if err := callback(ctx, &ResponseItem{
 			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
 		}); err != nil {
-			return nil, err
+			return err
 		}
 		result := unknownToolResult(toolCall, toolsByName)
 		unknownErr := result.Error.(*UnknownToolError)
@@ -2506,13 +2586,12 @@ func (a *Agent) executeOneToolCall(
 			"suggestions", unknownErr.Suggestions,
 			"agent_name", a.name,
 		)
-		if err := callback(ctx, &ResponseItem{
+		outcome.Result = result
+		outcome.reported = true
+		return callback(ctx, &ResponseItem{
 			Type:           ResponseItemTypeToolCallResult,
 			ToolCallResult: result,
-		}); err != nil {
-			return nil, err
-		}
-		return result, nil
+		})
 	}
 
 	a.logger.Debug("executing tool call",
@@ -2527,11 +2606,12 @@ func (a *Agent) executeOneToolCall(
 	}
 
 	// Emit tool call event
+	outcome.announced = true
 	if err := callback(ctx, &ResponseItem{
 		Type:     ResponseItemTypeToolCall,
 		ToolCall: toolCall,
 	}); err != nil {
-		return nil, err
+		return err
 	}
 
 	preHctx := &HookContext{
@@ -2556,7 +2636,7 @@ func (a *Agent) executeOneToolCall(
 			if errors.As(err, &abortErr) {
 				abortErr.HookType = "PreToolUse"
 				a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
-				return nil, abortErr
+				return abortErr
 			}
 			if denialErr == nil {
 				denialErr = err
@@ -2568,8 +2648,10 @@ func (a *Agent) executeOneToolCall(
 	if denialErr != nil {
 		result = a.createDeniedResult(toolCall, denialErr.Error(), preview)
 	} else {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		// PreToolUse hooks can wait on a person; check again before the
+		// call starts.
+		if err := stepStopErr(ctx); err != nil {
+			return err
 		}
 		input := toolCall.Input
 		if preHctx.UpdatedInput != nil {
@@ -2589,39 +2671,31 @@ func (a *Agent) executeOneToolCall(
 			toolSpan.End(nil)
 		}
 	}
+	outcome.Result = result
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		// The call's own result is kept, without PostToolUse hooks, which
+		// would run on a cancelled turn. The caller classifies a suspension.
+		if handle := startBackgroundTask(hctx, toolCall, result); handle != nil {
+			handle.hookCtx = preHctx
+			result.BackgroundHandle = handle
+		}
+		return err
 	}
 
 	// Suspend path: emit the tool_call_result event but skip PostToolUse
 	// hooks. The caller inspects result.Result.Suspend to classify as pending.
 	if result != nil && result.Result != nil && result.Result.Suspend != nil {
-		if err := callback(ctx, &ResponseItem{
+		outcome.reported = true
+		return callback(ctx, &ResponseItem{
 			Type:           ResponseItemTypeToolCallResult,
 			ToolCallResult: result,
-		}); err != nil {
-			return nil, err
-		}
-		return result, nil
+		})
 	}
 
 	// Background path: synthesize a "started" message as the tool result so
 	// the LLM knows the work began, build a BackgroundTaskHandle, then fall
 	// through to PostToolUse hooks normally.
-	var bgHandle *BackgroundTaskHandle
-	if result != nil && result.Result != nil && result.Result.Background != nil {
-		bg := result.Result.Background
-		bgHandle = &BackgroundTaskHandle{
-			TaskID:      bg.id,
-			ToolUseID:   toolCall.ID,
-			Description: bg.description,
-			Done:        bg.done,
-		}
-		if hctx.backgroundTaskStarted != nil {
-			hctx.backgroundTaskStarted(bgHandle)
-		}
-		result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
-	}
+	bgHandle := startBackgroundTask(hctx, toolCall, result)
 
 	// Determine if the tool call failed
 	failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
@@ -2641,6 +2715,9 @@ func (a *Agent) executeOneToolCall(
 		toolScoped:         true,
 		reminderDeliveries: slices.Clone(preHctx.reminderDeliveries),
 	}
+	if bgHandle != nil {
+		bgHandle.hookCtx = postHctx
+	}
 
 	if failed {
 		for _, hook := range a.hooks.PostToolUseFailure {
@@ -2649,7 +2726,7 @@ func (a *Agent) executeOneToolCall(
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PostToolUseFailure"
 					a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
-					return nil, abortErr
+					return abortErr
 				}
 				a.logger.Warn("post-tool-use-failure hook error", "error", err)
 			}
@@ -2661,7 +2738,7 @@ func (a *Agent) executeOneToolCall(
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PostToolUse"
 					a.logger.Error("post-tool-use hook aborted", "error", abortErr)
-					return nil, abortErr
+					return abortErr
 				}
 				a.logger.Warn("post-tool-use hook error", "error", err)
 			}
@@ -2679,9 +2756,9 @@ func (a *Agent) executeOneToolCall(
 
 	// Re-attach the background handle after hooks (hooks may have replaced
 	// postHctx.Result entirely; the handle must survive that replacement).
-	// Also save hookCtx for PostBackgroundToolUse hooks fired on the next turn.
+	// Its hookCtx is kept for PostBackgroundToolUse hooks fired on the next
+	// turn.
 	if bgHandle != nil {
-		bgHandle.hookCtx = postHctx
 		result.BackgroundHandle = bgHandle
 	}
 
@@ -2699,13 +2776,12 @@ func (a *Agent) executeOneToolCall(
 	result.reminderDeliveries = slices.Clone(postHctx.reminderDeliveries)
 
 	// Emit result event
-	if err := callback(ctx, &ResponseItem{
+	outcome.Result = result
+	outcome.reported = true
+	return callback(ctx, &ResponseItem{
 		Type:           ResponseItemTypeToolCallResult,
 		ToolCallResult: result,
-	}); err != nil {
-		return nil, err
-	}
-	return result, nil
+	})
 }
 
 // executeTool runs the tool and returns the result. Panics in tool.Call are
@@ -2940,13 +3016,23 @@ type suspendedSnapshot struct {
 }
 
 // toolCallOutcome is the per-tool-call result of an executeToolCalls batch.
-// On a successful return, at most one of Result or Pending is non-nil. If
-// both are nil, the tool call was "not started" (sequential path unwound
-// early due to an earlier sibling suspending) and must be re-scheduled on
-// resume.
+// At most one of Result, Pending or Running is non-nil. If all are nil, the
+// tool call was "not started": the sequential path unwound early due to an
+// earlier sibling suspending, and the call is re-scheduled on resume, or the
+// batch stopped before the call started.
 type toolCallOutcome struct {
 	Result  *ToolCallResult
 	Pending *PendingToolCall
+
+	// Running is set for a call that was still running when a parallel
+	// batch stopped: the handle its result arrives on once the tool returns.
+	Running *BackgroundTaskHandle
+
+	// announced is set once the call's tool_call item was emitted, and
+	// reported once its tool_call_result item was. A batch that stops early
+	// emits the items a call still owes.
+	announced bool
+	reported  bool
 }
 
 // toolBatchResult aggregates per-call outcomes for one LLM iteration.

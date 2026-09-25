@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`ResponseStatusIncomplete` and `Response.Turn`.** An error after the turn
   begins returns the incomplete response too; `Turn.Outcome` says why.
 - **`ResponseItemTypeTurnEnded`**, the last item of every call that began.
+- **`WithSoftCancel` and `SoftCanceled`.** Stops a run before its next model
+  call or tool call; running calls finish. The error wraps `context.Canceled`.
+- **`TurnOutcome.ToolCalls`** records each call of a stopped tool batch as
+  `completed`, `not_started` or `unknown`; `Next` is `reconcile` for unknown.
 
 ### Changed
 
@@ -32,6 +36,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `Turn.Persistence == unknown`, where it returned `(nil, err)`.
 - **`ResponseItemTypeSuspended` is deprecated**, and a callback error on it is
   logged instead of returned.
+- **A stopped tool batch keeps its finished results** and answers the other
+  calls with `ToolCallNotRunText` (`ErrToolCallNotRun`) or `ToolCallUnknownText`
+  (`ErrToolCallUnknown`), in the output and as `tool_call_result` items.
+- **A parallel call still running when its turn stops** is not waited for; its
+  result arrives on a handle in `Response.BackgroundTasks`.
 
 ### Fixed
 

@@ -433,6 +433,8 @@ Key types and helpers:
 - `dive.ToolResult.Suspend` — tagged union; never set alongside `Content`/`Display`/`IsError`
 - `dive.Response.Status` — `ResponseStatusCompleted`, `ResponseStatusSuspended` or `ResponseStatusIncomplete`
 - `dive.Response.Turn` — the turn as the call left it: `Messages`, `Usage`, `Outcome` (incomplete), `Suspension`, `Persistence`
+- `dive.TurnOutcome.ToolCalls` — each call of a stopped tool batch: `completed`, `not_started` (answered `ToolCallNotRunText`) or `unknown` (answered `ToolCallUnknownText`, late result on `Response.BackgroundTasks`)
+- `dive.WithSoftCancel(ctx) (ctx, cancel)` — stop before the next model or tool call; running calls finish; `dive.SoftCanceled(ctx)` reports the request
 - `dive.Response.Suspension *SuspensionState` — `PendingToolCalls`, `CompletedToolCalls`, `TurnMessages`
 - `dive.PendingToolCall.UnmarshalInput(&v)` / `dive.DecodePendingInput[T](p)` — decode original tool input
 - `dive.WithResume(state, results)` / `dive.WithToolResults(results)` — resume options

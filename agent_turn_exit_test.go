@@ -704,12 +704,13 @@ func TestEarlyHookAbortsNameTheHook(t *testing.T) {
 type funcTool struct {
 	name string
 	call func(ctx context.Context, input any) (*ToolResult, error)
+	ann  *ToolAnnotations
 }
 
 func (t *funcTool) Name() string                  { return t.name }
 func (t *funcTool) Description() string           { return "test tool" }
 func (t *funcTool) Schema() *Schema               { return &Schema{Type: Object} }
-func (t *funcTool) Annotations() *ToolAnnotations { return nil }
+func (t *funcTool) Annotations() *ToolAnnotations { return t.ann }
 func (t *funcTool) Call(ctx context.Context, input any) (*ToolResult, error) {
 	return t.call(ctx, input)
 }

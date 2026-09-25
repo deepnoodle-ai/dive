@@ -54,6 +54,14 @@ type turnRecord struct {
 	modelErr           error
 	modelStreamStarted bool
 
+	// toolCalls records the batch in flight when the turn stopped, and
+	// reconcile is set when one of its calls with an unknown result is not
+	// read-only. owedItems are the tool_call and tool_call_result items its
+	// calls still owe, which the exit emits.
+	toolCalls []ToolCallRecord
+	reconcile bool
+	owedItems []*ResponseItem
+
 	// version counts changes to the record, so an exit can tell whether
 	// the response is behind it.
 	version int
@@ -129,6 +137,16 @@ func (r *turnRecord) addBackgroundTask(handle *BackgroundTaskHandle) {
 	defer r.mu.Unlock()
 	r.backgroundTasks = append(r.backgroundTasks, handle)
 	r.version++
+}
+
+// stopBatch records the batch in flight when the turn stopped, closed by
+// closeToolBatch.
+func (r *turnRecord) stopBatch(records []ToolCallRecord, closed *closedToolBatch) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.toolCalls = records
+	r.reconcile = closed.reconcile
+	r.owedItems = closed.items
 }
 
 // turn is one CreateResponse invocation after the turn boundary, which lies
@@ -247,6 +265,7 @@ func (t *turn) end(ctx context.Context, exit turnExit) (*Response, error) {
 // *GenerationError. A failed partial resume returns no response: the turn
 // is still suspended.
 func (t *turn) fail(ctx context.Context, err error) (*Response, error) {
+	t.emitOwedItems(ctx)
 	r := t.record
 	r.mu.Lock()
 	genErr := &GenerationError{
@@ -295,6 +314,28 @@ func (t *turn) turnMessages() []*llm.Message {
 	messages := make([]*llm.Message, 0, len(prefix)+len(output))
 	messages = append(messages, prefix...)
 	return append(messages, output...)
+}
+
+// emitOwedItems emits the items the calls of a stopped batch still owe, so
+// that every tool_call item has a tool_call_result. The turn is ending, so
+// they go out on a context that is not cancelled, and a callback error is
+// only logged: it must not replace the error that ended the turn.
+func (t *turn) emitOwedItems(ctx context.Context) {
+	r := t.record
+	r.mu.Lock()
+	items := r.owedItems
+	r.owedItems = nil
+	r.mu.Unlock()
+	ctx = context.WithoutCancel(ctx)
+	for _, item := range items {
+		r.mu.Lock()
+		r.items = append(r.items, item)
+		r.version++
+		r.mu.Unlock()
+		if err := t.emit(ctx, item); err != nil {
+			t.logger.Error("event callback error on a stopped tool batch", "error", err)
+		}
+	}
 }
 
 // emitTurnEnded emits the terminal turn_ended item. The state it reports is

@@ -316,6 +316,37 @@ the session acknowledged the write, `none` when nothing was saved, and
 whose save fails is returned with that error and `Persistence == unknown`;
 reload the session before acting on it. An incomplete turn is not saved yet.
 
+A turn that stops during a tool batch answers every call of the batch, so
+`Turn.Messages` stays a history a provider accepts. A call whose tool returned
+keeps its result. A call that never started is answered with
+`dive.ToolCallNotRunText`: it had no effect. A parallel call that was still
+running is answered with `dive.ToolCallUnknownText`: it may have taken effect.
+The agent does not wait for it; its handle is on `Response.BackgroundTasks`,
+and `dive.AwaitBackgroundTasks` and `dive.WithBackgroundResults` deliver its
+result to the model later, as for a background tool. `Outcome.ToolCalls`
+records each call's state, and `Outcome.Next` is `reconcile` when an unknown
+call's tool is not annotated `ReadOnlyHint`. Every `tool_call` item gets a
+`tool_call_result` item, with `Error` set to `dive.ErrToolCallNotRun` or
+`dive.ErrToolCallUnknown` for these answers. A result that lands after the
+turn stopped is kept without PostToolUse hooks.
+
+### Stopping at a Step Boundary
+
+`dive.WithSoftCancel` asks a run to stop at its next step boundary rather
+than mid-call: before its next model call, and before each tool call it has
+not started. Calls already running finish, so a soft cancel never leaves a
+call unknown. The turn ends incomplete with reason `canceled`, and
+`errors.Is(err, context.Canceled)` holds. A stop button can escalate:
+
+```go
+ctx, cancel := context.WithCancel(ctx)
+ctx, softCancel := dive.WithSoftCancel(ctx)
+// First press: softCancel(). Second press: cancel(), which stops at once.
+```
+
+The request travels with the context, so subagents stop at their own
+boundaries, and a long-running tool can check `dive.SoftCanceled(ctx)`.
+
 ## CreateResponse Options
 
 | Option                       | Description                                                 |

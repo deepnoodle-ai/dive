@@ -166,7 +166,10 @@ Parallel batches return promptly on cancellation and stop admitting stream or
 progress callbacks after the batch ends. A callback already running may finish
 after cancellation. An arbitrary in-process custom tool that ignores its
 context can continue running after the call returns; implement
-cooperative cancellation in custom tools that have side effects.
+cooperative cancellation in custom tools that have side effects. Its call is
+recorded with an unknown result, and the result it eventually returns arrives
+on a handle in `Response.BackgroundTasks` (see
+[When a Turn Stops Short](agents.md#when-a-turn-stops-short)).
 
 ## Tool Annotations
 
