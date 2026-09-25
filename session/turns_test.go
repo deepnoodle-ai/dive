@@ -350,3 +350,24 @@ func TestLoadLatestOutcome(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, snap.LatestOutcome)
 }
+
+// A suspension write that replaces a checkpointed turn keeps its identity.
+func TestSuspensionWritesKeepTurnIdentity(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("identity")
+	turn := suspendedTurn("turn_1")
+	turn.Origin = &dive.TurnOrigin{Kind: dive.TurnOriginInput}
+	_, err := sess.CheckpointTurn(ctx, 0, turn)
+	assert.NoError(t, err)
+
+	assert.NoError(t, sess.SaveSuspendedTurn(ctx, turn.Messages, nil, turn.Suspension))
+	assert.Equal(t, sess.LoadSuspension().TurnID, "turn_1")
+
+	assert.NoError(t, sess.SaveResumedTurn(ctx, completedTurn("turn_1", "go", "done").Messages, nil))
+	turns, err := sess.Turns(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, turns, 1)
+	assert.Equal(t, turns[0].ID, "turn_1")
+	assert.Equal(t, turns[0].Origin.Kind, dive.TurnOriginInput)
+	assert.Equal(t, turns[0].Status, dive.ResponseStatusCompleted)
+}

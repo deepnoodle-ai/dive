@@ -669,9 +669,11 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 
 		var evtID string
 		var priorUsage *llm.Usage
+		var identity *turnState
 		if replaceLast {
 			prev := s.data.Events[len(s.data.Events)-1]
 			evtID = prev.ID
+			identity = turnIdentity(prev)
 			// The replaced suspended event's usage covers tokens already
 			// paid before this partial resume; carry it forward so
 			// TotalUsage does not undercount.
@@ -689,6 +691,7 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 				"suspended": true,
 			},
 			Revision: s.data.Revision,
+			Turn:     identity,
 		}
 		if replaceLast {
 			s.data.Events[len(s.data.Events)-1] = evt
@@ -741,6 +744,7 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 			Usage:    sumUsage(prev.Usage, usage),
 			Metadata: outcomeMetadata(messages),
 			Revision: s.data.Revision,
+			Turn:     turnIdentity(prev),
 		}
 		s.data.Events[len(s.data.Events)-1] = evt
 		s.data.Suspended = false

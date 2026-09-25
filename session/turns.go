@@ -27,6 +27,18 @@ func eventTurnID(e *event) string {
 	return e.ID
 }
 
+// turnIdentity returns the identity of the turn prev holds, its schema, ID
+// and origin, for an event that replaces it through SaveSuspendedTurn or
+// SaveResumedTurn, or nil when prev has no turn record. Its status comes from
+// the header and the metadata those writes set.
+func turnIdentity(prev *event) *turnState {
+	if prev.Turn == nil {
+		return nil
+	}
+	st := prev.Turn.copy()
+	return &turnState{Schema: st.Schema, ID: st.ID, Origin: st.Origin}
+}
+
 // eventStatusLocked returns the status of the turn the i-th event holds.
 // The header's suspended flag is the authority for the last event. Caller
 // must hold s.mu.

@@ -733,7 +733,10 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	hasToolResults := len(options.ToolResults) > 0
 	hasExplicitSuspension := options.Suspension != nil
-	hasResumeIntent := hasToolResults || hasExplicitSuspension || options.cancelSuspended
+	// A resume request is resume intent even without results: with nothing
+	// suspended it fails rather than starting a turn.
+	hasResumeRequest := options.ResumeTurnID != "" || options.ExpectedRevision != 0
+	hasResumeIntent := hasToolResults || hasExplicitSuspension || options.cancelSuspended || hasResumeRequest
 
 	if hasResumeIntent && suspState == nil {
 		return nil, ErrNoSuspendedTurn

@@ -501,3 +501,23 @@ func TestRequireReconcileSurvivesCompaction(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, resp.OutputText(), "next")
 }
+
+// A resume request with no results on a session with nothing suspended
+// fails; it never starts a turn.
+func TestResumeRequestWithoutSuspension(t *testing.T) {
+	mock := &responseLLM{responses: []*llm.Response{
+		textResponse("max_tokens", "The answer is"),
+	}}
+	sess := session.New("request-no-suspension")
+	agent, err := NewAgent(AgentOptions{Model: mock, Session: sess})
+	assert.NoError(t, err)
+	resp, err := agent.CreateResponse(context.Background(), WithInput("question"))
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithResumeRequest(ResumeRequest{
+		TurnID: resp.Turn.ID, ExpectedRevision: resp.Turn.Revision,
+	}))
+	assert.True(t, errors.Is(err, ErrNoSuspendedTurn))
+	assert.Equal(t, mock.calls(), 1)
+	assert.Equal(t, sess.EventCount(), 1)
+}
