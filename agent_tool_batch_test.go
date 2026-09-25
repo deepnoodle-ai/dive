@@ -574,6 +574,26 @@ func TestSoftCancelDuringModelCall(t *testing.T) {
 	}
 }
 
+// A soft cancel requested while a PreIteration hook runs stops the turn
+// before the model is called.
+func TestSoftCancelDuringPreIterationHook(t *testing.T) {
+	ctx, softCancel := WithSoftCancel(context.Background())
+	mock := &scriptedLLM{script: []scriptedTurn{finalTextTurn("unreachable")}}
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Hooks: Hooks{PreIteration: []PreIterationHook{func(ctx context.Context, hctx *HookContext) error {
+			softCancel()
+			return nil
+		}}},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(ctx, WithInput("go"))
+	assertIncomplete(t, resp, err, TurnReasonCanceled, TurnNextInput)
+	assert.True(t, errors.Is(err, context.Canceled))
+	assert.Equal(t, mock.Calls(), 0)
+}
+
 // softCancellingLLM requests a soft cancel while it generates.
 type softCancellingLLM struct {
 	scriptedLLM

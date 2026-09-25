@@ -1716,7 +1716,8 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		hctx.SystemPrompt = systemPrompt
 		hctx.Messages = updatedMessages
 
-		// A soft cancel stops the turn before its next model call.
+		// A soft cancel stops the turn before its next model call: here,
+		// and again below, since PreIteration hooks can wait on a person.
 		if err := stepStopErr(ctx); err != nil {
 			return nil, err
 		}
@@ -1763,6 +1764,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
+		}
+
+		if err := stepStopErr(ctx); err != nil {
+			return nil, err
 		}
 
 		// Open chat span before invoking the model. The returned ctx carries

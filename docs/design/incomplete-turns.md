@@ -1654,8 +1654,9 @@ would make neither reviewable.
    - The drain emits through a serialized `emit` that reports whether the
      item reached the callback: the gate that suppresses late stream events
      from tool goroutines also dropped result items once the context ended.
-   - A soft cancel is checked at the top of every generation iteration,
-     before each sequential call and again after its PreToolUse hooks (which
+   - A soft cancel is checked at the top of every generation iteration and
+     again just before its model call (PreIteration hooks can wait on a
+     person), before each sequential call and again after its PreToolUse hooks (which
      can wait on a person), and before each parallel call is prepared or
      launched. Open question 1 is taken as recommended.
    - No grace period (open question 3): a parallel tool that honours its
