@@ -1806,8 +1806,10 @@ Phase 2a and 2b below are the seventh and eighth stages.
      request's checks, so a resume the process did not finish fails with
      `ErrNoSuspendedTurn` and is continued instead. The running calls are
      unknown; `Next` is `reconcile` unless each of them is read-only, else
-     `continue`. No `OnIncompleteTurn` hook runs for it, since the
-     invocation that owned the turn is gone. `Fork` with an open running
+     `continue`; when the tools cannot be resolved, every unknown call needs
+     reconciling, and the turn is closed all the same. No
+     `OnIncompleteTurn` hook runs for it, since the invocation that owned
+     the turn is gone. `Fork` with an open running
      turn closes it as it closes a suspended one.
    - `FileStore` writes a turn's first step as a `step` line holding the
      whole event, and each later step as the messages it changed (compared
@@ -1823,9 +1825,10 @@ Phase 2a and 2b below are the seventh and eighth stages.
      that fails cancels the invocation with a cause that wraps
      `ErrSessionClaimed`, and a failed turn reports a context's cause with
      its cancellation. `FileStore` keeps the claim in `{id}.claim`,
-     replaced under a lock file created exclusively (a lock older than ten
-     seconds is taken as left by an exited process), and a session that
-     claims anew reads its file back. A write through a session whose claim
+     replaced under an operating-system lock on `{id}.claim.lock` (`flock`,
+     `LockFileEx` on Windows), which the system releases when its holder
+     exits, so no stale lock is ever taken over; a platform without either
+     refuses claims. A session that claims anew reads its file back. A write through a session whose claim
      the file no longer names is refused with `ErrSessionClaimed`; that
      check and the append are not one atomic operation, which a database
      store would make a conditional write. A session in memory or in a

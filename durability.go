@@ -75,9 +75,13 @@ func (a *Agent) claimSession(ctx context.Context, claimer SessionClaimer) (conte
 // place. It returns the snapshot reloaded after that write.
 func (a *Agent) recoverRunningTurn(ctx context.Context, store TurnStore, snap *SessionSnapshot) (*SessionSnapshot, error) {
 	open := snap.OpenTurn
+	// The tools say only which unknown calls are read-only. When they
+	// cannot be resolved, every unknown call needs reconciling, and the
+	// turn is closed all the same.
 	_, toolsByName, err := a.resolveTools(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("tool resolution error: %w", err)
+		a.logger.Warn("tool resolution error while closing a turn left running", "error", err)
+		toolsByName = nil
 	}
 	outcome := &TurnOutcome{
 		Reason: TurnReasonProcessExit,

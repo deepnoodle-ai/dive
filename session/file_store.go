@@ -44,8 +44,8 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 // (Session.ClaimSession, or dive.DurabilityOptions.Claim on the agent): two
 // processes can both read, both rewrite the JSONL, and the later rename
 // wins. A claim is kept in {dir}/{session_id}.claim, changed under an
-// exclusively created lock file, and a session that claims it reads back
-// the writes other processes made. Without claims, implement a
+// operating-system file lock on {session_id}.claim.lock, and a session that
+// claims it reads back the writes other processes made. Without claims, implement a
 // database-backed Session backend for multi-instance deployments instead.
 //
 // # Step checkpoints
@@ -321,6 +321,7 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	}
 	if claimPath, err := s.claimPath(id); err == nil {
 		_ = os.Remove(claimPath)
+		_ = os.Remove(claimPath + ".lock")
 	}
 	// Evict the cached instance so a subsequent Open creates fresh state
 	// instead of resurrecting the deleted session. Any handle still held

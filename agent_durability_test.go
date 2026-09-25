@@ -426,3 +426,47 @@ func TestClaimLostCancelsTurn(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSessionClaimed))
 	assert.Equal(t, resp.Turn.Outcome.Reason, TurnReasonCanceled)
 }
+
+// failingToolset cannot resolve its tools.
+type failingToolset struct{}
+
+func (failingToolset) Name() string { return "failing" }
+func (failingToolset) Tools(ctx context.Context) ([]Tool, error) {
+	return nil, errors.New("toolset unavailable")
+}
+
+// A turn left running is closed even when the tools cannot be resolved; its
+// running calls then all need reconciling, read-only or not.
+func TestProcessExitRecoveryWithoutTools(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("no-tools-exit")
+	_, err := sess.CheckpointTurn(ctx, 0, &Turn{
+		Schema: TurnSchema,
+		ID:     "turn_crashed",
+		Status: ResponseStatusRunning,
+		Messages: []*llm.Message{
+			llm.NewUserTextMessage("look"),
+			{Role: llm.Assistant, Content: []llm.Content{toolUse("toolu_1", "look", `{}`)}},
+		},
+		ToolCalls: []ToolCallRecord{{ID: "toolu_1", Name: "look", State: ToolCallStateRunning}},
+	})
+	assert.NoError(t, err)
+
+	var ran atomic.Int32
+	agent, err := NewAgent(AgentOptions{
+		Model:    &responseLLM{responses: []*llm.Response{textResponse("end_turn", "hi")}},
+		Session:  sess,
+		Tools:    []Tool{readOnly(countingTool("look", &ran))},
+		Toolsets: []Toolset{failingToolset{}},
+	})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(ctx, WithInput("again"))
+	assert.Error(t, err)
+
+	turns, err := sess.Turns(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, turns, 2)
+	assert.Equal(t, turns[0].Outcome.Reason, TurnReasonProcessExit)
+	assert.Equal(t, turns[0].Outcome.Next, TurnNextReconcile)
+	assert.Equal(t, states(turns[0]), []ToolCallState{ToolCallStateUnknown})
+}

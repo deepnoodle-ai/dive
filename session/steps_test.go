@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -324,4 +326,46 @@ func TestMemoryClaims(t *testing.T) {
 	assert.NoError(t, sess.ClaimSession(ctx, "A", time.Minute), "expired")
 	assert.Error(t, sess.ClaimSession(ctx, "", time.Minute))
 	assert.Error(t, sess.ClaimSession(ctx, "A", 0))
+}
+
+// Owners racing to claim a session whose lock file an exited process left
+// behind: exactly one claim succeeds.
+func TestFileStoreClaimRace(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	old := time.Now().Add(-time.Hour)
+	lock := filepath.Join(dir, "raced.claim.lock")
+	assert.NoError(t, os.WriteFile(lock, nil, 0644))
+	assert.NoError(t, os.Chtimes(lock, old, old))
+
+	const owners = 8
+	sessions := make([]*session.Session, owners)
+	for i := range sessions {
+		store, err := session.NewFileStore(dir)
+		assert.NoError(t, err)
+		sessions[i], err = store.Open(ctx, "raced")
+		assert.NoError(t, err)
+	}
+	errs := make([]error, owners)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i, sess := range sessions {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[i] = sess.ClaimSession(ctx, fmt.Sprintf("owner-%d", i), time.Minute)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	won := 0
+	for _, err := range errs {
+		if err == nil {
+			won++
+			continue
+		}
+		assert.True(t, errors.Is(err, dive.ErrSessionClaimed), "%v", err)
+	}
+	assert.Equal(t, won, 1)
 }

@@ -149,31 +149,31 @@ func (s *FileStore) claimPath(id string) (string, error) {
 	return strings.TrimSuffix(p, ".jsonl") + ".claim", nil
 }
 
-// staleClaimLock is how old a claim lock file must be before a process
-// that finds it takes it to be left by a process that exited while holding
-// it. The lock is held only while a claim file is read and replaced.
-const staleClaimLock = 10 * time.Second
-
 // lockClaim takes the lock that serializes changes to a claim file across
-// processes: a lock file created exclusively. It returns the function that
-// releases it.
+// processes: an exclusive operating-system lock (flock on Unix, LockFileEx on
+// Windows) on {id}.claim.lock, which the system releases when the process
+// holding it exits, so a lock is never left behind. It waits until the lock
+// is free or ctx ends, and returns the function that releases it.
 func lockClaim(ctx context.Context, claimPath string) (func(), error) {
-	lockPath := claimPath + ".lock"
+	f, err := os.OpenFile(claimPath+".lock", os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
 	for {
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-		if err == nil {
+		locked, err := tryLockFile(f)
+		if err != nil {
 			f.Close()
-			return func() { _ = os.Remove(lockPath) }, nil
-		}
-		if !os.IsExist(err) {
 			return nil, err
 		}
-		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > staleClaimLock {
-			_ = os.Remove(lockPath)
-			continue
+		if locked {
+			return func() {
+				_ = unlockFile(f)
+				f.Close()
+			}, nil
 		}
 		select {
 		case <-ctx.Done():
+			f.Close()
 			return nil, ctx.Err()
 		case <-time.After(2 * time.Millisecond):
 		}
