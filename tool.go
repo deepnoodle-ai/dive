@@ -626,7 +626,7 @@ type ToolCallResult struct {
 	Input              any
 	Preview            *ToolCallPreview      // Preview generated before execution (if tool implements ToolPreviewer)
 	Result             *ToolResult           // Protocol-level result sent to the LLM
-	Error              error                 // Go error from tool.Call() or dispatch, including UnknownToolError and ErrBatchHalted
+	Error              error                 // Go error from tool.Call() or dispatch, including UnknownToolError, ErrBatchHalted, ErrToolCallNotRun and ErrToolCallUnknown
 	AdditionalContext  string                // Context injected by hooks, appended to the tool result message
 	BackgroundHandle   *BackgroundTaskHandle // Non-nil when the tool returned BackgroundResult
 	reminderDeliveries []reminderDelivery
