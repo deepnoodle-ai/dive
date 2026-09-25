@@ -5,6 +5,7 @@ import "context"
 type contextKey string
 
 const (
+	turnIDKey         contextKey = "turn_id"
 	toolCallIDKey     contextKey = "tool_call_id"
 	toolStreamFnKey   contextKey = "tool_stream_fn"
 	toolProgressFnKey contextKey = "tool_progress_fn"
@@ -20,6 +21,25 @@ func WithToolCallID(ctx context.Context, id string) context.Context {
 // ToolCallID returns the tool call ID from the context, or empty string.
 func ToolCallID(ctx context.Context) string {
 	if id, ok := ctx.Value(toolCallIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// WithTurnID returns a context with the given turn ID. The agent sets it at
+// the start of every turn, so hooks and tools can read the ID of the turn
+// they run in.
+func WithTurnID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, turnIDKey, id)
+}
+
+// TurnID returns the ID of the turn the context belongs to (Turn.ID), or an
+// empty string. It is stable across the invocations of one turn: a resume,
+// and a continuation of an open turn on a TurnStore, keep it. With
+// ToolCallID it forms a key a tool can hand to a service that supports
+// idempotency keys.
+func TurnID(ctx context.Context) string {
+	if id, ok := ctx.Value(turnIDKey).(string); ok {
 		return id
 	}
 	return ""

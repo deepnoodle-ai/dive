@@ -1,7 +1,7 @@
 # Incomplete Turns
 
 _Last updated: 2026-09-25_
-_Status: accepted; v1.34 implemented (see "Order of work"), Phase 2 next. Answers the Noodle team's request "Dive:
+_Status: accepted; v1.34 and Phase 2a implemented (see "Order of work"), Phase 2b next. Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
 revision, after six reviews: the pull-request review (a running call must
 not be recorded as "not run"; the partial-resume rule; the error contract;
@@ -1710,6 +1710,66 @@ would make neither reviewable.
      which sets them. The CLI's transcript marker (section 14) is not done.
 
 Phase 2a and 2b below are the seventh and eighth stages.
+
+7. **Recoverable turns** (Phase 2a). Done, in one pull request: the turn
+   record on `Turn` (`Schema`, `ID`, `Revision`, `Origin`, `Status`,
+   `ToolCalls` with `waiting`, `Superseded`), `TurnID(ctx)`,
+   `SuspensionState.TurnID` and `BackgroundTaskHandle.TurnID`; `TurnStore`
+   with `Load`, `CheckpointTurn`, `SessionSnapshot` and
+   `ErrRevisionConflict`, implemented by `session.Session`
+   (`session/turns.go`) with `Revision`, `Turns` and `RemoveLastTurn`; the
+   agent saving through it, a continuation folding into the open turn,
+   `WithResumeRequest`, resent results skipped and conflicting ones refused,
+   `Agent.CancelSuspendedTurn`, `Fork` stopping at the last completed turn
+   with `ForkWithOpenTurn`, `CancelSuspension` deprecated, and
+   `RequireReconcile`. Decided while building it:
+   - The record is the closed turn. A projection computed on load would
+     have to run the `OnIncompleteTurn` hooks and `DropPartialText` again,
+     and the stopped batch already answers its calls in the output (step 5),
+     so the placeholder results are recorded. The record and the projection
+     separate only where the design needs it: a continuation drops the
+     outcome reminder, which the record keeps in `Outcome`.
+   - After an assistant message, a continuation records its `turn-continue`
+     reminder before the new output, so the folded turn keeps alternating
+     roles; the model-only form is kept after an outcome reminder. A folded
+     continuation that ends in tool results carries no reminder at all.
+   - `ResponseStatusRunning`, `ToolCallStateRunning` and
+     `TurnReasonProcessExit` are left to 2b, which sets them. `Superseded`
+     is derived, not written: an incomplete turn that later turns followed.
+     `Turns` lists it; hidden turns stay deferred.
+   - A turn saved before records has its event ID as its turn ID, and its
+     status comes from the suspended flag and the `outcome` metadata, so a
+     v1.34 session's open turn can be continued and replaced.
+   - `FileStore` writes the revision on each event line and on the header,
+     and a session is at the newest either holds, so adding a completed or
+     incomplete turn stays a single appended line; replacing the open turn
+     or changing the suspension rewrites the file. The revision check is the
+     process's, as `FileStore` is single-writer; a database store would make
+     it a conditional write. Older versions ignore the new fields.
+   - A checkpoint refused as a conflict wraps `ErrSaveRejected`, so it is
+     `PersistenceFailed`: a session compacted during the turn keeps the
+     compaction and the caller holds the turn.
+   - `WithResume` on a `TurnStore` still replaces the stored suspended turn,
+     as the documented handoff relies on it; `CheckpointTurn` is the explicit
+     import. `WithResumeRequest` is the checked resume, and needs a
+     `TurnStore`.
+   - A resent result is recognised on every session, not only a
+     `TurnStore`: `CompletedToolCalls` now records each supplied result as
+     supplied, before hooks, and a resent one is compared through its JSON
+     encoding. `ErrConflictingToolResult` also matches
+     `ErrUnknownPendingToolCall`, which a resent result returned before.
+   - A partial resume saves before emitting its results' items, on every
+     session; an abort before the save emits none. A full resume is not
+     checkpointed until it ends (2b); a failure closes it, as in v1.34.
+   - `CancelSuspendedTurn` runs no PreGeneration hook, and its `Next` is
+     `reconcile` only when a pending call is not read-only, the v1.34 rule.
+     `Fork` with an open suspended turn closes it the same way, but always
+     with `reconcile`, since a session does not know the tools.
+   - `TurnID(ctx)` matches the existing `ToolCallID(ctx)` rather than the
+     `TurnIDFromContext` name above.
+   - A wrapper that embeds `*session.Session` and overrides the v1.34 writes
+     now also has `CheckpointTurn`, which the agent calls instead; the
+     changelog says so.
 
 ## Phase 2: recoverable turns, then per-step durability
 

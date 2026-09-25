@@ -198,8 +198,11 @@ type SuspensionState struct {
 	PendingToolCalls []*PendingToolCall `json:"pending_tool_calls,omitempty"`
 
 	// CompletedToolCalls are tool calls that ran to completion in the same
-	// iteration as a suspending sibling (or have since been supplied via a
-	// resume call). Informational: their results are already in TurnMessages.
+	// iteration as a suspending sibling, and the calls whose results a
+	// resume has since supplied, with the result as supplied. Their results
+	// are already in TurnMessages. A resume that supplies the same result
+	// again for one of these calls skips it; a different result fails with
+	// ErrConflictingToolResult.
 	CompletedToolCalls []*CompletedToolCall `json:"completed_tool_calls,omitempty"`
 
 	// TurnMessages is the complete set of messages that belong to the
@@ -219,6 +222,10 @@ type SuspensionState struct {
 	// are answered with ErrBatchHalted on resume. It is recorded rather than
 	// worked out again on resume, where the agent's tools may have changed.
 	BatchHalted bool `json:"batch_halted,omitempty"`
+
+	// TurnID is the suspended turn's Turn.ID, which a resume keeps. Empty
+	// for a state saved before Dive recorded turn IDs.
+	TurnID string `json:"turn_id,omitempty"`
 
 	// Usage is the suspended turn's usage so far, summed over every
 	// invocation of it. The agent adds it to Response.Turn.Usage when the

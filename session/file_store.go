@@ -163,6 +163,7 @@ type sessionHeader struct {
 	PendingToolCalls   []*dive.PendingToolCall   `json:"pending_tool_calls,omitempty"`
 	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
 	BatchHalted        bool                      `json:"batch_halted,omitempty"`
+	Revision           uint64                    `json:"revision,omitempty"`
 }
 
 // Open returns the session with the given ID, creating it (and its backing
@@ -484,10 +485,17 @@ func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err er
 		PendingToolCalls:   header.PendingToolCalls,
 		CompletedToolCalls: header.CompletedToolCalls,
 		BatchHalted:        header.BatchHalted,
+		Revision:           header.Revision,
 	}
 	if header.Metadata != nil {
 		data.Metadata = make(map[string]any, len(header.Metadata))
 		maps.Copy(data.Metadata, header.Metadata)
+	}
+
+	// An append advances the revision without rewriting the header, so the
+	// session is at the newest revision either records.
+	for _, evt := range events {
+		data.Revision = max(data.Revision, evt.Revision)
 	}
 
 	// Derive UpdatedAt from the last event if events exist.
@@ -542,6 +550,7 @@ func (s *FileStore) writeSession(data *sessionData) error {
 		PendingToolCalls:   data.PendingToolCalls,
 		CompletedToolCalls: data.CompletedToolCalls,
 		BatchHalted:        data.BatchHalted,
+		Revision:           data.Revision,
 	}
 	hdrData, err := json.Marshal(hdr)
 	if err != nil {

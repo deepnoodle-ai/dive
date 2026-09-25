@@ -11,16 +11,43 @@ import (
 // Turn is the record of one turn as the invocation that returned it left it:
 // the unit a session saves and a stateless caller appends to its history. It
 // is set on Response.Turn for every status once the turn has begun, and on
-// the terminal ResponseItemTypeTurnEnded item.
+// the terminal ResponseItemTypeTurnEnded item. A TurnStore stores it as the
+// turn's record (TurnStore.CheckpointTurn).
 type Turn struct {
+	// Schema versions the record; TurnSchema for records this version of
+	// Dive writes.
+	Schema int `json:"schema,omitempty"`
+
+	// ID identifies the turn across the invocations that advance it: a
+	// resume and a continuation of an open turn on a TurnStore keep it. A
+	// tool reads it with TurnID(ctx), for example as part of an idempotency
+	// key.
+	ID string `json:"id,omitempty"`
+
+	// Revision is the session revision at which a TurnStore last
+	// checkpointed the record, or zero when it was not checkpointed. Pass
+	// it back as ResumeRequest.ExpectedRevision.
+	Revision uint64 `json:"revision,omitempty"`
+
+	// Origin says what started the turn. Nil when it is not known, as for a
+	// turn resumed from a SuspensionState alone.
+	Origin *TurnOrigin `json:"origin,omitempty"`
+
+	// Status is the turn's state as this invocation left it: completed,
+	// suspended or incomplete. It is Response.Status.
+	Status ResponseStatus `json:"status,omitempty"`
+
 	// Messages is what a session saves for this invocation, closed so it
 	// can be sent again. For a fresh turn it is the input and the output,
 	// including a synthetic background-results message, which
 	// OutputMessages does not carry. For a resume it is the whole suspended
 	// turn merged with this invocation's output, since the session replaces
-	// the suspended event. For a continuation (WithContinue) it is the
-	// output alone. A stateless caller appends it to the history it held
-	// before the call (before the suspended turn, on a resume).
+	// the suspended event. For a continuation (WithContinue) of an open
+	// turn on a TurnStore it is the whole turn: the open turn without its
+	// outcome reminder, then this invocation's output. For any other
+	// continuation it is the output alone. A stateless caller appends it to
+	// the history it held before the call (before the suspended turn, on a
+	// resume).
 	Messages []*llm.Message `json:"messages"`
 
 	// Usage is the turn's usage: this invocation's model calls, plus, on a
@@ -36,9 +63,47 @@ type Turn struct {
 	// same value as Response.Suspension.
 	Suspension *SuspensionState `json:"suspension,omitempty"`
 
+	// ToolCalls is the state of every client tool call in the turn, in
+	// order: completed, waiting for a result on a suspended turn,
+	// not_started, or unknown.
+	ToolCalls []ToolCallRecord `json:"tool_calls,omitempty"`
+
+	// Superseded is set on an incomplete turn that later turns followed
+	// without continuing it: it was abandoned, its record intact. Set by a
+	// TurnStore on the records it lists; the agent never sets it.
+	Superseded bool `json:"superseded,omitempty"`
+
 	// Persistence says whether a session recorded this state.
 	Persistence PersistenceState `json:"persistence"`
 }
+
+// TurnSchema is the Turn.Schema of the records this version of Dive writes.
+const TurnSchema = 1
+
+// TurnOrigin says what started a turn.
+type TurnOrigin struct {
+	Kind TurnOriginKind `json:"kind"`
+
+	// TurnID links a turn started by background results to the turn that
+	// started the task.
+	TurnID string `json:"turn_id,omitempty"`
+}
+
+// TurnOriginKind is what started a turn.
+type TurnOriginKind string
+
+const (
+	// TurnOriginInput: new input.
+	TurnOriginInput TurnOriginKind = "input"
+
+	// TurnOriginContinue: WithContinue with no open turn to continue, or on
+	// a session that is not a TurnStore.
+	TurnOriginContinue TurnOriginKind = "continue"
+
+	// TurnOriginBackground: delivered background results
+	// (WithBackgroundResults).
+	TurnOriginBackground TurnOriginKind = "background"
+)
 
 // PersistenceState says whether a session recorded a turn.
 type PersistenceState string
@@ -187,15 +252,14 @@ const (
 	TurnNextInput TurnNext = "input"
 )
 
-// ToolCallRecord is what is known about one call of the batch in flight when
-// a turn stopped.
+// ToolCallRecord is what is known about one tool call of a turn.
 type ToolCallRecord struct {
 	ID    string        `json:"id"`
 	Name  string        `json:"name"`
 	State ToolCallState `json:"state"`
 }
 
-// ToolCallState is what is known about a tool call when its turn stopped.
+// ToolCallState is what is known about a tool call.
 type ToolCallState string
 
 const (
@@ -208,6 +272,10 @@ const (
 	// ToolCallStateUnknown: the call started and no result was recorded; it
 	// may have taken effect.
 	ToolCallStateUnknown ToolCallState = "unknown"
+
+	// ToolCallStateWaiting: the call suspended and its turn is waiting for
+	// its result (SuspensionState.PendingToolCalls).
+	ToolCallStateWaiting ToolCallState = "waiting"
 )
 
 // failureOutcome classifies the error that ended an invocation. A context

@@ -1,6 +1,7 @@
 package dive
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -381,6 +382,14 @@ type IncompleteTurnOptions struct {
 	// context without the cancellation that may have ended the turn, so
 	// that the turn is kept. Default 30 seconds.
 	SaveTimeout time.Duration
+
+	// RequireReconcile refuses new input on a session whose last turn
+	// stopped with a call whose result is unknown (TurnOutcome.Next is
+	// TurnNextReconcile), with ErrUnreconciledToolCalls, so that such a turn
+	// is continued (WithContinue) or removed before the conversation moves
+	// on. By default the new turn starts, and the model sees the unknown
+	// calls' results and the outcome reminder.
+	RequireReconcile bool
 }
 
 // defaultSaveTimeout is IncompleteTurnOptions.SaveTimeout when unset.
@@ -655,13 +664,44 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		defer release()
 	}
 
-	// Load session history
+	// Load session history. A TurnStore also reports its open turn and
+	// revision, and stores the turn's record in place of the other writes.
 	var sessionMsgs []*llm.Message
-	if sess != nil {
+	store, _ := sess.(TurnStore)
+	var snap *SessionSnapshot
+	switch {
+	case store != nil:
+		var err error
+		snap, err = store.Load(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("session load error: %w", err)
+		}
+		sessionMsgs = slices.Clone(snap.History)
+		if snap.OpenTurn != nil {
+			sessionMsgs = append(sessionMsgs, snap.OpenTurn.Messages...)
+		}
+	case sess != nil:
 		var err error
 		sessionMsgs, err = sess.Messages(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("session load error: %w", err)
+		}
+	}
+	var openTurn *Turn
+	if snap != nil {
+		openTurn = snap.OpenTurn
+	}
+
+	// A resume request names the turn and revision the caller read.
+	if options.ResumeTurnID != "" || options.ExpectedRevision != 0 {
+		if store == nil {
+			return nil, errors.New("dive: WithResumeRequest needs a session that implements TurnStore")
+		}
+		if options.ExpectedRevision != 0 && options.ExpectedRevision != snap.Revision {
+			return nil, fmt.Errorf("%w: session is at revision %d, not %d", ErrRevisionConflict, snap.Revision, options.ExpectedRevision)
+		}
+		if options.ResumeTurnID != "" && (openTurn == nil || openTurn.ID != options.ResumeTurnID) {
+			return nil, fmt.Errorf("%w: turn %s is not the session's open turn", ErrRevisionConflict, options.ResumeTurnID)
 		}
 	}
 
@@ -674,9 +714,15 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// suspendable, the session's stored state is used.
 	suspendable, _ := sess.(SuspendableSession)
 	var storedSuspension *SuspensionState
-	if suspendable != nil {
+	switch {
+	case store != nil:
+		if openTurn != nil && openTurn.Status == ResponseStatusSuspended {
+			storedSuspension = openTurn.Suspension
+		}
+	case suspendable != nil:
 		storedSuspension = suspendable.LoadSuspension()
 	}
+	persistsSuspension := store != nil || suspendable != nil
 	suspState := options.Suspension
 	if suspState == nil {
 		suspState = storedSuspension
@@ -684,7 +730,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	hasToolResults := len(options.ToolResults) > 0
 	hasExplicitSuspension := options.Suspension != nil
-	hasResumeIntent := hasToolResults || hasExplicitSuspension
+	hasResumeIntent := hasToolResults || hasExplicitSuspension || options.cancelSuspended
 
 	if hasResumeIntent && suspState == nil {
 		return nil, ErrNoSuspendedTurn
@@ -694,7 +740,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// persisted via SaveResumedTurn, which fails when the session is not
 	// suspended. Detect the mismatch before calling the LLM so no tokens
 	// are spent on a turn that could never be saved.
-	if hasExplicitSuspension && suspendable != nil && storedSuspension == nil {
+	if hasExplicitSuspension && persistsSuspension && storedSuspension == nil {
 		return nil, ErrSessionNotSuspended
 	}
 	// A session-backed resume cannot accept new user input — the new
@@ -713,9 +759,32 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, ErrResumeRequired
 	}
 
+	// Closing a suspended turn takes nothing but the turn.
+	if options.cancelSuspended {
+		if suspState == nil {
+			return nil, ErrNoSuspendedTurn
+		}
+		if len(options.ToolResults) > 0 || options.Continue {
+			return nil, errors.New("dive: CancelSuspendedTurn takes no tool results and no continuation")
+		}
+	}
+
+	// With RequireReconcile, new input waits until a last turn with unknown
+	// results is continued or removed.
+	if a.incompleteTurns.RequireReconcile && sess != nil && !hasResumeIntent && !options.Continue &&
+		len(inputMessages) > 0 && len(sessionMsgs) > 0 {
+		if outcome, ok := FindTurnOutcome(sessionMsgs[len(sessionMsgs)-1]); ok && outcome.Next == TurnNextReconcile {
+			return nil, ErrUnreconciledToolCalls
+		}
+	}
+
 	// A continuation has no input. On a session the history is the
 	// session's; a stateless caller's messages are its history, so they are
-	// not part of the turn this invocation records.
+	// not part of the turn this invocation records. On a TurnStore, a
+	// continuation of an open incomplete turn folds into it: the model sees
+	// the turn without its outcome reminder, and the turn is recorded again
+	// with this invocation's output.
+	var continued []*llm.Message
 	if options.Continue {
 		if hasResumeIntent || (sess != nil && len(inputMessages) > 0) {
 			return nil, ErrContinueWithInput
@@ -723,8 +792,54 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		if len(sessionMsgs) == 0 && len(inputMessages) == 0 {
 			return nil, errors.New("dive: WithContinue needs a conversation to continue")
 		}
-		sessionMsgs = append(slices.Clone(sessionMsgs), inputMessages...)
+		history := append(slices.Clone(sessionMsgs), inputMessages...)
+		if openTurn != nil && openTurn.Status == ResponseStatusIncomplete {
+			continued = withoutOutcomeReminder(openTurn.Messages)
+			history = append(slices.Clone(snap.History), continued...)
+		}
 		inputMessages = nil
+		// A history that ends in an assistant message gets the
+		// turn-continue reminder as a recorded message of the turn, so the
+		// request never ends in an assistant turn, which some models reject
+		// as a prefill, and the saved history keeps alternating roles.
+		// After an outcome reminder it is model-only (see below).
+		if n := len(history); n > 0 && history[n-1].Role == llm.Assistant {
+			reminder := NewReminderMessage(turnContinueReminder())
+			if continued != nil {
+				continued = append(continued, reminder)
+				history = append(history, reminder)
+			} else {
+				inputMessages = []*llm.Message{reminder}
+			}
+		}
+		sessionMsgs = history
+	}
+
+	// The turn's identity: a resume keeps the suspended turn's, as does a
+	// continuation of an open turn; anything else starts a new turn.
+	turnID, origin := newTurnID(), &TurnOrigin{Kind: TurnOriginInput}
+	switch {
+	case suspState != nil:
+		origin = nil
+		if suspState.TurnID != "" {
+			turnID = suspState.TurnID
+		}
+		// A resume on a TurnStore replaces the suspended turn it stores,
+		// even when WithResume supplied a newer snapshot of it.
+		if storedSuspension != nil && store != nil {
+			turnID, origin = openTurn.ID, openTurn.Origin
+		}
+	case continued != nil:
+		turnID, origin = openTurn.ID, openTurn.Origin
+	case options.Continue:
+		origin = &TurnOrigin{Kind: TurnOriginContinue}
+	case len(options.BackgroundHandles) > 0 && options.BackgroundResults != nil:
+		origin = &TurnOrigin{Kind: TurnOriginBackground, TurnID: options.BackgroundHandles[0].TurnID}
+	}
+	ctx = WithTurnID(ctx, turnID)
+	var revision uint64
+	if snap != nil {
+		revision = snap.Revision
 	}
 
 	// Fire SessionStart hooks at the start of a fresh conversation: the session
@@ -772,6 +887,14 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		if len(persistentSeeds) > 0 && sess != nil {
 			if err := sess.SaveTurn(ctx, persistentSeeds, nil); err != nil {
 				return nil, fmt.Errorf("session start seed save error: %w", err)
+			}
+			// The seeds advanced the revision the turn's checkpoint expects.
+			if store != nil {
+				seeded, err := store.Load(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("session load error: %w", err)
+				}
+				revision = seeded.Revision
 			}
 		}
 	}
@@ -855,11 +978,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		hctx.reminders.appendModelOnly(NewReminderMessage(reminder))
 	}
 	if options.Continue && continueNeedsReminder(messages) {
-		hctx.reminders.appendModelOnly(NewReminderMessage(Reminder{
-			Name:    ReminderNameTurnContinue,
-			Tier:    ReminderTierContextual,
-			Content: turnContinueText,
-		}))
+		hctx.reminders.appendModelOnly(NewReminderMessage(turnContinueReminder()))
 	}
 
 	// Copy caller-provided values into hook context, then layer any values
@@ -890,15 +1009,32 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		inputMessages: inputMessages,
 		sess:          sess,
 		suspendable:   suspendable,
+		store:         store,
+		revision:      revision,
+		turnID:        turnID,
+		origin:        origin,
+		continued:     continued,
 		rs:            rs,
-		partialResume: rs != nil && len(rs.RemainingPending) > 0,
+		partialResume: rs != nil && len(rs.RemainingPending) > 0 && !options.cancelSuspended,
 	}
-	if suspState != nil && suspState.Usage != nil {
+	switch {
+	case suspState != nil && suspState.Usage != nil:
 		t.priorUsage = suspState.Usage.Copy()
+	case continued != nil && openTurn.Usage != nil:
+		t.priorUsage = openTurn.Usage.Copy()
 	}
 	eventCallback := t.record.collecting(t.emit)
 
-	hctx.backgroundTaskStarted = t.record.addBackgroundTask
+	hctx.backgroundTaskStarted = func(handle *BackgroundTaskHandle) {
+		handle.TurnID = turnID
+		t.record.addBackgroundTask(handle)
+	}
+
+	// Closing a suspended turn calls neither the hooks that prepare a
+	// generation nor the model.
+	if options.cancelSuspended {
+		return t.cancelSuspended(ctx)
+	}
 
 	// Run PreGeneration hooks
 	for _, hook := range a.hooks.PreGeneration {
@@ -947,33 +1083,43 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		// produced by in-process tools. Emit them after post hooks so streaming
 		// observers see the final, hook-mutated value and can keep their
 		// transcript indexes aligned with rs.TurnMessages.
-		for _, toolUseID := range collectToolUseIDs(rs.AssistantToolUse) {
-			result := rs.CallerSupplied[toolUseID]
-			if result == nil {
-				continue
+		emitSupplied := func(ctx context.Context) error {
+			for _, toolUseID := range collectToolUseIDs(rs.AssistantToolUse) {
+				result := rs.CallerSupplied[toolUseID]
+				if result == nil {
+					continue
+				}
+				item := &ResponseItem{
+					Type:           ResponseItemTypeToolCallResult,
+					ToolCallResult: result,
+				}
+				if err := eventCallback(ctx, item); err != nil {
+					return fmt.Errorf("resume tool-result event callback: %w", err)
+				}
 			}
-			item := &ResponseItem{
-				Type:           ResponseItemTypeToolCallResult,
-				ToolCallResult: result,
-			}
-			if err := eventCallback(ctx, item); err != nil {
-				// Mirror the not-started execution path below: expose the
-				// items already emitted via *GenerationError so callers can
-				// recover partial work (no LLM calls yet, so usage is zero).
-				return t.end(ctx, failedExit(fmt.Errorf("resume tool-result event callback: %w", err)))
-			}
+			return nil
 		}
 		batchHalted := resumedBatchHalted(rs, resumeToolsByName)
 		if len(rs.RemainingPending) > 0 {
 			// Partial resume: update session and return a new suspended response.
 			// This is not a fresh transition — the session was already suspended —
 			// so we skip OnSuspend notifications and the terminal stream item.
+			// The results are saved before their items are emitted, so a
+			// callback error cannot lose a result the hooks have seen.
 			snap := &suspendedSnapshot{
 				PendingToolCalls:   rs.RemainingPendingCalls,
 				CompletedToolCalls: rs.CompletedToolCalls(),
 				BatchHalted:        batchHalted,
 			}
-			return t.end(ctx, suspendedExit(snap, true))
+			exit := suspendedExit(snap, true)
+			exit.afterSave = emitSupplied
+			return t.end(ctx, exit)
+		}
+		if err := emitSupplied(ctx); err != nil {
+			// Mirror the not-started execution path below: expose the
+			// items already emitted via *GenerationError so callers can
+			// recover partial work (no LLM calls yet, so usage is zero).
+			return t.end(ctx, failedExit(err))
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
@@ -1164,6 +1310,10 @@ type resumeState struct {
 	// original (now-resumed) turn. Used to enrich partial-resume snapshots.
 	PreviouslyCompleted []*CompletedToolCall
 
+	// Supplied records the results the caller supplied, as supplied, before
+	// any hook changed them, so a resume that sends one again is recognized.
+	Supplied []*CompletedToolCall
+
 	// RemainingPending lists pending IDs the caller did NOT supply this
 	// time. Non-empty means the resume is partial.
 	RemainingPending []string
@@ -1180,8 +1330,35 @@ type resumeState struct {
 	HaltingPending map[string]bool
 }
 
+// CompletedToolCalls returns the calls of the suspended batch with a result:
+// those completed before this resume, then those whose results it supplied.
 func (rs *resumeState) CompletedToolCalls() []*CompletedToolCall {
-	return rs.PreviouslyCompleted
+	return append(slices.Clone(rs.PreviouslyCompleted), rs.Supplied...)
+}
+
+// sameToolResult reports whether two tool results encode the same way,
+// which is how a result is compared once it has been stored.
+func sameToolResult(a, b *ToolResult) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
+}
+
+// copyToolResult returns a copy of a result that shares nothing with it,
+// through its JSON encoding, which is how a session stores it.
+func copyToolResult(r *ToolResult) *ToolResult {
+	if r == nil {
+		return nil
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		return r
+	}
+	var cp ToolResult
+	if err := json.Unmarshal(data, &cp); err != nil {
+		return r
+	}
+	return &cp
 }
 
 // AppendToolResults appends additional tool_result content blocks to the
@@ -1270,15 +1447,33 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		}
 		pendingIDs[i] = pc.ID
 	}
-	// Validate caller-supplied IDs. Any ID not in the pending set — including
-	// IDs that already have a completed tool_result in the persisted turn —
-	// is rejected. The caller must reconcile their view of outstanding work
-	// against the authoritative pending set.
-	for id := range toolResults {
-		if _, ok := pendingByID[id]; !ok {
+	// Validate caller-supplied IDs. A result for a call that is not pending
+	// is skipped when it is the result a previous resume accepted for that
+	// call, so a resume whose outcome was unknown can be sent again as it
+	// was, and rejected otherwise: a different result conflicts, and a call
+	// with no recorded result is unknown.
+	priorCompletedByID := make(map[string]*CompletedToolCall, len(state.CompletedToolCalls))
+	for _, cc := range state.CompletedToolCalls {
+		priorCompletedByID[cc.ID] = cc
+	}
+	var accepted map[string]*ToolResult
+	for id, result := range toolResults {
+		if _, ok := pendingByID[id]; ok {
+			if accepted == nil {
+				accepted = make(map[string]*ToolResult, len(toolResults))
+			}
+			accepted[id] = result
+			continue
+		}
+		prior := priorCompletedByID[id]
+		if prior == nil || prior.Result == nil {
 			return nil, fmt.Errorf("%w: %s", ErrUnknownPendingToolCall, id)
 		}
+		if !sameToolResult(prior.Result, result) {
+			return nil, fmt.Errorf("%w: %w: %s", ErrUnknownPendingToolCall, ErrConflictingToolResult, id)
+		}
 	}
+	toolResults = accepted
 	pendingSet := make(map[string]bool, len(pendingIDs))
 	for _, id := range pendingIDs {
 		pendingSet[id] = true
@@ -1354,6 +1549,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		}
 	}
 	callerSupplied := make(map[string]*ToolCallResult)
+	var supplied []*CompletedToolCall
 	// Iterate sorted IDs so the merged tool_result content blocks land in a
 	// deterministic order rather than nondeterministic map order.
 	for _, id := range slices.Sorted(maps.Keys(toolResults)) {
@@ -1371,6 +1567,12 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 			Input:  input,
 			Result: result,
 		}
+		supplied = append(supplied, &CompletedToolCall{
+			ID:     id,
+			Name:   name,
+			Input:  input,
+			Result: copyToolResult(result),
+		})
 		isError := result != nil && result.IsError
 		var content any
 		if result != nil {
@@ -1416,10 +1618,6 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 	// blocks. Fall back to message-based reconstruction only for IDs not
 	// found in the state — shouldn't happen in practice, but keeps the
 	// code robust against incomplete snapshots.
-	priorCompletedByID := make(map[string]*CompletedToolCall, len(state.CompletedToolCalls))
-	for _, cc := range state.CompletedToolCalls {
-		priorCompletedByID[cc.ID] = cc
-	}
 	var previouslyCompleted []*CompletedToolCall
 	for _, id := range toolUseIDs {
 		if _, ok := existingResults[id]; !ok {
@@ -1485,6 +1683,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		NotStartedToolCalls:       notStarted,
 		CallerSupplied:            callerSupplied,
 		PreviouslyCompleted:       previouslyCompleted,
+		Supplied:                  supplied,
 		RemainingPending:          remaining,
 		RemainingPendingCalls:     remainingCalls,
 		BatchHalted:               state.BatchHalted,
@@ -3395,16 +3594,61 @@ func toPendingToolCall(toolCall *llm.ToolUseContent, sr *SuspendResult) *Pending
 }
 
 // continueNeedsReminder reports whether a continuation of history gets the
-// turn-continue reminder: when the history ends in an incomplete turn, or in
-// an assistant message, which some models would take as a prefill.
+// model-only turn-continue reminder: when the history ends in an incomplete
+// turn's outcome reminder. A history that ends in an assistant message has
+// the reminder recorded instead.
 func continueNeedsReminder(history []*llm.Message) bool {
 	if len(history) == 0 {
 		return false
 	}
-	last := history[len(history)-1]
-	if last.Role == llm.Assistant {
-		return true
-	}
-	_, ok := FindTurnOutcome(last)
+	_, ok := FindTurnOutcome(history[len(history)-1])
 	return ok
+}
+
+// turnContinueReminder is the reminder a continuation adds, saying the user
+// asked to continue.
+func turnContinueReminder() Reminder {
+	return Reminder{
+		Name:    ReminderNameTurnContinue,
+		Tier:    ReminderTierContextual,
+		Content: turnContinueText,
+	}
+}
+
+// newTurnID returns the ID of a new turn.
+func newTurnID() string {
+	return "turn_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+}
+
+// withoutOutcomeReminder returns messages without a trailing message that
+// holds only the turn-incomplete reminder.
+func withoutOutcomeReminder(messages []*llm.Message) []*llm.Message {
+	if n := len(messages); n > 0 && len(messages[n-1].Content) == 1 {
+		if _, ok := FindTurnOutcome(messages[n-1]); ok {
+			return slices.Clone(messages[:n-1])
+		}
+	}
+	return slices.Clone(messages)
+}
+
+// CancelSuspendedTurn closes a suspended turn without calling the model, so
+// the conversation can move on while keeping what the turn did. The pending
+// calls are answered as unknown, since their requests may be out in the
+// world; the calls that completed keep their results; the turn is
+// incomplete with TurnReasonCanceled, and TurnOutcome.Next is
+// TurnNextReconcile when a pending call is not read-only. The closed turn
+// replaces the suspended one in the session, which is no longer suspended,
+// and the OnIncompleteTurn hooks run as for any incomplete turn. It returns
+// Status == ResponseStatusIncomplete with a nil error, since nothing failed,
+// unless the save fails.
+//
+// The suspended turn comes from the session, or from WithResume(state, nil)
+// with the pre-turn history in WithMessages for a stateless caller, who
+// appends Response.Turn.Messages to that history. Other options, such as
+// WithSession and WithEventCallback, apply as for CreateResponse; tool
+// results and WithContinue are refused. It returns ErrNoSuspendedTurn when
+// there is no suspended turn.
+func (a *Agent) CancelSuspendedTurn(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
+	opts = append(slices.Clone(opts), func(o *CreateResponseOptions) { o.cancelSuspended = true })
+	return a.CreateResponse(ctx, opts...)
 }

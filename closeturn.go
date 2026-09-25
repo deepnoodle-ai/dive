@@ -12,8 +12,8 @@ import (
 // incomplete turn. Its Details hold the TurnOutcome (see FindTurnOutcome).
 const ReminderNameTurnIncomplete = "turn-incomplete"
 
-// ReminderNameTurnContinue is the name of the model-only reminder
-// WithContinue adds, saying the user asked to continue.
+// ReminderNameTurnContinue is the name of the reminder WithContinue adds,
+// saying the user asked to continue.
 const ReminderNameTurnContinue = "turn-continue"
 
 // toolCallsNote ends the outcome reminder of a turn that answered calls it
