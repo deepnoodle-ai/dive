@@ -59,6 +59,7 @@ type turnRecord struct {
 	version int
 }
 
+// newTurnRecord returns an empty record with zero usage.
 func newTurnRecord() *turnRecord {
 	return &turnRecord{usage: &llm.Usage{}}
 }
@@ -187,14 +188,17 @@ type turnExit struct {
 	continuesSuspension bool
 }
 
+// completedExit ends the invocation with a completed turn.
 func completedExit() turnExit {
 	return turnExit{kind: turnExitCompleted}
 }
 
+// suspendedExit ends the invocation with a suspended turn.
 func suspendedExit(snap *suspendedSnapshot, continuesSuspension bool) turnExit {
 	return turnExit{kind: turnExitSuspended, suspension: snap, continuesSuspension: continuesSuspension}
 }
 
+// failedExit ends the invocation on err.
 func failedExit(err error) turnExit {
 	return turnExit{kind: turnExitFailed, err: err}
 }

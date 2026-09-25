@@ -137,6 +137,11 @@ type HookContext struct {
 	reminders          *reminderState
 	reminderDeliveries []reminderDelivery
 	toolScoped         bool
+
+	// backgroundTaskStarted, when set on the turn's context, records a
+	// background task as soon as a tool starts it, so the handle survives
+	// a batch that fails afterwards.
+	backgroundTaskStarted func(*BackgroundTaskHandle)
 }
 
 // PreGenerationHook is called before the LLM generation loop begins.

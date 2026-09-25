@@ -560,3 +560,156 @@ func TestStopHookResponseEditsSurvive(t *testing.T) {
 	assert.Len(t, saved, 2)
 	assert.Equal(t, saved[1].Text(), "redacted")
 }
+
+// commitThenFailSession saves a suspended turn and then reports an error, as
+// a store does when it fails after its write landed.
+type commitThenFailSession struct {
+	*session.Session
+	fail bool
+}
+
+func (s *commitThenFailSession) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *SuspensionState) error {
+	if err := s.Session.SaveSuspendedTurn(ctx, messages, usage, state); err != nil {
+		return err
+	}
+	if s.fail {
+		return errors.New("sync failed after write")
+	}
+	return nil
+}
+
+// A partial resume whose save fails after it landed returns no response;
+// the reloaded suspension shows the result was taken, and resubmitting it
+// is refused with ErrUnknownPendingToolCall.
+func TestPartialResumeSaveFailureAfterCommit(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+			),
+			finalTextTurn("done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+	sess := &commitThenFailSession{Session: session.New("commit-then-fail")}
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB},
+		Session:               sess,
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+
+	sess.fail = true
+	supplied := map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}
+	resp, err = agent.CreateResponse(context.Background(), WithToolResults(supplied))
+	assert.Nil(t, resp)
+	var genErr *GenerationError
+	assert.True(t, errors.As(err, &genErr))
+	assert.Nil(t, genErr.Response)
+	assert.ErrorContains(t, err, "save suspended turn")
+
+	// The reloaded suspension holds only the call still pending.
+	sess.fail = false
+	state := sess.LoadSuspension()
+	assert.NotNil(t, state)
+	assert.Len(t, state.PendingToolCalls, 1)
+	assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_b")
+
+	_, err = agent.CreateResponse(context.Background(), WithToolResults(supplied))
+	assert.True(t, errors.Is(err, ErrUnknownPendingToolCall))
+
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_b": NewToolResultText("B done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+}
+
+// A background task started before a later failure in the same batch is
+// still reported on the incomplete response.
+func TestIncompleteResponseKeepsStartedBackgroundTasks(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_bg", "start_job", `{}`),
+				newScriptedToolUse("toolu_x", "blocked", `{}`),
+			),
+		},
+	}
+	release := make(chan struct{})
+	defer close(release)
+	startJob := &funcTool{
+		name: "start_job",
+		call: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewBackgroundResult(ctx, "long job", func(ctx context.Context) (string, error) {
+				<-release
+				return "finished", nil
+			}), nil
+		},
+	}
+	blocked := &funcTool{
+		name: "blocked",
+		call: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewToolResultText("unreachable"), nil
+		},
+	}
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{startJob, blocked},
+		Hooks: Hooks{
+			PreToolUse: []PreToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					if hctx.Tool.Name() == "blocked" {
+						return AbortGeneration("stop here")
+					}
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("go"))
+	assertIncomplete(t, resp, err, TurnReasonHookAbort, TurnNextInput)
+	assert.Len(t, resp.BackgroundTasks, 1)
+	assert.Equal(t, resp.BackgroundTasks[0].ToolUseID, "toolu_bg")
+}
+
+// PreGeneration and PreIteration aborts name their hook.
+func TestEarlyHookAbortsNameTheHook(t *testing.T) {
+	for _, hookType := range []string{"PreGeneration", "PreIteration"} {
+		abort := func(ctx context.Context, hctx *HookContext) error { return AbortGeneration("no") }
+		var hooks Hooks
+		if hookType == "PreGeneration" {
+			hooks.PreGeneration = []PreGenerationHook{abort}
+		} else {
+			hooks.PreIteration = []PreIterationHook{abort}
+		}
+		agent, err := NewAgent(AgentOptions{Model: &scriptedLLM{}, Hooks: hooks})
+		assert.NoError(t, err)
+		resp, err := agent.CreateResponse(context.Background(), WithInput("hi"))
+		assertIncomplete(t, resp, err, TurnReasonHookAbort, TurnNextInput)
+		assert.Equal(t, resp.Turn.Outcome.Hook, hookType)
+	}
+}
+
+// funcTool is a tool that runs call.
+type funcTool struct {
+	name string
+	call func(ctx context.Context, input any) (*ToolResult, error)
+}
+
+func (t *funcTool) Name() string                  { return t.name }
+func (t *funcTool) Description() string           { return "test tool" }
+func (t *funcTool) Schema() *Schema               { return &Schema{Type: Object} }
+func (t *funcTool) Annotations() *ToolAnnotations { return nil }
+func (t *funcTool) Call(ctx context.Context, input any) (*ToolResult, error) {
+	return t.call(ctx, input)
+}

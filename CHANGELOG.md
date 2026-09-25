@@ -43,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **A session resyncs from its store after a failed write.** The cached
   session matches the file after a write that failed late, and a torn or
   unterminated append is healed before the next one.
+- **Background tasks are reported however the turn ends**, including those a
+  resumed call started and those started before a batch failed.
 - **Suspension snapshots are deep copies.** `LoadSuspension` and
   `SaveSuspendedTurn` copy turn messages and completed-call results.
 - **A2A `Cancel` waits for the cancelled run's session write** before removing

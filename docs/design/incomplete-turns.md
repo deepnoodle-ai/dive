@@ -1599,10 +1599,11 @@ would make neither reviewable.
    completed or suspended turn. The existing tests pass unmodified, and new
    tests pinning each exit's return pass on the old code and the new. The
    one visible difference is that `Response.CreatedAt` now precedes the
-   PreGeneration hooks. Found on the way, for step 5: tool calls the resume
-   phase runs do not report their background task handles, so
-   `Response.BackgroundTasks` misses a background task a resumed call
-   started.
+   PreGeneration hooks. Found on the way: tool calls the resume phase runs
+   did not report their background task handles, so
+   `Response.BackgroundTasks` missed a background task a resumed call
+   started; step 4 records each handle in the turn record as its task
+   starts, which fixes that and keeps handles on an error exit.
 4. **The envelope** (sections 1, 6 and 13). Done:
    `ResponseStatusIncomplete`, `Turn`, `TurnOutcome`, `TurnReason`,
    `TurnNext`, `ToolCallRecord`, `PersistenceState`, `Response.Turn`,

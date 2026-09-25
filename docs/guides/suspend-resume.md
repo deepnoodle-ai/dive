@@ -261,6 +261,13 @@ resp, _ := agent.CreateResponse(ctx,
 `OnSuspend` hooks do **not** re-fire on a partial resume — they only
 announce new suspensions, not continuations.
 
+A partial resume that fails returns `(nil, err)`: the turn stays suspended,
+and `err` wraps a `*dive.GenerationError` whose `Response` is nil. When the
+failure was the session write itself, the write may still have landed, so
+reload before resubmitting: `LoadSuspension()` on a `SuspendableSession`
+reports the calls still pending. A resubmitted result the session already
+accepted returns `ErrUnknownPendingToolCall`, which means it went through.
+
 ## Parallel and sequential tool execution
 
 With `AgentOptions.ParallelToolExecution = true`, sibling tools keep

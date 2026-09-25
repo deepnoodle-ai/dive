@@ -61,7 +61,11 @@ var (
 //
 // CreateResponse returns the incomplete Response alongside the error, and
 // Response is the same value; it is nil only when a partial resume fails,
-// since the turn is then still suspended.
+// since the turn is then still suspended. A partial resume can fail in its
+// session write after the write landed, so the caller reloads the
+// suspension (SuspendableSession.LoadSuspension) before resubmitting; a
+// result the session already accepted is refused with
+// ErrUnknownPendingToolCall.
 //
 // The partial turn is intentionally NOT persisted to the session: a turn
 // that ends mid-loop (e.g. with a trailing tool_result and no final
@@ -798,9 +802,15 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 	eventCallback := t.record.collecting(t.emit)
 
+	hctx.backgroundTaskStarted = t.record.addBackgroundTask
+
 	// Run PreGeneration hooks
 	for _, hook := range a.hooks.PreGeneration {
 		if err := hook(ctx, hctx); err != nil {
+			var abortErr *HookAbortError
+			if errors.As(err, &abortErr) {
+				abortErr.HookType = "PreGeneration"
+			}
 			logger.Error("pre-generation hook error", "error", err)
 			return t.end(ctx, failedExit(fmt.Errorf("pre-generation hook error: %w", err)))
 		}
@@ -1682,6 +1692,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		if len(a.hooks.PreIteration) > 0 {
 			for _, hook := range a.hooks.PreIteration {
 				if err := hook(ctx, hctx); err != nil {
+					var abortErr *HookAbortError
+					if errors.As(err, &abortErr) {
+						abortErr.HookType = "PreIteration"
+					}
 					return nil, fmt.Errorf("pre-iteration hook error: %w", err)
 				}
 			}
@@ -1800,12 +1814,8 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 			return nil, err
 		}
 
-		// Collect background task handles from completed outcomes.
-		for _, o := range batch.Outcomes {
-			if o.Result != nil && o.Result.BackgroundHandle != nil {
-				record.addBackgroundTask(o.Result.BackgroundHandle)
-			}
-		}
+		// Background task handles were recorded as their tasks started
+		// (HookContext.backgroundTaskStarted).
 
 		// Build the tool_result message from completed outcomes only. On a
 		// suspended batch, this is the PARTIAL tool_result that gets persisted
@@ -2381,6 +2391,9 @@ func (a *Agent) executeToolCallsParallel(
 				Description: bg.description,
 				Done:        bg.done,
 			}
+			if hctx.backgroundTaskStarted != nil {
+				hctx.backgroundTaskStarted(bgHandle)
+			}
 			result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
 		}
 
@@ -2603,6 +2616,9 @@ func (a *Agent) executeOneToolCall(
 			ToolUseID:   toolCall.ID,
 			Description: bg.description,
 			Done:        bg.done,
+		}
+		if hctx.backgroundTaskStarted != nil {
+			hctx.backgroundTaskStarted(bgHandle)
 		}
 		result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
 	}
