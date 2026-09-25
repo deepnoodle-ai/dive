@@ -319,6 +319,13 @@ if err != nil && resp != nil && resp.Status == dive.ResponseStatusIncomplete {
 Set `AgentOptions.IncompleteTurns.Discard` to keep the old behaviour, where
 a failed resume leaves the session suspended.
 
+With `DurabilityOptions.CheckpointSteps`, a full resume records the turn as
+running, with your results, before it emits their items or runs anything
+else. If the process exits during the resume, the next call finds the turn
+running and closes it with `process_exit`: your results are kept, and
+sending the resume again fails with `ErrNoSuspendedTurn`. Continue the turn
+with `WithContinue`.
+
 **A cancellation does not undo a suspension.** A tool that suspends has
 usually dispatched its request already, so when the run is cancelled while
 the agent is suspending, the suspension is still persisted and
@@ -517,9 +524,11 @@ dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error 
 in-process per-ID lock, so two goroutines or two agents hitting the same
 session run one after the other rather than interleaving. This is an
 in-process guarantee only. For multi-process deployments that share a
-session, use a backend with its own serialization — `FileStore` is
-documented as single-writer-per-session and does not take an OS-level
-lock.
+session, claim it: `DurabilityOptions.Claim` holds the session
+(`dive.SessionClaimer`) for each call, and a call on a session another
+process holds fails with `dive.ErrSessionClaimed`. `session.Session`
+implements it; a `FileStore` keeps the claim next to the session's file.
+Every process must claim the session for this to hold.
 
 Stateless callers (no session) skip the lock entirely; coordination is
 their responsibility.

@@ -45,6 +45,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`session.Session.Turns`, `RemoveLastTurn` and `ForkWithOpenTurn`.**
 - **`IncompleteTurnOptions.RequireReconcile`** refuses new input over a turn
   with unknown calls (`ErrUnreconciledToolCalls`).
+- **`DurabilityOptions.CheckpointSteps`** records a running turn at each model
+  response and tool call; a turn left running is closed with
+  `TurnReasonProcessExit`. `session.FileStore` appends a `step` line per step.
+- **`dive.SessionClaimer` and `DurabilityOptions.Claim`** let several processes
+  share a session: `session.Session.ClaimSession`, `ErrSessionClaimed`.
 
 ### Changed
 

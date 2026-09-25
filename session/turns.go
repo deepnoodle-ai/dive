@@ -58,7 +58,8 @@ func (s *Session) eventStatusLocked(i int) dive.ResponseStatus {
 }
 
 // openTurnIndexLocked returns the index of the open turn, the last event
-// when it holds a suspended or incomplete turn, or -1. Caller must hold s.mu.
+// when it holds a suspended, incomplete or running turn, or -1. Caller must
+// hold s.mu.
 func (s *Session) openTurnIndexLocked() int {
 	n := len(s.data.Events)
 	if n == 0 || s.data.Events[n-1].Type != eventTypeTurn {
@@ -196,12 +197,17 @@ func (s *Session) Turns(ctx context.Context) ([]*dive.Turn, error) {
 // with ErrSuspendedSession while the session is suspended, and a turn whose
 // ID is already recorded, but not open, is refused as a conflict. The
 // session stores a copy of turn and does not modify it.
+//
+// A FileStore appends a line for a turn added at the end, for each step
+// checkpoint of a running turn (the messages it adds since the last), and
+// for the running turn's finished record; it rewrites the session for any
+// other replacement and for a suspension.
 func (s *Session) CheckpointTurn(ctx context.Context, expectedRevision uint64, turn *dive.Turn) (uint64, error) {
 	if turn == nil || turn.ID == "" {
 		return 0, &rejectedError{"session: a checkpointed turn needs an ID"}
 	}
 	switch turn.Status {
-	case dive.ResponseStatusCompleted, dive.ResponseStatusIncomplete:
+	case dive.ResponseStatusCompleted, dive.ResponseStatusIncomplete, dive.ResponseStatusRunning:
 	case dive.ResponseStatusSuspended:
 		if turn.Suspension == nil {
 			return 0, &rejectedError{"session: a suspended turn needs its suspension state"}
@@ -246,17 +252,40 @@ func (s *Session) CheckpointTurn(ctx context.Context, expectedRevision uint64, t
 			ToolCalls: turn.ToolCalls,
 		}).copy(),
 	}
+	suspended := turn.Status == dive.ResponseStatusSuspended
+	running := turn.Status == dive.ResponseStatusRunning
+
+	// A turn added to a session that is not suspended changes nothing but
+	// the log: append it, a running turn as its first step. A step of a
+	// running turn appends the change, and its finished record the event,
+	// which replaces the steps. Any other write replaces an event the store
+	// holds as an event, or the suspension state, so the store rewrites the
+	// session.
+	switch {
+	case !replace && !suspended:
+		if running {
+			return evt.Revision, s.recordLocked(ctx, len(s.data.Events), evt, func(a eventAppender) error {
+				return a.appendStep(ctx, s.data.ID, &stepRecord{Event: evt, Timestamp: evt.Timestamp})
+			})
+		}
+		return evt.Revision, s.appendLocked(ctx, evt)
+	case replace && !suspended && s.eventStatusLocked(open) == dive.ResponseStatusRunning:
+		prev := s.data.Events[open]
+		evt.ID = prev.ID
+		if !running {
+			return evt.Revision, s.recordLocked(ctx, open, evt, func(a eventAppender) error {
+				return a.appendEvent(ctx, s.data.ID, evt)
+			})
+		}
+		// The messages the step keeps are the stored ones.
+		step := stepChange(prev, evt)
+		evt.Messages = append(prev.Messages[:step.From:step.From], evt.Messages[step.From:]...)
+		return evt.Revision, s.recordLocked(ctx, open, evt, func(a eventAppender) error {
+			return a.appendStep(ctx, s.data.ID, step)
+		})
+	}
 	if replace {
 		evt.ID = s.data.Events[open].ID
-	}
-	suspended := turn.Status == dive.ResponseStatusSuspended
-
-	// A completed or incomplete turn added to a session that is not
-	// suspended changes nothing but the log: append it. Any other write
-	// replaces an event or the suspension state, so the store rewrites the
-	// session.
-	if !replace && !suspended {
-		return evt.Revision, s.appendLocked(ctx, evt)
 	}
 	err := s.withRollback(ctx, func() {
 		if replace {
@@ -319,14 +348,27 @@ func (s *Session) RemoveLastTurn(ctx context.Context) error {
 	})
 }
 
-// closedSuspendedEventLocked returns a copy of the suspended turn's event
-// closed incomplete: each pending call answered as unknown, the other calls
-// of the batch as completed or not started. Caller must hold s.mu.
-func (s *Session) closedSuspendedEventLocked(e *event) *event {
+// closedOpenEventLocked returns a copy of the open turn's event, suspended
+// or running, closed incomplete: each pending or running call answered as
+// unknown, the other calls of the last batch as completed or not started.
+// Caller must hold s.mu.
+func (s *Session) closedOpenEventLocked(e *event) *event {
 	cp := e.copy()
 	pending := map[string]bool{}
-	for _, call := range s.data.PendingToolCalls {
-		pending[call.ID] = true
+	errText := "the suspended turn was not carried into a fork"
+	if s.data.Suspended {
+		for _, call := range s.data.PendingToolCalls {
+			pending[call.ID] = true
+		}
+	} else {
+		errText = "the running turn was not carried into a fork"
+		if e.Turn != nil {
+			for _, record := range e.Turn.ToolCalls {
+				if record.State == dive.ToolCallStateRunning {
+					pending[record.ID] = true
+				}
+			}
+		}
 	}
 	answered := map[string]bool{}
 	var assistant *llm.Message
@@ -359,7 +401,7 @@ func (s *Session) closedSuspendedEventLocked(e *event) *event {
 	}
 	outcome := &dive.TurnOutcome{
 		Reason:    dive.TurnReasonCanceled,
-		Error:     "the suspended turn was not carried into a fork",
+		Error:     errText,
 		ToolCalls: records,
 		Next:      dive.TurnNextReconcile,
 	}

@@ -347,6 +347,10 @@ type AgentOptions struct {
 	// before it completes.
 	IncompleteTurns IncompleteTurnOptions
 
+	// Durability configures per-step checkpoints and execution ownership on
+	// a session that stores turn records.
+	Durability DurabilityOptions
+
 	// ParallelToolExecution enables concurrent execution of tool calls when
 	// the LLM returns multiple tool calls in a single message. When false
 	// (the default), tool calls are executed sequentially in order.
@@ -398,6 +402,51 @@ type IncompleteTurnOptions struct {
 // defaultSaveTimeout is IncompleteTurnOptions.SaveTimeout when unset.
 const defaultSaveTimeout = 30 * time.Second
 
+// DurabilityOptions configures what the agent does so that a turn survives
+// the process running it, and so that several processes can share a
+// session. Both are off by default: the agent then records a turn once, when
+// the invocation ends.
+type DurabilityOptions struct {
+	// CheckpointSteps records the turn in the session at each step of an
+	// invocation, with ResponseStatusRunning: before the first model call,
+	// after each model response whose tool calls will run, as each tool
+	// call starts (ToolCallStateRunning) and as each result arrives; the
+	// invocation's end records the turn as before. A step checkpoint that
+	// fails stops the turn before the step, so no tool runs unrecorded.
+	//
+	// An invocation that finds its session's last turn running closes it
+	// first, as an incomplete turn with TurnReasonProcessExit: its running
+	// calls are unknown, and Next is TurnNextReconcile unless every one of
+	// them is read-only. A tool that ran between its running checkpoint and
+	// its result's is the window that remains; TurnID(ctx) and
+	// ToolCallID(ctx) give it a stable key for idempotent requests.
+	//
+	// It needs a session that implements TurnStore; session.FileStore
+	// appends a line per step.
+	CheckpointSteps bool
+
+	// Claim claims the session for Owner before an invocation loads it
+	// (SessionClaimer), renews the claim while the invocation runs, and
+	// releases it at the end. An invocation on a session another owner
+	// holds fails with ErrSessionClaimed before doing anything, and one
+	// whose claim is lost while it runs is cancelled. Every process that
+	// runs an agent on the session must claim it. It needs a session that
+	// implements SessionClaimer.
+	Claim bool
+
+	// Owner names this agent in its claims. It must differ between
+	// processes. Default: a random name for each Agent.
+	Owner string
+
+	// ClaimTTL is how long a claim lasts unless it is renewed; the agent
+	// renews it every third of that, so a claim a process left when it
+	// exited expires within ClaimTTL. Default 30 seconds.
+	ClaimTTL time.Duration
+}
+
+// defaultClaimTTL is DurabilityOptions.ClaimTTL when unset.
+const defaultClaimTTL = 30 * time.Second
+
 // Agent represents an intelligent AI entity that can autonomously use tools to
 // process information while responding to chat messages.
 type Agent struct {
@@ -415,6 +464,7 @@ type Agent struct {
 	toolIterationLimit    int
 	parallelToolExecution bool
 	incompleteTurns       IncompleteTurnOptions
+	durability            DurabilityOptions
 	modelSettings         *ModelSettings
 	systemPrompt          string
 	session               Session
@@ -445,6 +495,12 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	}
 	if opts.IncompleteTurns.SaveTimeout <= 0 {
 		opts.IncompleteTurns.SaveTimeout = defaultSaveTimeout
+	}
+	if opts.Durability.ClaimTTL <= 0 {
+		opts.Durability.ClaimTTL = defaultClaimTTL
+	}
+	if opts.Durability.Owner == "" {
+		opts.Durability.Owner = "owner_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
 	// Merge extensions into opts before building the agent. Clone the
 	// caller's slices first: appending directly may write into the caller's
@@ -490,6 +546,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		toolIterationLimit:    opts.ToolIterationLimit,
 		parallelToolExecution: opts.ParallelToolExecution,
 		incompleteTurns:       opts.IncompleteTurns,
+		durability:            opts.Durability,
 		llmHooks:              opts.LLMHooks,
 		logger:                opts.Logger,
 		systemPrompt:          opts.SystemPrompt,
@@ -665,6 +722,20 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 		ctx = lockCtx
 		defer release()
+
+		// Durability: a session that cannot do what the options ask fails
+		// the call, and a claim is taken before the session is loaded.
+		if err := a.checkDurability(sess); err != nil {
+			return nil, err
+		}
+		if a.durability.Claim {
+			claimCtx, releaseClaim, err := a.claimSession(ctx, sess.(SessionClaimer))
+			if err != nil {
+				return nil, err
+			}
+			ctx = claimCtx
+			defer releaseClaim()
+		}
 	}
 
 	// Load session history. A TurnStore also reports its open turn and
@@ -678,6 +749,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		snap, err = store.Load(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("session load error: %w", err)
+		}
+		// A turn left running by an invocation that did not finish is
+		// closed before anything else happens.
+		if snap.OpenTurn != nil && snap.OpenTurn.Status == ResponseStatusRunning {
+			if snap, err = a.recoverRunningTurn(ctx, store, snap); err != nil {
+				return nil, err
+			}
 		}
 		sessionMsgs = slices.Clone(snap.History)
 		if snap.OpenTurn != nil {
@@ -1043,6 +1121,9 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		handle.TurnID = turnID
 		t.record.addBackgroundTask(handle)
 	}
+	if a.durability.CheckpointSteps && store != nil {
+		hctx.steps = t
+	}
 
 	// Closing a suspended turn calls neither the hooks that prepare a
 	// generation nor the model.
@@ -1114,6 +1195,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			return nil
 		}
 		batchHalted := resumedBatchHalted(rs, resumeToolsByName)
+		// With step checkpoints, a full resume's supplied results are
+		// recorded before their items are emitted, as a partial resume's are.
+		if len(rs.RemainingPending) == 0 {
+			if err := hctx.stepCheckpoint(ctx); err != nil {
+				return t.end(ctx, failedExit(err))
+			}
+		}
 		if len(rs.RemainingPending) > 0 {
 			// Partial resume: update session and return a new suspended response.
 			// This is not a fresh transition — the session was already suspended —
@@ -1137,7 +1225,9 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
+			hctx.stepBatchStart(true)
 			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, eventCallback, batchHalted)
+			hctx.stepBatchEnd()
 			if err != nil {
 				// Answer the calls of the stopped batch in the merged
 				// tool_result message. The batch in flight is the whole
@@ -1215,6 +1305,14 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		// options.Messages backing array is not mutated.
 		if injected := messages[preInjectLen:]; len(injected) > 0 {
 			t.inputMessages = append(slices.Clone(t.inputMessages), injected...)
+		}
+	}
+
+	// With step checkpoints, the turn is recorded running before the first
+	// model call: a resume was recorded with its results above.
+	if rs == nil {
+		if err := hctx.stepCheckpoint(ctx); err != nil {
+			return t.end(ctx, failedExit(err))
 		}
 	}
 
@@ -2229,8 +2327,14 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 			break
 		}
 
-		// Execute all requested tool calls
+		// Execute all requested tool calls. With step checkpoints, the
+		// response is recorded before any of them starts.
+		if err := hctx.stepCheckpoint(ctx); err != nil {
+			return nil, err
+		}
+		hctx.stepBatchStart(false)
 		batch, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, callback, false)
+		hctx.stepBatchEnd()
 		if err != nil {
 			// Every call of the stopped batch is answered by what is known
 			// about it, so the output stays a valid history.
@@ -2853,6 +2957,18 @@ func (a *Agent) executeToolCallsParallel(
 		preps[i] = prep
 	}
 
+	// With step checkpoints, the calls about to start are recorded as
+	// running first. A failure starts none of them.
+	var starting []*llm.ToolUseContent
+	for i, prep := range preps {
+		if !prep.denied {
+			starting = append(starting, toolCalls[i])
+		}
+	}
+	if err := hctx.stepCallsStarting(ctx, starting...); err != nil {
+		return batch, err
+	}
+
 	// Phase 2: Tool execution (parallel) with streamed results
 	ch := make(chan parallelToolResult, len(toolCalls))
 	remaining := 0
@@ -3039,6 +3155,9 @@ func (a *Agent) executeToolCallsParallel(
 		result.reminderDeliveries = slices.Clone(postHctx.reminderDeliveries)
 
 		outcome.Result = result
+		if err := hctx.stepCallFinished(ctx, toolCalls[i], result); err != nil {
+			return stop(err)
+		}
 		delivered, err := emit(ctx, &ResponseItem{
 			Type:           ResponseItemTypeToolCallResult,
 			ToolCallResult: result,
@@ -3157,6 +3276,9 @@ func (a *Agent) executeOneToolCall(
 		input := toolCall.Input
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
+		}
+		if err := hctx.stepCallsStarting(ctx, toolCall); err != nil {
+			return err
 		}
 		toolCtx, toolSpan := a.tracer.StartToolCall(ctx, ToolCallInfo{
 			Agent:   a,
@@ -3279,8 +3401,11 @@ func (a *Agent) executeOneToolCall(
 	}
 	result.reminderDeliveries = slices.Clone(postHctx.reminderDeliveries)
 
-	// Emit result event
+	// Record the result, then emit its event.
 	outcome.Result = result
+	if err := hctx.stepCallFinished(ctx, toolCall, result); err != nil {
+		return err
+	}
 	outcome.reported = true
 	return callback(ctx, &ResponseItem{
 		Type:           ResponseItemTypeToolCallResult,

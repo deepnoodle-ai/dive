@@ -40,11 +40,22 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 // either the previous or the new complete file).
 //
 // Concurrent access from multiple processes to the same session is NOT
-// supported and may cause silent state loss: two processes can both read,
-// both rewrite the JSONL, and the later rename wins. There is no OS-level
-// file lock. For multi-instance deployments where the same session might
-// be touched concurrently, implement a database-backed Session backend
-// instead of using FileStore.
+// supported unless every process claims the session before it writes
+// (Session.ClaimSession, or dive.DurabilityOptions.Claim on the agent): two
+// processes can both read, both rewrite the JSONL, and the later rename
+// wins. A claim is kept in {dir}/{session_id}.claim, changed under an
+// exclusively created lock file, and a session that claims it reads back
+// the writes other processes made. Without claims, implement a
+// database-backed Session backend for multi-instance deployments instead.
+//
+// # Step checkpoints
+//
+// A running turn's step checkpoints (dive.DurabilityOptions.CheckpointSteps)
+// are appended as "step" lines: the turn's first step holds its whole
+// event, and each later one the messages it changed. The finished turn is
+// then appended as an event line with the same event ID, which replaces the
+// steps when the file is read. Versions before step checkpoints skip step
+// lines, so they see each finished turn once and a running turn not at all.
 //
 // Within a single process, a FileStore is safe for concurrent use across
 // distinct sessions and serializes writes to the same session via an
@@ -308,6 +319,9 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if claimPath, err := s.claimPath(id); err == nil {
+		_ = os.Remove(claimPath)
+	}
 	// Evict the cached instance so a subsequent Open creates fresh state
 	// instead of resurrecting the deleted session. Any handle still held
 	// by a caller keeps working in memory but is orphaned from the store.
@@ -317,6 +331,11 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 
 // appendEvent implements eventAppender for FileStore.
 func (s *FileStore) appendEvent(ctx context.Context, sessionID string, evt *event) error {
+	return s.appendLine(sessionID, "event", evt)
+}
+
+// appendLine appends one line of the given type holding v.
+func (s *FileStore) appendLine(sessionID, lineType string, v any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -330,11 +349,11 @@ func (s *FileStore) appendEvent(ctx context.Context, sessionID string, evt *even
 	}
 	defer f.Close()
 
-	eventData, err := json.Marshal(evt)
+	eventData, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	line := jsonlLine{LineType: "event", Data: eventData}
+	line := jsonlLine{LineType: lineType, Data: eventData}
 	encoded, err := json.Marshal(line)
 	if err != nil {
 		return err
@@ -349,6 +368,12 @@ func (s *FileStore) appendEvent(ctx context.Context, sessionID string, evt *even
 		}
 	}
 	return nil
+}
+
+// appendStep implements eventAppender for FileStore: it appends a step line,
+// which versions before step checkpoints skip.
+func (s *FileStore) appendStep(ctx context.Context, sessionID string, step *stepRecord) error {
+	return s.appendLine(sessionID, "step", step)
 }
 
 // putSession implements eventAppender for FileStore. Used by Compact.
@@ -405,7 +430,20 @@ func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err er
 
 	var header sessionHeader
 	var events []*event
+	index := map[string]int{}
 	first := true
+
+	// An event or step line whose event is already in the log replaces it:
+	// a step checkpoint appends the running turn's steps, then its finished
+	// event, under one event ID.
+	put := func(evt *event) {
+		if i, ok := index[evt.ID]; ok {
+			events[i] = evt
+			return
+		}
+		index[evt.ID] = len(events)
+		events = append(events, evt)
+	}
 
 	parseLine := func(b []byte) error {
 		var line jsonlLine
@@ -422,7 +460,25 @@ func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err er
 			if err := json.Unmarshal(line.Data, &evt); err != nil {
 				return err
 			}
-			events = append(events, &evt)
+			put(&evt)
+		case "step":
+			var step stepRecord
+			if err := json.Unmarshal(line.Data, &step); err != nil {
+				return err
+			}
+			if step.Event != nil {
+				put(step.Event)
+				break
+			}
+			i, ok := index[step.EventID]
+			if !ok {
+				return fmt.Errorf("session file %s: step for unknown event %q", p, step.EventID)
+			}
+			evt, err := step.apply(events[i])
+			if err != nil {
+				return fmt.Errorf("session file %s: %w", p, err)
+			}
+			events[i] = evt
 		default:
 			if first {
 				// Deliberately NOT ErrNotFound: Open treats ErrNotFound as
@@ -569,12 +625,18 @@ func (s *FileStore) writeSession(data *sessionData) error {
 	}
 
 	for _, evt := range data.Events {
-		eventData, err := json.Marshal(evt)
+		// A running turn is written as the first step of its checkpoints,
+		// which readers that do not know step records skip.
+		lineType, v := "event", any(evt)
+		if evt.Turn != nil && evt.Turn.Status == dive.ResponseStatusRunning {
+			lineType, v = "step", &stepRecord{Event: evt, Timestamp: evt.Timestamp}
+		}
+		eventData, err := json.Marshal(v)
 		if err != nil {
 			tmp.Close()
 			return err
 		}
-		line := jsonlLine{LineType: "event", Data: eventData}
+		line := jsonlLine{LineType: lineType, Data: eventData}
 		encoded, err := json.Marshal(line)
 		if err != nil {
 			tmp.Close()

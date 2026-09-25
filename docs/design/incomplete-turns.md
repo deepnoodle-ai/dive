@@ -1,7 +1,7 @@
 # Incomplete Turns
 
 _Last updated: 2026-09-25_
-_Status: accepted; v1.34 and Phase 2a implemented (see "Order of work"), Phase 2b next. Answers the Noodle team's request "Dive:
+_Status: accepted; v1.34, Phase 2a and Phase 2b implemented (see "Order of work"). Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
 revision, after six reviews: the pull-request review (a running call must
 not be recorded as "not run"; the partial-resume rule; the error contract;
@@ -1776,6 +1776,60 @@ Phase 2a and 2b below are the seventh and eighth stages.
    - A wrapper that embeds `*session.Session` and overrides the v1.34 writes
      now also has `CheckpointTurn`, which the agent calls instead; the
      changelog says so.
+8. **Per-step durability and execution ownership** (Phase 2b). Done, in one
+   pull request: `DurabilityOptions` (`durability.go`) with
+   `CheckpointSteps`, `Claim`, `Owner` and `ClaimTTL`;
+   `ResponseStatusRunning`, `ToolCallStateRunning` and
+   `TurnReasonProcessExit`; `CheckpointTurn` accepting a running turn, which
+   `FileStore` appends as step lines; closing a turn found running;
+   `SessionClaimer` and `ErrSessionClaimed`, implemented by
+   `session.Session` (`session/claims.go`). Decided while building it:
+   - Both capabilities are options on the agent, off by default, and a
+     session that cannot honour one fails the call; a call without a session
+     ignores them. A step checkpoint that fails stops the turn before the
+     step, so no tool starts unrecorded, and the end of the invocation
+     records the turn as before.
+   - The checkpoints: the turn before the first model call, after the
+     PreGeneration hooks and the background-results message; a full
+     resume's supplied results before their items are emitted, as 2a does
+     for a partial resume; a response before its calls start, only when
+     they will run, since a final answer is recorded by the end; the calls a
+     parallel batch starts, in one checkpoint; each call a sequential batch
+     starts, after its PreToolUse hooks; and each result after its
+     PostToolUse hooks, before its item. A denied, unknown or halted call
+     never runs, so its result waits for the next checkpoint, as a
+     Stop-hook reminder does. The results of the batch in flight are
+     recorded in a tool_result message of their own, or in the resumed
+     turn's merged one.
+   - A turn found running is closed as soon as the session is loaded,
+     whatever the options of the agent that finds it, and before a resume
+     request's checks, so a resume the process did not finish fails with
+     `ErrNoSuspendedTurn` and is continued instead. The running calls are
+     unknown; `Next` is `reconcile` unless each of them is read-only, else
+     `continue`. No `OnIncompleteTurn` hook runs for it, since the
+     invocation that owned the turn is gone. `Fork` with an open running
+     turn closes it as it closes a suspended one.
+   - `FileStore` writes a turn's first step as a `step` line holding the
+     whole event, and each later step as the messages it changed (compared
+     by their encoding) with the new state; the finished record is an
+     `event` line with the same event ID, which replaces the steps on read.
+     A rewrite writes a running turn as a `step` line and a finished one as
+     an `event` line. A step over a suspended or incomplete open turn (a
+     resume, a continuation) rewrites the file once, since the file holds
+     that turn as an event. So a version before step checkpoints, which
+     skips unknown line types, sees each finished turn once and no running
+     one; the steps stay in the file until the next rewrite.
+   - A claim is a lease renewed every third of its time to live. A renewal
+     that fails cancels the invocation with a cause that wraps
+     `ErrSessionClaimed`, and a failed turn reports a context's cause with
+     its cancellation. `FileStore` keeps the claim in `{id}.claim`,
+     replaced under a lock file created exclusively (a lock older than ten
+     seconds is taken as left by an exited process), and a session that
+     claims anew reads its file back. A write through a session whose claim
+     the file no longer names is refused with `ErrSessionClaimed`; that
+     check and the append are not one atomic operation, which a database
+     store would make a conditional write. A session in memory or in a
+     `MemoryStore` keeps its claim itself. Every process must claim.
 
 ## Phase 2: recoverable turns, then per-step durability
 

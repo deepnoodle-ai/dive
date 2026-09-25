@@ -54,19 +54,21 @@ final message; call `AnswerText` directly on any model-written message (see
 
 ## AgentOptions
 
-| Field                   | Type             | Description                                      |
-| ----------------------- | ---------------- | ------------------------------------------------ |
-| `Name`                  | `string`         | Agent identifier (for logging)                   |
-| `SystemPrompt`          | `string`         | System prompt sent to the LLM                    |
-| `Model`                 | `llm.LLM`        | LLM provider (required)                          |
-| `Tools`                 | `[]Tool`         | Static tools available to the agent              |
-| `Toolsets`              | `[]Toolset`      | Dynamic tool providers resolved per LLM request  |
-| `Hooks`                 | `Hooks`          | Hook functions grouped in a struct (see below)   |
-| `Session`               | `Session`        | Persistent conversation state (see below)        |
-| `ModelSettings`         | `*ModelSettings` | Temperature, max tokens, reasoning, caching      |
-| `ResponseTimeout`       | `time.Duration`  | Max time for a response (default: 30 min)        |
-| `ToolIterationLimit`    | `int`            | Max tool call iterations (default: 100)          |
-| `ParallelToolExecution` | `bool`           | Execute tool calls concurrently (default: false) |
+| Field                   | Type                    | Description                                      |
+| ----------------------- | ----------------------- | ------------------------------------------------ |
+| `Name`                  | `string`                | Agent identifier (for logging)                   |
+| `SystemPrompt`          | `string`                | System prompt sent to the LLM                    |
+| `Model`                 | `llm.LLM`               | LLM provider (required)                          |
+| `Tools`                 | `[]Tool`                | Static tools available to the agent              |
+| `Toolsets`              | `[]Toolset`             | Dynamic tool providers resolved per LLM request  |
+| `Hooks`                 | `Hooks`                 | Hook functions grouped in a struct (see below)   |
+| `Session`               | `Session`               | Persistent conversation state (see below)        |
+| `ModelSettings`         | `*ModelSettings`        | Temperature, max tokens, reasoning, caching      |
+| `ResponseTimeout`       | `time.Duration`         | Max time for a response (default: 30 min)        |
+| `ToolIterationLimit`    | `int`                   | Max tool call iterations (default: 100)          |
+| `ParallelToolExecution` | `bool`                  | Execute tool calls concurrently (default: false) |
+| `IncompleteTurns`       | `IncompleteTurnOptions` | Turns that stop short (see below)                |
+| `Durability`            | `DurabilityOptions`     | Step checkpoints and session claims (see below)  |
 
 ### Hooks Struct
 
@@ -531,7 +533,7 @@ and advances a revision on every write. The agent loads from it and
 checkpoints the turn at the end of every call.
 
 ```go
-snap, _ := sess.Load(ctx)      // History, OpenTurn (suspended or incomplete), Revision
+snap, _ := sess.Load(ctx)      // History, OpenTurn (suspended, incomplete or running), Revision
 turns, _ := sess.Turns(ctx)    // every turn's record; superseded incomplete turns marked
 err := sess.RemoveLastTurn(ctx) // delete the last turn, whatever its state
 ```
@@ -543,6 +545,52 @@ wrapper that embeds `*session.Session` to intercept `SaveTurn` or
 `SaveSuspendedTurn` must intercept `CheckpointTurn` too, which the agent
 calls instead.
 
+### Durable turns
+
+By default a turn is recorded once, when the call ends, so a process that
+exits mid-turn loses it. `DurabilityOptions.CheckpointSteps` records the turn
+as it runs, with status `running`: before the first model call, after each
+model response whose tool calls will run, as each call starts
+(`ToolCallStateRunning`) and as each result arrives. A step checkpoint that
+fails stops the turn before that step, so no tool runs unrecorded.
+`FileStore` appends one line per step.
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:      model,
+    Session:    sess, // a dive.TurnStore, such as a session.Session
+    Durability: dive.DurabilityOptions{CheckpointSteps: true},
+})
+```
+
+The next call on a session whose last turn is `running` closes that turn
+first: it becomes incomplete with `TurnReasonProcessExit`, its running calls
+`unknown`, and `Next` is `reconcile` unless every one of them is read-only.
+Continue it with `WithContinue`, or check the unknown calls first. A tool
+that ran between its `running` checkpoint and its result's is the window
+that remains: `dive.TurnID(ctx)` and `dive.ToolCallID(ctx)` give it a stable
+key for services that accept idempotency keys.
+
+Several processes can share one session when each claims it.
+`DurabilityOptions.Claim` claims the session (`dive.SessionClaimer`) before a
+call loads it, renews the claim every third of `ClaimTTL` while the call
+runs, and releases it at the end. A call on a session another owner holds
+fails with `dive.ErrSessionClaimed` before doing anything; a call whose claim
+cannot be renewed is cancelled, and its error wraps `ErrSessionClaimed`. A
+`FileStore` keeps the claim in a file next to the session's, so processes
+sharing its directory see it, and a newly claimed session reads back what
+other processes wrote. A claim left by a process that exited expires after
+`ClaimTTL`, so another process can then take the session and recover its
+running turn.
+
+```go
+Durability: dive.DurabilityOptions{
+    CheckpointSteps: true,
+    Claim:           true,
+    ClaimTTL:        30 * time.Second, // the default
+},
+```
+
 ### Fork and compact
 
 ```go
@@ -550,7 +598,7 @@ calls instead.
 forked := sess.Fork("new-branch")
 store.Put(ctx, forked)
 
-// Include an open turn: an incomplete one as it is, a suspended one closed
+// Include an open turn: an incomplete one as it is, a suspended or running one closed
 forked = sess.Fork("with-open-turn", session.ForkWithOpenTurn())
 
 // Compact history with a summarizer

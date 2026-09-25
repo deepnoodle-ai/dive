@@ -149,6 +149,10 @@ type HookContext struct {
 	// background task as soon as a tool starts it, so the handle survives
 	// a batch that fails afterwards.
 	backgroundTaskStarted func(*BackgroundTaskHandle)
+
+	// steps, when set on the turn's context, checkpoints the tool calls of
+	// the batch in flight (DurabilityOptions.CheckpointSteps).
+	steps *turn
 }
 
 // PreGenerationHook is called before the LLM generation loop begins.

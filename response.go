@@ -82,6 +82,14 @@ const (
 	// error is nil. The turn is closed and saved like any other: see
 	// IncompleteTurnOptions and WithContinue.
 	ResponseStatusIncomplete ResponseStatus = "incomplete"
+
+	// ResponseStatusRunning is the status of a turn record an invocation is
+	// still advancing, as a step checkpoint stores it
+	// (DurabilityOptions.CheckpointSteps). CreateResponse never returns it. A
+	// running turn found when a session loads was left by an invocation
+	// that did not finish, and the agent closes it with
+	// TurnReasonProcessExit.
+	ResponseStatusRunning ResponseStatus = "running"
 )
 
 // PendingToolCall describes a tool call awaiting an external result.
