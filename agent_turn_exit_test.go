@@ -192,3 +192,43 @@ func TestSuspendedItemCallbackError(t *testing.T) {
 	assert.Equal(t, err, errRejected)
 	assert.True(t, sessIsSuspended(sess))
 }
+
+// A final Stop hook's changes to the response reach the PostGeneration
+// hooks, the saved turn and the return.
+func TestStopHookResponseEditsSurvive(t *testing.T) {
+	mock := &scriptedLLM{script: []scriptedTurn{finalTextTurn("secret answer")}}
+	sess := session.New("stop-hook-edits")
+	var postGenText string
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Session: sess,
+		Hooks: Hooks{
+			Stop: []StopHook{
+				func(ctx context.Context, hctx *HookContext) (*StopDecision, error) {
+					hctx.Response.StopReason = "edited"
+					hctx.Response.OutputMessages = []*llm.Message{llm.NewAssistantTextMessage("redacted")}
+					return nil, nil
+				},
+			},
+			PostGeneration: []PostGenerationHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					postGenText = hctx.Response.OutputMessages[0].Text()
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("hi"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.StopReason, "edited")
+	assert.Len(t, resp.OutputMessages, 1)
+	assert.Equal(t, resp.OutputMessages[0].Text(), "redacted")
+	assert.Equal(t, postGenText, "redacted")
+
+	saved, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, saved, 2)
+	assert.Equal(t, saved[1].Text(), "redacted")
+}

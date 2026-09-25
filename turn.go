@@ -190,7 +190,8 @@ func (t *turn) syncResponse(finished bool) {
 
 // end finishes the invocation: it builds the return for a failed exit, and
 // runs the terminal hooks, saves the turn and builds the response for a
-// completed or suspended one.
+// completed or suspended one. A completed exit follows the Stop hooks, which
+// may have edited the response, so it is not synced from the record again.
 func (t *turn) end(ctx context.Context, exit turnExit) (*Response, error) {
 	switch exit.kind {
 	case turnExitFailed:
@@ -211,7 +212,8 @@ func (t *turn) end(ctx context.Context, exit turnExit) (*Response, error) {
 		t.response.BackgroundTasks = t.record.backgroundTasks
 		return t.finishSuspended(ctx, exit.suspension, exit.continuesSuspension)
 	default:
-		t.syncResponse(false)
+		// The response was synced when the last generate call returned, and
+		// the Stop hooks since then may have edited it: keep their edits.
 		return t.finishCompleted(ctx)
 	}
 }
@@ -221,8 +223,8 @@ func (t *turn) finishCompleted(ctx context.Context) (*Response, error) {
 	a, logger, hctx, response := t.agent, t.logger, t.hctx, t.response
 
 	hctx.Response = response
-	hctx.OutputMessages = response.OutputMessages
-	hctx.Usage = response.Usage
+	hctx.OutputMessages = t.record.output
+	hctx.Usage = t.record.usage
 	for _, hook := range a.hooks.PostGeneration {
 		if err := hook(ctx, hctx); err != nil {
 			// Check if this is a fatal abort error
