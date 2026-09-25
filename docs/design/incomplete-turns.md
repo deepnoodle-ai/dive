@@ -1828,7 +1828,10 @@ Phase 2a and 2b below are the seventh and eighth stages.
      replaced under an operating-system lock on `{id}.claim.lock` (`flock`,
      `LockFileEx` on Windows), which the system releases when its holder
      exits, so no stale lock is ever taken over; a platform without either
-     refuses claims. A session that claims anew reads its file back. A write through a session whose claim
+     refuses claims. The lock file is never removed, since a process could
+     then lock a new file at the same path while another holds the old one:
+     `Delete` removes the session and its claim, whoever holds it, under
+     the lock. A session that claims anew reads its file back. A write through a session whose claim
      the file no longer names is refused with `ErrSessionClaimed`; that
      check and the append are not one atomic operation, which a database
      store would make a conditional write. A session in memory or in a

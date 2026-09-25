@@ -149,6 +149,10 @@ func (s *FileStore) claimPath(id string) (string, error) {
 	return strings.TrimSuffix(p, ".jsonl") + ".claim", nil
 }
 
+// errNoFileLock is returned by a FileStore claim on a platform without a
+// file lock the store can use.
+var errNoFileLock = errors.New("session: FileStore claims are not supported on this platform")
+
 // lockClaim takes the lock that serializes changes to a claim file across
 // processes: an exclusive operating-system lock (flock on Unix, LockFileEx on
 // Windows) on {id}.claim.lock, which the system releases when the process

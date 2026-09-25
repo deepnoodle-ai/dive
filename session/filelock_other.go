@@ -2,14 +2,7 @@
 
 package session
 
-import (
-	"errors"
-	"os"
-)
-
-// errNoFileLock is returned by a FileStore claim on a platform without a
-// file lock the store can use.
-var errNoFileLock = errors.New("session: FileStore claims are not supported on this platform")
+import "os"
 
 func tryLockFile(f *os.File) (bool, error) { return false, errNoFileLock }
 

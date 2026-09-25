@@ -305,10 +305,26 @@ func (s *FileStore) List(ctx context.Context, opts *ListOptions) (*ListResult, e
 	return &ListResult{Sessions: infos}, nil
 }
 
+// Delete removes the session and its claim, whoever holds it. The claim is
+// removed under the claim lock, so no claim is changed meanwhile; the lock
+// file itself stays, since removing a file another process has locked would
+// let a third lock a new file at the same path.
 func (s *FileStore) Delete(ctx context.Context, id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
+	claimPath, err := s.claimPath(id)
+	if err != nil {
+		return err
+	}
+	unlock, err := lockClaim(ctx, claimPath)
+	switch {
+	case errors.Is(err, errNoFileLock):
+		unlock = func() {}
+	case err != nil:
+		return err
+	}
+	defer unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.path(id)
@@ -319,9 +335,8 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if claimPath, err := s.claimPath(id); err == nil {
-		_ = os.Remove(claimPath)
-		_ = os.Remove(claimPath + ".lock")
+	if err := os.Remove(claimPath); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	// Evict the cached instance so a subsequent Open creates fresh state
 	// instead of resurrecting the deleted session. Any handle still held
