@@ -982,7 +982,9 @@ func TestPreToolUseHookIntegration(t *testing.T) {
 
 		resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
 		assert.Error(t, err)
-		assert.Nil(t, resp)
+		assert.Equal(t, resp.Status, ResponseStatusIncomplete)
+		assert.Equal(t, resp.Turn.Outcome.Reason, TurnReasonHookAbort)
+		assert.Equal(t, resp.Turn.Outcome.Hook, "PreToolUse")
 
 		var abortErr *HookAbortError
 		assert.ErrorAs(t, err, &abortErr)

@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `llm.ClassifyStopReason` maps any provider's value to an `llm.StopKind`.
 - **`llm.ResponseAccumulator.UnfinishedContent`** returns the blocks a stream
   never finished.
+- **`ResponseStatusIncomplete` and `Response.Turn`.** An error after the turn
+  begins returns the incomplete response too; `Turn.Outcome` says why.
+- **`ResponseItemTypeTurnEnded`**, the last item of every call that began.
 
 ### Changed
 
@@ -23,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   the rest, lowercased, where all but `stop` and `max_tokens` were `other`.
 - **`Response.CreatedAt` is set before PreGeneration hooks run**, so the
   response's time span covers them.
+- **Errors after the turn begins return `(resp, err)`**, and `err` wraps
+  `*GenerationError`; a failed partial resume still returns no response.
+- **A failed session save returns the response** with the error and
+  `Turn.Persistence == unknown`, where it returned `(nil, err)`.
+- **`ResponseItemTypeSuspended` is deprecated**, and a callback error on it is
+  logged instead of returned.
 
 ### Fixed
 

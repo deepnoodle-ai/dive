@@ -165,7 +165,6 @@ func TestGenerationErrorExposesPartialWork(t *testing.T) {
 	assert.NoError(t, err)
 
 	resp, err := agent.CreateResponse(context.Background(), WithInput("do work"))
-	assert.Nil(t, resp)
 	assert.Error(t, err)
 	assert.True(t, toolRan, "the side-effecting tool ran before the failure")
 
@@ -174,6 +173,14 @@ func TestGenerationErrorExposesPartialWork(t *testing.T) {
 
 	var genErr *GenerationError
 	assert.True(t, errors.As(err, &genErr), "error must wrap *GenerationError")
+
+	// The incomplete response comes back with the error.
+	assert.NotNil(t, resp)
+	assert.True(t, genErr.Response == resp)
+	assert.Equal(t, resp.Status, ResponseStatusIncomplete)
+	assert.Equal(t, resp.Turn.Outcome.Reason, TurnReasonProviderError)
+	assert.Equal(t, resp.Turn.Outcome.Next, TurnNextContinue)
+	assert.Equal(t, resp.Turn.Persistence, PersistenceNone)
 
 	// Cost accounting from the successful first iteration is recoverable.
 	assert.NotNil(t, genErr.Usage)

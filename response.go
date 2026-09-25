@@ -42,11 +42,22 @@ const (
 	// widget with structured fields like exit_code or files_scanned.
 	ResponseItemTypeToolProgress ResponseItemType = "tool_progress"
 
-	// ResponseItemTypeSuspended is a terminal item emitted when the agent
-	// transitions into a suspended state. The Suspension field carries the
-	// same SuspensionState as Response.Suspension. Stream consumers should
-	// treat this as end-of-stream and then observe Response.Status.
+	// ResponseItemTypeSuspended is emitted when the agent transitions into a
+	// suspended state, before ResponseItemTypeTurnEnded. The Suspension
+	// field carries the same SuspensionState as Response.Suspension.
+	//
+	// Deprecated: use ResponseItemTypeTurnEnded, whose Turn.Suspension
+	// carries the same state.
 	ResponseItemTypeSuspended ResponseItemType = "suspended"
+
+	// ResponseItemTypeTurnEnded is the terminal item of every invocation
+	// that reached the turn boundary (see Response.Turn): completed,
+	// suspended or incomplete. The Turn field mirrors Response.Turn. Stream
+	// consumers treat it as end-of-stream. It is emitted after the session
+	// write, on a context that is not cancelled; an error the callback
+	// returns for it is logged and does not change the return. It is not
+	// added to Response.Items.
+	ResponseItemTypeTurnEnded ResponseItemType = "turn_ended"
 )
 
 // ResponseStatus indicates the terminal state of a CreateResponse call.
@@ -62,6 +73,12 @@ const (
 	// turn to its session and expects a future CreateResponse call with
 	// WithToolResults to supply the missing tool outputs.
 	ResponseStatusSuspended ResponseStatus = "suspended"
+
+	// ResponseStatusIncomplete means the turn stopped before it finished.
+	// Response.Turn.Outcome says why and what can continue it. CreateResponse
+	// returns an incomplete response together with an error that wraps a
+	// *GenerationError.
+	ResponseStatusIncomplete ResponseStatus = "incomplete"
 )
 
 // PendingToolCall describes a tool call awaiting an external result.
@@ -229,6 +246,10 @@ type ResponseItem struct {
 	// Response.Suspension.
 	Suspension *SuspensionState `json:"suspension,omitempty"`
 
+	// Turn is set on a ResponseItemTypeTurnEnded item. It mirrors
+	// Response.Turn.
+	Turn *Turn `json:"turn,omitempty"`
+
 	// Extension holds optional data from experimental packages.
 	// The concrete type depends on the ResponseItemType.
 	Extension any `json:"extension,omitempty"`
@@ -285,10 +306,18 @@ type Response struct {
 	StopReason  string           `json:"stop_reason,omitempty"`
 	StopDetails *llm.StopDetails `json:"stop_details,omitempty"`
 
-	// Status is ResponseStatusCompleted for normal returns, or
-	// ResponseStatusSuspended when at least one tool returned SuspendResult.
+	// Status is ResponseStatusCompleted for normal returns,
+	// ResponseStatusSuspended when at least one tool returned SuspendResult,
+	// or ResponseStatusIncomplete when the turn stopped short.
 	// An empty Status means Completed (back-compat).
 	Status ResponseStatus `json:"status,omitempty"`
+
+	// Turn is the turn as this invocation left it: the messages a session
+	// saves, the usage, the outcome or the suspension, and whether a session
+	// recorded it. It is set for every status once the turn has begun,
+	// which is just before the PreGeneration hooks run; an error before
+	// that returns no Response.
+	Turn *Turn `json:"turn,omitempty"`
 
 	// Suspension carries the suspend/resume turn snapshot. It is populated:
 	//

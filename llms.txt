@@ -431,7 +431,8 @@ Key types and helpers:
 
 - `dive.SuspendResult{Prompt, Metadata}` — signal returned from a tool; construct with `NewSuspendResult`
 - `dive.ToolResult.Suspend` — tagged union; never set alongside `Content`/`Display`/`IsError`
-- `dive.Response.Status` — `ResponseStatusCompleted` or `ResponseStatusSuspended`
+- `dive.Response.Status` — `ResponseStatusCompleted`, `ResponseStatusSuspended` or `ResponseStatusIncomplete`
+- `dive.Response.Turn` — the turn as the call left it: `Messages`, `Usage`, `Outcome` (incomplete), `Suspension`, `Persistence`
 - `dive.Response.Suspension *SuspensionState` — `PendingToolCalls`, `CompletedToolCalls`, `TurnMessages`
 - `dive.PendingToolCall.UnmarshalInput(&v)` / `dive.DecodePendingInput[T](p)` — decode original tool input
 - `dive.WithResume(state, results)` / `dive.WithToolResults(results)` — resume options

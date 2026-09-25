@@ -278,6 +278,44 @@ response, err := agent.CreateResponse(ctx,
 )
 ```
 
+Every call that gets as far as the PreGeneration hooks ends with one
+`ResponseItemTypeTurnEnded` item, whose `Turn` mirrors `Response.Turn`. It is
+emitted after the session write, so a stream consumer can treat it as
+end-of-stream. An error your callback returns for it is logged, not
+returned.
+
+## When a Turn Stops Short
+
+Once a turn has begun (just before the PreGeneration hooks), `CreateResponse`
+returns a `Response` even when it returns an error. The response's `Status`
+is `ResponseStatusIncomplete`, and `Response.Turn.Outcome` says what stopped
+it and what can continue it:
+
+```go
+resp, err := agent.CreateResponse(ctx, dive.WithInput("..."))
+if err != nil {
+    if resp != nil && resp.Status == dive.ResponseStatusIncomplete {
+        outcome := resp.Turn.Outcome
+        log.Printf("turn stopped (%s), next: %s", outcome.Reason, outcome.Next)
+        // resp.OutputMessages, resp.Items and resp.Usage hold the work done.
+    }
+    return err
+}
+```
+
+`Outcome.Reason` is `canceled`, `deadline`, `provider_error`,
+`stream_interrupted`, `hook_abort` (with `Outcome.Hook`), `callback_error`
+or `error`. The error still wraps a `*dive.GenerationError`, whose `Response`
+is the same value.
+
+`Response.Turn` is set for every status: `Messages` is what a session saves
+for the call (the input and the output, or the suspended turn and the output
+on a resume), `Usage` is the call's usage, and `Persistence` is `saved` when
+the session acknowledged the write, `none` when nothing was saved, and
+`unknown` when the write returned an error. A completed or suspended turn
+whose save fails is returned with that error and `Persistence == unknown`;
+reload the session before acting on it. An incomplete turn is not saved yet.
+
 ## CreateResponse Options
 
 | Option                       | Description                                                 |
