@@ -30,9 +30,16 @@ The core of the harness: `Agent.CreateResponse` runs the generate → tool-call
   `ErrBatchHalted`.
 - **Tool panic recovery** — a panic inside a tool becomes an `IsError` tool
   result the model can react to, rather than crashing the process.
-- **Partial-work recovery** — a failed turn returns `GenerationError`
-  carrying usage, output messages, and response items, so callers can still
-  bill, log, and salvage.
+- **Incomplete turns** — a turn that stops before it finishes (cancelled,
+  failed, cut off at a limit) returns `ResponseStatusIncomplete` with
+  `Response.Turn.Outcome` saying why and what can continue it. The turn is
+  closed (every tool call answered, a `turn-incomplete` reminder last), passed
+  to `OnIncompleteTurn` hooks and saved, and `WithContinue` picks it up without
+  running a tool again. `WithSoftCancel` stops at the next step boundary.
+- **Stop-reason handling** — the agent reads each response's stop reason: an
+  output or context limit, a refusal and a provider stop run no tool call, a
+  paused server tool loop is sent again, and a stream that ends before its end
+  marker is interrupted.
 - **Streaming** — agents use `StreamingLLM` when available and emit typed
   `ResponseItem` events (message, tool_call, tool_call_result, model_event,
   tool_stream, tool_progress, suspended) through `WithEventCallback`.

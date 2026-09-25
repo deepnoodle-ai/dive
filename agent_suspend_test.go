@@ -1777,14 +1777,51 @@ func (b *blockingTool) Call(ctx context.Context, input any) (*ToolResult, error)
 	return nil, ctx.Err()
 }
 
-// Invariant 6: resume with a context that cancels mid-execution — the
-// session must remain in its pre-resume state (fully unchanged). We verify
-// by snapshotting Messages() as JSON before and after.
+// Invariant 6: resume with a context that cancels mid-execution. The
+// resume was full, so the turn is closed: the caller-supplied result is kept,
+// every call rerun is answered, and the closed turn replaces the suspended
+// one. With IncompleteTurns.Discard the session is left exactly as it was.
 //
-// We drive the cancel through the parallel-exec path so that a tool worker
-// returning ctx.Err propagates as a Go error out of executeToolCalls, causing
-// CreateResponse to return without saving.
+// We drive the cancel through the parallel-exec path so that the rerun
+// calls are still running when the context is cancelled.
 func TestResumeContextCancelMidExecution(t *testing.T) {
+	sess, preJSON, prePending, err := resumeCancelledMidExecution(t, false)
+	assert.True(t, errors.Is(err, context.Canceled))
+	assert.NotEqual(t, preJSON, "")
+	assert.NotEqual(t, len(prePending), 0)
+
+	assert.False(t, sessIsSuspended(sess))
+	msgs, _ := sess.Messages(context.Background())
+	assert.Len(t, msgs, 4)
+	results := map[string]bool{}
+	for _, c := range msgs[2].Content {
+		if trc, ok := c.(*llm.ToolResultContent); ok {
+			results[trc.ToolUseID] = true
+		}
+	}
+	assert.True(t, results["toolu_a"] && results["toolu_b"] && results["toolu_c"])
+	outcome, ok := FindTurnOutcome(msgs[3])
+	assert.True(t, ok)
+	assert.Equal(t, outcome.Reason, TurnReasonCanceled)
+}
+
+func TestResumeContextCancelMidExecutionDiscard(t *testing.T) {
+	sess, preJSON, prePending, err := resumeCancelledMidExecution(t, true)
+	assert.True(t, err != nil, "resume must return an error when ctx cancels mid-execution")
+
+	// Session state must be unchanged.
+	postMsgs, _ := sess.Messages(context.Background())
+	postJSON, _ := json.Marshal(postMsgs)
+	assert.Equal(t, preJSON, string(postJSON))
+	assert.True(t, sessIsSuspended(sess))
+	assert.Equal(t, pendingIDs(sess), prePending)
+}
+
+// resumeCancelledMidExecution suspends a turn, then resumes it with a
+// context cancelled while the rerun calls run. It returns the session, its
+// messages and pending calls before the resume, and the resume's error.
+func resumeCancelledMidExecution(t *testing.T, discard bool) (*session.Session, string, []string, error) {
+	t.Helper()
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
 			toolUseAssistantTurn(
@@ -1816,13 +1853,13 @@ func TestResumeContextCancelMidExecution(t *testing.T) {
 	preJSON, _ := json.Marshal(preMsgs)
 	prePending := pendingIDs(sess)
 
-	// Resume with a parallel agent so not-started B, C run concurrently
-	// and ctx cancel propagates as a Go error from executeToolCallsParallel.
+	// Resume with a parallel agent so not-started B, C run concurrently.
 	parAgent, err := NewAgent(AgentOptions{
 		Model:                 mock,
 		Tools:                 []Tool{toolA, toolB, toolC},
 		Session:               sess,
 		ParallelToolExecution: true,
+		IncompleteTurns:       IncompleteTurnOptions{Discard: discard},
 	})
 	assert.NoError(t, err)
 
@@ -1840,15 +1877,7 @@ func TestResumeContextCancelMidExecution(t *testing.T) {
 	<-toolC.started
 	cancel()
 
-	err = <-done
-	assert.True(t, err != nil, "resume must return an error when ctx cancels mid-execution")
-
-	// Session state must be unchanged.
-	postMsgs, _ := sess.Messages(context.Background())
-	postJSON, _ := json.Marshal(postMsgs)
-	assert.Equal(t, string(preJSON), string(postJSON))
-	assert.True(t, sessIsSuspended(sess))
-	assert.Equal(t, pendingIDs(sess), prePending)
+	return sess, string(preJSON), prePending, <-done
 }
 
 // Invariant 7: supplying a result for an ID that exists in the assistant
@@ -2271,8 +2300,8 @@ func TestStatelessResumeEmitsCallerSuppliedToolResult(t *testing.T) {
 // An event-callback failure while emitting a caller-supplied resume result
 // wraps the error in *GenerationError carrying the items emitted so far,
 // matching the contract of the generate loop and the not-started execution
-// path. Nothing is persisted: the session keeps its suspended turn, so the
-// caller can retry the resume.
+// path. The resume was full, so the turn is closed with the supplied result
+// kept, and WithContinue picks it up without supplying it again.
 func TestResumeEmitCallbackErrorWrapsGenerationError(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
@@ -2305,13 +2334,18 @@ func TestResumeEmitCallbackErrorWrapsGenerationError(t *testing.T) {
 	assert.True(t, errors.As(err, &genErr))
 	assert.Equal(t, 1, countToolResultItems(genErr.Items, "toolu_a"))
 
-	// The session still holds the suspended turn — the resume is retryable.
-	assert.True(t, sessIsSuspended(sess))
-	resp, err = agent.CreateResponse(context.Background(),
-		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
-	)
+	// The closed turn replaced the suspended one, supplied result included.
+	assert.False(t, sessIsSuspended(sess))
+	resp, err = agent.CreateResponse(context.Background(), WithContinue())
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, resp.OutputText(), "done")
+	msgs, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 5)
+	resultJSON, err := json.Marshal(msgs[2].Content[0].(*llm.ToolResultContent).Content)
+	assert.NoError(t, err)
+	assert.Contains(t, string(resultJSON), "A done")
 }
 
 func countToolResultItems(items []*ResponseItem, id string) int {

@@ -167,6 +167,12 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 
 		// CreateResponse finished. Yield final result.
 		result := <-results
+		if result.resp != nil && result.resp.Status == dive.ResponseStatusIncomplete {
+			// An incomplete turn comes back with or without an error; its
+			// outcome decides the task state.
+			e.yieldResponseEvents(execCtx, result.resp, yield)
+			return
+		}
 		if result.err != nil {
 			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
 				a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart(result.err.Error()))), nil)
@@ -255,7 +261,9 @@ func (e *Executor) cancelInflight(id a2asdk.TaskID) {
 }
 
 // yieldResponseEvents emits artifacts and a final status event from a
-// completed or suspended Dive response.
+// completed, suspended or incomplete Dive response. An incomplete turn that
+// was cancelled is canceled; any other is failed, with the output it kept as
+// its artifact.
 func (e *Executor) yieldResponseEvents(
 	execCtx *a2asrv.ExecutorContext,
 	resp *dive.Response,
@@ -307,34 +315,61 @@ func (e *Executor) yieldResponseEvents(
 		yield(event, nil)
 
 	case "", dive.ResponseStatusCompleted:
-		// Emit a single artifact built from the final assistant message,
-		// matching Response.OutputText() semantics. In a tool-using turn the
-		// intermediate assistant messages ("Let me check...") are streamed as
-		// working status updates but must not become the task's result —
-		// only the last assistant message with renderable content does.
-		var parts []*a2asdk.Part
-		for _, out := range resp.OutputMessages {
-			if out.Role != llm.Assistant {
-				continue
-			}
-			if p := partsFromContent(out.Content); len(p) > 0 {
-				parts = p
-			}
+		if !yieldFinalArtifact(execCtx, resp, yield) {
+			return
 		}
-		if len(parts) > 0 {
-			artEvent := a2asdk.NewArtifactEvent(execCtx, parts...)
-			artEvent.LastChunk = true
-			if !yield(artEvent, nil) {
-				return
-			}
-		}
-
 		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCompleted, nil), nil)
+
+	case dive.ResponseStatusIncomplete:
+		var outcome *dive.TurnOutcome
+		if resp.Turn != nil {
+			outcome = resp.Turn.Outcome
+		}
+		if outcome != nil && outcome.Reason == dive.TurnReasonCanceled {
+			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), nil)
+			return
+		}
+		if !yieldFinalArtifact(execCtx, resp, yield) {
+			return
+		}
+		text := "turn incomplete"
+		if outcome != nil {
+			text += ": " + string(outcome.Reason)
+			if outcome.Error != "" {
+				text += ": " + outcome.Error
+			}
+		}
+		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
+			a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart(text))), nil)
 
 	default:
 		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
 			a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart("unknown response status: "+string(resp.Status)))), nil)
 	}
+}
+
+// yieldFinalArtifact emits a single artifact built from the final assistant
+// message, matching Response.OutputText() semantics. In a tool-using turn the
+// intermediate assistant messages ("Let me check...") are streamed as working
+// status updates but must not become the task's result — only the last
+// assistant message with renderable content does. It returns false when the
+// consumer stopped.
+func yieldFinalArtifact(execCtx *a2asrv.ExecutorContext, resp *dive.Response, yield func(a2asdk.Event, error) bool) bool {
+	var parts []*a2asdk.Part
+	for _, out := range resp.OutputMessages {
+		if out.Role != llm.Assistant {
+			continue
+		}
+		if p := partsFromContent(out.Content); len(p) > 0 {
+			parts = p
+		}
+	}
+	if len(parts) == 0 {
+		return true
+	}
+	artEvent := a2asdk.NewArtifactEvent(execCtx, parts...)
+	artEvent.LastChunk = true
+	return yield(artEvent, nil)
 }
 
 // buildResumeOpts checks if the stored task is suspended and builds the

@@ -2,6 +2,7 @@ package dive
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -20,6 +21,18 @@ type Reminder struct {
 	Name    string       `json:"name"`
 	Tier    ReminderTier `json:"tier"`
 	Content string       `json:"content"`
+
+	// Details is structured data about the reminder for applications,
+	// recorded with it and never rendered to the model. Values must be
+	// JSON-friendly: after a round trip through a session, numbers are
+	// float64 and structs are map[string]any.
+	Details map[string]any `json:"details,omitempty"`
+}
+
+// WithDetails returns a copy of r carrying details.
+func (r Reminder) WithDetails(details map[string]any) Reminder {
+	r.Details = maps.Clone(details)
+	return r
 }
 
 // NewContextReminder creates user-adjacent runtime context.
@@ -51,11 +64,11 @@ func validateReminder(r Reminder) error {
 }
 
 func reminderContent(r Reminder) *llm.ReminderContent {
-	return &llm.ReminderContent{Name: r.Name, Tier: r.Tier, Content: r.Content}
+	return &llm.ReminderContent{Name: r.Name, Tier: r.Tier, Content: r.Content, Details: maps.Clone(r.Details)}
 }
 
 func reminderFromContent(c *llm.ReminderContent) Reminder {
-	return Reminder{Name: c.Name, Tier: c.Tier, Content: c.Content}
+	return Reminder{Name: c.Name, Tier: c.Tier, Content: c.Content, Details: maps.Clone(c.Details)}
 }
 
 // NewReminderMessage builds a recorded input message for an appended reminder.

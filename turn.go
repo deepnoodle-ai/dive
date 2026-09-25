@@ -54,6 +54,9 @@ type turnRecord struct {
 	modelErr           error
 	modelStreamStarted bool
 
+	// usageUnknown is set when a model call's usage could not be observed.
+	usageUnknown bool
+
 	// toolCalls records the batch in flight when the turn stopped, and
 	// reconcile is set when one of its calls with an unknown result is not
 	// read-only. owedItems are the tool_call and tool_call_result items its
@@ -131,6 +134,21 @@ func (r *turnRecord) addModelError(err error, streamStarted bool) {
 	r.modelErr, r.modelStreamStarted = err, streamStarted
 }
 
+// addPartialResponse records the usage of a model response that stopped
+// before it finished. usageSeen reports whether the stream reported usage.
+func (r *turnRecord) addPartialResponse(response *llm.Response, usageSeen bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.modelCalled = true
+	if response != nil {
+		r.usage.Add(&response.Usage)
+	}
+	if !usageSeen {
+		r.usageUnknown = true
+	}
+	r.version++
+}
+
 // addBackgroundTask records the handle of a background task the turn started.
 func (r *turnRecord) addBackgroundTask(handle *BackgroundTaskHandle) {
 	r.mu.Lock()
@@ -177,6 +195,10 @@ type turn struct {
 	// suspended, so a failure returns no Response.
 	partialResume bool
 
+	// priorUsage is the usage the suspended turn had accumulated before
+	// this invocation resumed it, or nil.
+	priorUsage *llm.Usage
+
 	// syncedVersion is the record version the response was last synced at.
 	syncedVersion int
 }
@@ -188,6 +210,7 @@ const (
 	turnExitCompleted turnExitKind = iota
 	turnExitSuspended
 	turnExitFailed
+	turnExitStopped
 )
 
 // turnExit describes how an invocation ends; end acts on it.
@@ -199,6 +222,10 @@ type turnExit struct {
 
 	// suspension is the batch state of a suspended exit.
 	suspension *suspendedSnapshot
+
+	// outcome is the outcome of a stopped exit: a turn the model or its
+	// provider stopped short, which ends without an error.
+	outcome *TurnOutcome
 
 	// continuesSuspension marks a partial resume: the turn was already
 	// suspended and stays so, so OnSuspend hooks and the terminal suspended
@@ -219,6 +246,12 @@ func suspendedExit(snap *suspendedSnapshot, continuesSuspension bool) turnExit {
 // failedExit ends the invocation on err.
 func failedExit(err error) turnExit {
 	return turnExit{kind: turnExitFailed, err: err}
+}
+
+// stoppedExit ends the invocation with a turn the model or its provider
+// stopped short.
+func stoppedExit(outcome *TurnOutcome) turnExit {
+	return turnExit{kind: turnExitStopped, outcome: outcome}
 }
 
 // syncResponse copies the record onto the response. FinishedAt is set when
@@ -249,6 +282,8 @@ func (t *turn) end(ctx context.Context, exit turnExit) (*Response, error) {
 	switch exit.kind {
 	case turnExitFailed:
 		return t.fail(ctx, exit.err)
+	case turnExitStopped:
+		return t.closeIncomplete(ctx, exit.outcome, nil)
 	case turnExitSuspended:
 		t.syncResponse(false)
 		t.response.BackgroundTasks = t.record.backgroundTasks
@@ -262,28 +297,35 @@ func (t *turn) end(ctx context.Context, exit turnExit) (*Response, error) {
 
 // fail ends the invocation on err. The response becomes incomplete, with an
 // outcome classifying err, and is returned with err wrapped in a
-// *GenerationError. A failed partial resume returns no response: the turn
-// is still suspended.
+// *GenerationError. The turn is closed and saved (closeIncomplete), unless
+// IncompleteTurnOptions.Discard is set. A failed partial resume returns no
+// response: the turn is still suspended.
 func (t *turn) fail(ctx context.Context, err error) (*Response, error) {
-	t.emitOwedItems(ctx)
-	r := t.record
-	r.mu.Lock()
-	genErr := &GenerationError{
-		Err:            err,
-		Usage:          r.usage,
-		OutputMessages: slices.Clone(r.output),
-		Items:          slices.Clone(r.items),
-	}
-	stale := r.version != t.syncedVersion
-	r.mu.Unlock()
 	if t.partialResume {
-		return nil, genErr
+		r := t.record
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return nil, &GenerationError{
+			Err:            err,
+			Usage:          r.usage,
+			OutputMessages: slices.Clone(r.output),
+			Items:          slices.Clone(r.items),
+		}
 	}
+	outcome := failureOutcome(err, t.record)
+	if t.agent.incompleteTurns.Discard {
+		return t.discardIncomplete(outcome, err)
+	}
+	return t.closeIncomplete(ctx, outcome, err)
+}
 
+// discardIncomplete ends a failed invocation as before v1.34
+// (IncompleteTurnOptions.Discard): the output is left as the error found it,
+// nothing is saved, and no further item is emitted.
+func (t *turn) discardIncomplete(outcome *TurnOutcome, err error) (*Response, error) {
+	t.syncResponse(true)
+	r := t.record
 	response := t.response
-	if stale || response.FinishedAt == nil {
-		t.syncResponse(true)
-	}
 	response.Status = ResponseStatusIncomplete
 	response.Suspension = nil
 	if len(r.backgroundTasks) > 0 {
@@ -291,13 +333,234 @@ func (t *turn) fail(ctx context.Context, err error) (*Response, error) {
 	}
 	response.Turn = &Turn{
 		Messages:    t.turnMessages(),
-		Usage:       r.usage.Copy(),
-		Outcome:     failureOutcome(err, r),
+		Usage:       t.turnUsage(),
+		Outcome:     outcome,
 		Persistence: PersistenceNone,
 	}
-	genErr.Response = response
-	t.emitTurnEnded(ctx)
+	r.mu.Lock()
+	genErr := &GenerationError{
+		Err:            err,
+		Usage:          r.usage,
+		OutputMessages: slices.Clone(r.output),
+		Items:          slices.Clone(r.items),
+		Response:       response,
+	}
+	r.mu.Unlock()
 	return response, genErr
+}
+
+// closeIncomplete ends an incomplete invocation: err is the error that ended
+// it, or nil for a turn the model stopped short. It closes the turn (every
+// tool call answered, the outcome reminder last), runs the OnIncompleteTurn
+// hooks, saves the turn, and emits turn_ended. Everything after the turn
+// stopped runs on a context without its cancellation.
+func (t *turn) closeIncomplete(ctx context.Context, outcome *TurnOutcome, err error) (*Response, error) {
+	a, r, hctx, response := t.agent, t.record, t.hctx, t.response
+	ctx = context.WithoutCancel(ctx)
+
+	// Items the stopped batch owes, then the reminders queued while the
+	// turn ended, which are recorded before the outcome reminder.
+	t.emitOwedItems(ctx)
+	t.recordPendingReminders()
+
+	// Sync the response from the record unless it is current, so that the
+	// edits a Stop hook made before a PostGeneration abort are kept, as a
+	// completed turn keeps them.
+	r.mu.Lock()
+	stale := r.version != t.syncedVersion
+	r.mu.Unlock()
+	if stale || response.FinishedAt == nil {
+		t.syncResponse(true)
+	}
+
+	// Answer every call still open, in the suspended turn on a resume and
+	// in the output, and record the calls answered here.
+	output := slices.Clone(response.OutputMessages)
+	prefix := t.inputMessages
+	var answered []*llm.ToolUseContent
+	if t.rs != nil {
+		prefix, answered = answerOpenToolCalls(t.rs.TurnMessages, outcome.ToolCalls)
+	}
+	output, answeredOutput := answerOpenToolCalls(output, outcome.ToolCalls)
+	answered = append(answered, answeredOutput...)
+	outcome.ToolCalls = withNotStartedRecords(outcome.ToolCalls, answered)
+	t.emitAnswered(ctx, answered, outcome.ToolCalls)
+	r.mu.Lock()
+	response.Items = slices.Clone(r.items)
+	r.mu.Unlock()
+	response.FinishedAt = Ptr(time.Now())
+
+	response.Status = ResponseStatusIncomplete
+	response.Suspension = nil
+	if len(r.backgroundTasks) > 0 {
+		response.BackgroundTasks = r.backgroundTasks
+	}
+	response.OutputMessages = output
+	turnRec := &Turn{
+		Messages:    joinMessages(prefix, output),
+		Usage:       t.turnUsage(),
+		Outcome:     outcome,
+		Persistence: PersistenceNone,
+	}
+	response.Turn = turnRec
+
+	discard := false
+	if len(a.hooks.OnIncompleteTurn) > 0 {
+		hctx.Response = response
+		hctx.OutputMessages = output
+		hctx.Usage = r.usage
+		hctx.Turn = turnRec
+		for _, hook := range a.hooks.OnIncompleteTurn {
+			decision, hookErr := hook(ctx, hctx)
+			if hookErr != nil {
+				t.logger.Error("incomplete turn hook error", "error", hookErr)
+				continue
+			}
+			if decision != nil && decision.Discard {
+				discard = true
+			}
+		}
+		output = slices.Clone(hctx.OutputMessages)
+		for _, delivery := range hctx.reminders.drainPending() {
+			if delivery.recording == Recorded {
+				output = append(output, NewReminderMessage(delivery.reminder))
+			}
+		}
+		if turnRec.Outcome != nil {
+			outcome = turnRec.Outcome
+		}
+	}
+	output = append(output, NewReminderMessage(NewTurnOutcomeReminder(outcome)))
+	response.OutputMessages = output
+	turnRec.Messages = joinMessages(prefix, output)
+	turnRec.Outcome = outcome
+
+	var saveErr error
+	if !discard {
+		turnRec.Persistence, saveErr = t.save(ctx, turnRec.Messages)
+	}
+	t.emitTurnEnded(ctx)
+
+	if err == nil {
+		if saveErr != nil {
+			return response, saveErr
+		}
+		return response, nil
+	}
+	if saveErr != nil {
+		err = errors.Join(err, saveErr)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return response, &GenerationError{
+		Err:            err,
+		Usage:          r.usage,
+		OutputMessages: output,
+		Items:          slices.Clone(r.items),
+		Response:       response,
+	}
+}
+
+// recordPendingReminders records the reminders queued for the next model
+// call that will not come: a recorded reminder joins the output, a
+// model-only one is dropped.
+func (t *turn) recordPendingReminders() {
+	for _, delivery := range t.hctx.reminders.drainPending() {
+		if delivery.recording == Recorded {
+			t.record.addOutput(NewReminderMessage(delivery.reminder))
+		}
+	}
+}
+
+// emitAnswered emits a tool_call_result item for each call the closing of
+// the turn answered, preceded by a tool_call item when the call was never
+// announced, so that every call has both. A callback error is only logged.
+func (t *turn) emitAnswered(ctx context.Context, answered []*llm.ToolUseContent, records []ToolCallRecord) {
+	if len(answered) == 0 {
+		return
+	}
+	r := t.record
+	announced := map[string]bool{}
+	r.mu.Lock()
+	for _, item := range r.items {
+		if item.Type == ResponseItemTypeToolCall && item.ToolCall != nil {
+			announced[item.ToolCall.ID] = true
+		}
+	}
+	r.mu.Unlock()
+	unknown := map[string]bool{}
+	for _, record := range records {
+		if record.State == ToolCallStateUnknown {
+			unknown[record.ID] = true
+		}
+	}
+	var items []*ResponseItem
+	for _, call := range answered {
+		if !announced[call.ID] {
+			items = append(items, &ResponseItem{Type: ResponseItemTypeToolCall, ToolCall: call})
+		}
+		result := notRunToolCallResult(call)
+		if unknown[call.ID] {
+			result = unknownToolCallResult(call, nil)
+		}
+		items = append(items, &ResponseItem{Type: ResponseItemTypeToolCallResult, ToolCallResult: result})
+	}
+	r.mu.Lock()
+	r.owedItems = items
+	r.mu.Unlock()
+	t.emitOwedItems(ctx)
+}
+
+// save writes the turn to the session: a resume replaces the suspended turn
+// (SaveResumedTurn) on a SuspendableSession, any other turn is appended
+// (SaveTurn). ctx carries no cancellation; the write is bounded by
+// IncompleteTurnOptions.SaveTimeout. The session is handed this
+// invocation's usage alone, since it sums a resumed turn's usage itself.
+func (t *turn) save(ctx context.Context, messages []*llm.Message) (PersistenceState, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.agent.incompleteTurns.SaveTimeout)
+	defer cancel()
+	usage := t.response.Usage
+	var err error
+	switch {
+	case t.rs != nil && t.suspendable != nil:
+		if err = t.suspendable.SaveResumedTurn(ctx, messages, usage); err != nil {
+			err = fmt.Errorf("save resumed turn: %w", err)
+		}
+	case t.sess != nil:
+		// On a resume, a plain session never saw the suspended turn (only
+		// SuspendableSessions persist suspended turns), so this is the
+		// first write for this turn. Append.
+		if err = t.sess.SaveTurn(ctx, messages, usage); err != nil {
+			err = fmt.Errorf("save turn: %w", err)
+		}
+	default:
+		return PersistenceNone, nil
+	}
+	if err != nil {
+		t.logger.Error("session save error", "error", err)
+		return persistenceOf(err), err
+	}
+	return PersistenceSaved, nil
+}
+
+// turnUsage returns the turn's usage: this invocation's, plus what a resumed
+// suspension had accumulated before it.
+func (t *turn) turnUsage() *llm.Usage {
+	r := t.record
+	r.mu.Lock()
+	usage := r.usage.Copy()
+	r.mu.Unlock()
+	if t.priorUsage != nil {
+		usage.Add(t.priorUsage)
+	}
+	return usage
+}
+
+// joinMessages returns a new slice holding a then b.
+func joinMessages(a, b []*llm.Message) []*llm.Message {
+	out := make([]*llm.Message, 0, len(a)+len(b))
+	out = append(out, a...)
+	return append(out, b...)
 }
 
 // turnMessages returns the messages a session saves for this invocation:
@@ -348,15 +611,10 @@ func (t *turn) emitTurnEnded(ctx context.Context) {
 	}
 }
 
-// saveError records a failed session write on a completed or suspended
-// response and returns err.
-func (t *turn) saveError(err error) (*Response, error) {
-	t.logger.Error("session save error", "error", err)
-	t.response.Turn.Persistence = PersistenceUnknown
-	return t.response, err
-}
-
-// finishCompleted runs PostGeneration hooks and saves a completed turn.
+// finishCompleted runs PostGeneration hooks and saves a completed turn. A
+// PostGeneration abort makes the turn incomplete, with the model's output
+// kept. A save error is returned with the completed response, whose
+// Turn.Persistence says whether the session may hold it.
 func (t *turn) finishCompleted(ctx context.Context) (*Response, error) {
 	a, logger, hctx, response := t.agent, t.logger, t.hctx, t.response
 
@@ -377,17 +635,11 @@ func (t *turn) finishCompleted(ctx context.Context) (*Response, error) {
 		}
 	}
 
-	// Save session turn. On resume, replace the suspended event with the
-	// combined turn (pre-suspend turn messages plus new output). Otherwise
-	// append a new turn with input + output. A save error is returned with
-	// the completed response, whose Turn.Persistence says the session may
-	// not hold it.
-	//
-	// On a resume completion we also populate Response.Suspension with the
-	// final merged turn snapshot (PendingToolCalls = nil) so stateless
-	// callers can flush the turn into their local history in one append
-	// without reconciling a stale partial tool_result from their saved
-	// state.
+	// On a resume, the session replaces the suspended event with the
+	// combined turn (the suspended turn's messages plus the new output), and
+	// Response.Suspension carries the final merged turn with no pending
+	// calls, so stateless callers can flush it into their history in one
+	// append without reconciling a stale partial tool_result.
 	turnMsgs := t.turnMessages()
 	response.Status = ResponseStatusCompleted
 	if len(t.record.backgroundTasks) > 0 {
@@ -401,34 +653,17 @@ func (t *turn) finishCompleted(ctx context.Context) (*Response, error) {
 	}
 	response.Turn = &Turn{
 		Messages:    turnMsgs,
-		Usage:       t.record.usage.Copy(),
+		Usage:       t.turnUsage(),
 		Persistence: PersistenceNone,
 	}
 
+	ctx = context.WithoutCancel(ctx)
 	var saveErr error
-	switch {
-	case t.rs != nil && t.suspendable != nil:
-		if err := t.suspendable.SaveResumedTurn(ctx, turnMsgs, response.Usage); err != nil {
-			saveErr = fmt.Errorf("save resumed turn: %w", err)
-		}
-	case t.sess != nil:
-		// On a resume, a plain session never saw the suspended turn (only
-		// SuspendableSessions auto-persist suspended turns), so this resume
-		// completion is the first write for this turn. Append.
-		if err := t.sess.SaveTurn(ctx, turnMsgs, response.Usage); err != nil {
-			saveErr = fmt.Errorf("save turn: %w", err)
-		}
-	default:
-		t.emitTurnEnded(ctx)
-		return response, nil
-	}
-	if saveErr != nil {
-		resp, err := t.saveError(saveErr)
-		t.emitTurnEnded(ctx)
-		return resp, err
-	}
-	response.Turn.Persistence = PersistenceSaved
+	response.Turn.Persistence, saveErr = t.save(ctx, turnMsgs)
 	t.emitTurnEnded(ctx)
+	if saveErr != nil {
+		return response, saveErr
+	}
 	return response, nil
 }
 
@@ -437,6 +672,11 @@ func (t *turn) finishCompleted(ctx context.Context) (*Response, error) {
 // SuspendableSession is present), and emits the terminal suspended and
 // turn_ended stream items. Hooks run before persistence so a hook abort
 // leaves the session untouched — no compensation needed.
+//
+// A suspension is kept even when the context was cancelled by the time the
+// agent reaches it: the suspending tool may already have dispatched its
+// request, so the hooks and the write run on a context without the
+// cancellation, and the invocation returns Suspended with a nil error.
 //
 // Suspension works without a session: when the session is nil or does not
 // implement SuspendableSession, the Response.Suspension payload is still
@@ -448,12 +688,14 @@ func (t *turn) finishCompleted(ctx context.Context) (*Response, error) {
 // existing suspension rather than announcing a new one.
 func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, continuesSuspension bool) (*Response, error) {
 	a, logger, hctx, response := t.agent, t.logger, t.hctx, t.response
+	ctx = context.WithoutCancel(ctx)
 
 	// Build the turn the caller will need on resume. For a generate-driven
 	// suspend this is inputMessages + the assistant tool_use and any partial
 	// tool_result. For a partial resume it is the existing turn plus any
 	// tool_result updates captured in rs.
 	turnMsgs := t.turnMessages()
+	usage := t.turnUsage()
 
 	response.Status = ResponseStatusSuspended
 	response.Suspension = &SuspensionState{
@@ -461,6 +703,7 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 		CompletedToolCalls: snap.CompletedToolCalls,
 		TurnMessages:       turnMsgs,
 		BatchHalted:        snap.BatchHalted,
+		Usage:              usage,
 	}
 
 	hctx.Response = response
@@ -476,7 +719,7 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "OnSuspend"
 					logger.Error("on-suspend hook aborted", "error", abortErr)
-					return t.fail(ctx, abortErr)
+					return t.abortSuspension(ctx, snap, turnMsgs, abortErr)
 				}
 				logger.Error("on-suspend hook error", "error", err)
 			}
@@ -491,7 +734,10 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 			if errors.As(err, &abortErr) {
 				abortErr.HookType = "PostGeneration"
 				logger.Error("post-generation hook aborted", "error", abortErr)
-				return t.fail(ctx, abortErr)
+				if continuesSuspension {
+					return t.fail(ctx, abortErr)
+				}
+				return t.abortSuspension(ctx, snap, turnMsgs, abortErr)
 			}
 			logger.Error("post-generation hook error", "error", err)
 		}
@@ -499,7 +745,7 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 
 	response.Turn = &Turn{
 		Messages:    turnMsgs,
-		Usage:       t.record.usage.Copy(),
+		Usage:       usage,
 		Suspension:  response.Suspension,
 		Persistence: PersistenceNone,
 	}
@@ -509,19 +755,22 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 	// sessions and session-less callers rely on the Response.Suspension
 	// payload to drive their own persistence.
 	if t.suspendable != nil {
-		if err := t.suspendable.SaveSuspendedTurn(ctx, turnMsgs, response.Usage, response.Suspension); err != nil {
+		saveCtx, cancel := context.WithTimeout(ctx, a.incompleteTurns.SaveTimeout)
+		err := t.suspendable.SaveSuspendedTurn(saveCtx, turnMsgs, response.Usage, response.Suspension)
+		cancel()
+		if err != nil {
 			err = fmt.Errorf("save suspended turn: %w", err)
+			logger.Error("session save error", "error", err)
 			if continuesSuspension {
 				// A partial resume leaves the earlier suspension in place.
-				logger.Error("session save error", "error", err)
 				return t.fail(ctx, err)
 			}
 			// The pending calls may not exist in the session. The caller
 			// reloads it, and persists Response.Suspension itself only when
 			// the session does not hold it.
-			resp, err := t.saveError(err)
+			response.Turn.Persistence = persistenceOf(err)
 			t.emitTurnEnded(ctx)
-			return resp, err
+			return response, err
 		}
 		response.Turn.Persistence = PersistenceSaved
 	}
@@ -531,7 +780,7 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 	// suspended terminal for a call that ultimately returned an error. The
 	// state is already decided, so a callback error is only logged.
 	if !continuesSuspension {
-		if err := t.emit(context.WithoutCancel(ctx), &ResponseItem{
+		if err := t.emit(ctx, &ResponseItem{
 			Type:       ResponseItemTypeSuspended,
 			Suspension: response.Suspension,
 		}); err != nil {
@@ -540,4 +789,50 @@ func (t *turn) finishSuspended(ctx context.Context, snap *suspendedSnapshot, con
 	}
 	t.emitTurnEnded(ctx)
 	return response, nil
+}
+
+// abortSuspension ends a new suspension that an OnSuspend or PostGeneration
+// hook aborted. The turn is incomplete with hook_abort: the completed calls
+// of the suspended batch keep their results, and the suspending calls are
+// unknown, since a tool may dispatch its request before it suspends, and an
+// earlier OnSuspend hook may have dispatched before a later one aborted.
+// Calls the batch never reached are not started.
+func (t *turn) abortSuspension(ctx context.Context, snap *suspendedSnapshot, turnMsgs []*llm.Message, abortErr error) (*Response, error) {
+	var assistant *llm.Message
+	for i := len(turnMsgs) - 1; i >= 0; i-- {
+		if msg := turnMsgs[i]; msg.Role == llm.Assistant && hasToolUseContent(msg) {
+			assistant = msg
+			break
+		}
+	}
+	pending := map[string]bool{}
+	for _, call := range snap.PendingToolCalls {
+		pending[call.ID] = true
+	}
+	answered := map[string]bool{}
+	for _, msg := range turnMsgs {
+		for _, c := range msg.Content {
+			if result, ok := c.(*llm.ToolResultContent); ok {
+				answered[result.ToolUseID] = true
+			}
+		}
+	}
+	_, toolsByName, _ := t.agent.resolveTools(ctx)
+	var records []ToolCallRecord
+	reconcile := false
+	for _, call := range toolUseContents(assistant) {
+		state := ToolCallStateNotStarted
+		switch {
+		case pending[call.ID]:
+			state = ToolCallStateUnknown
+			if !readOnlyTool(call, toolsByName) {
+				reconcile = true
+			}
+		case answered[call.ID]:
+			state = ToolCallStateCompleted
+		}
+		records = append(records, ToolCallRecord{ID: call.ID, Name: call.Name, State: state})
+	}
+	t.record.stopBatch(records, &closedToolBatch{reconcile: reconcile})
+	return t.fail(ctx, abortErr)
 }

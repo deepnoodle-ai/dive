@@ -75,9 +75,12 @@ const (
 	ResponseStatusSuspended ResponseStatus = "suspended"
 
 	// ResponseStatusIncomplete means the turn stopped before it finished.
-	// Response.Turn.Outcome says why and what can continue it. CreateResponse
-	// returns an incomplete response together with an error that wraps a
-	// *GenerationError.
+	// Response.Turn.Outcome says why and what can continue it. When an error
+	// ended the turn, CreateResponse returns the response together with an
+	// error that wraps a *GenerationError; when the model or its provider
+	// stopped it short (an output limit, the iteration limit, ...), the
+	// error is nil. The turn is closed and saved like any other: see
+	// IncompleteTurnOptions and WithContinue.
 	ResponseStatusIncomplete ResponseStatus = "incomplete"
 )
 
@@ -216,6 +219,12 @@ type SuspensionState struct {
 	// are answered with ErrBatchHalted on resume. It is recorded rather than
 	// worked out again on resume, where the agent's tools may have changed.
 	BatchHalted bool `json:"batch_halted,omitempty"`
+
+	// Usage is the suspended turn's usage so far, summed over every
+	// invocation of it. The agent adds it to Response.Turn.Usage when the
+	// turn is resumed. session.Session fills it from the suspended turn; a
+	// session that does not track it leaves it nil.
+	Usage *llm.Usage `json:"usage,omitempty"`
 }
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.

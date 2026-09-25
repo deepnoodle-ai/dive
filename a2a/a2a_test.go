@@ -956,3 +956,19 @@ func TestStreamingEmitsArtifacts(t *testing.T) {
 	assert.True(t, hasText)
 	assert.True(t, hasURL)
 }
+
+// A turn cut off at the output limit is incomplete: the task fails, with the
+// partial answer as its artifact.
+func TestIncompleteTurnFailsWithPartialAnswer(t *testing.T) {
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		resp := textResponse("The answer is")
+		resp.StopReason = "max_tokens"
+		return resp, nil
+	}}
+	_, client := startServer(t, buildAgent(t, model))
+
+	task := sendAndExpectTask(t, client, a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart("question")))
+	assert.Equal(t, a2asdk.TaskStateFailed, task.Status.State)
+	assert.Equal(t, "The answer is", taskText(task))
+	assert.Contains(t, task.Status.Message.Parts[0].Text(), "output_limit")
+}

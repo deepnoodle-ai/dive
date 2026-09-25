@@ -223,7 +223,7 @@ func (t *agentTool) runSync(ctx context.Context, input *AgentToolInput, agent *d
 
 	response, err := agent.CreateResponse(runCtx, dive.WithMessages(llm.NewUserTextMessage(input.Prompt)))
 	if err != nil {
-		return dive.NewToolResultError(fmt.Sprintf("Subagent failed: %s", err.Error())).
+		return dive.NewToolResultError("Subagent failed: " + subagentFailure(response, err)).
 			WithDisplay(fmt.Sprintf("Failed: %s", input.Description))
 	}
 	return dive.NewToolResultText(subagentOutput(response)).
@@ -247,7 +247,7 @@ func (t *agentTool) runBackground(input *AgentToolInput, agent *dive.Agent) *div
 		}
 		response, err := agent.CreateResponse(runCtx, dive.WithMessages(llm.NewUserTextMessage(input.Prompt)))
 		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Subagent failed (Task ID: %s): %s", taskID, err.Error())).
+			return dive.NewToolResultError(fmt.Sprintf("Subagent failed (Task ID: %s): %s", taskID, subagentFailure(response, err))).
 				WithDisplay(fmt.Sprintf("Failed: %s", input.Description))
 		}
 		return dive.NewToolResultText(fmt.Sprintf("Task ID: %s\n\n%s", taskID, subagentOutput(response))).
@@ -264,10 +264,33 @@ func (t *agentTool) typeNames() []string {
 	return names
 }
 
+// subagentFailure describes a subagent run that ended in err, with the
+// answer it had written when it stopped, if any.
+func subagentFailure(response *dive.Response, err error) string {
+	text := err.Error()
+	if partial := partialAnswer(response); partial != "" {
+		text += "\n\nIts answer so far:\n" + partial
+	}
+	return text
+}
+
+// partialAnswer returns the answer text of an incomplete subagent response,
+// or "".
+func partialAnswer(response *dive.Response) string {
+	if response == nil || response.Status != dive.ResponseStatusIncomplete {
+		return ""
+	}
+	return response.OutputText()
+}
+
 // subagentOutput renders a completed subagent response as text. Subagents are
 // single-use, so a subagent that suspends mid-turn cannot be resumed; surface
-// its pending prompt as the (terminal) result instead.
+// its pending prompt as the (terminal) result instead. A subagent the model
+// stopped short (an output or iteration limit) says why before its answer.
 func subagentOutput(response *dive.Response) string {
+	if response != nil && response.Status == dive.ResponseStatusIncomplete && response.Turn != nil && response.Turn.Outcome != nil {
+		return fmt.Sprintf("Subagent stopped before finishing (%s). Its answer so far:\n%s", response.Turn.Outcome.Reason, response.OutputText())
+	}
 	if response != nil && response.Status == dive.ResponseStatusSuspended {
 		if response.Suspension != nil && len(response.Suspension.PendingToolCalls) > 0 {
 			if p := response.Suspension.PendingToolCalls[0].Prompt; p != "" {

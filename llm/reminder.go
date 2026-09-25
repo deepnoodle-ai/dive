@@ -28,6 +28,11 @@ type ReminderContent struct {
 	Name    string       `json:"name"`
 	Tier    ReminderTier `json:"tier"`
 	Content string       `json:"content"`
+
+	// Details is structured data about the reminder for applications. It is
+	// not rendered to the model. Values must be JSON-friendly: after a round
+	// trip numbers are float64 and structs are map[string]any.
+	Details map[string]any `json:"details,omitempty"`
 }
 
 func (c *ReminderContent) Type() ContentType { return ContentTypeReminder }

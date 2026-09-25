@@ -137,9 +137,10 @@ func TestSequentialCancelKeepsFinishedCallAndSkipsTheRest(t *testing.T) {
 		{ID: "toolu_2", Name: "second", State: ToolCallStateNotStarted},
 	})
 
-	// The input, the assistant message, then every call answered.
-	assert.Len(t, resp.OutputMessages, 2)
-	assert.Len(t, resp.Turn.Messages, 3)
+	// The input, the assistant message, every call answered, then the
+	// outcome reminder.
+	assert.Len(t, resp.OutputMessages, 3)
+	assert.Len(t, resp.Turn.Messages, 4)
 	assertEveryCallAnswered(t, resp.Turn.Messages)
 	results := lastToolResults(t, resp.Turn.Messages)
 	assert.False(t, results["toolu_1"].IsError)
