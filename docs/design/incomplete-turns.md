@@ -507,7 +507,7 @@ const (
     StopKindFinished    StopKind = "finished"     // end_turn, stop, stop_sequence
     StopKindToolUse     StopKind = "tool_use"
     StopKindOutputLimit StopKind = "output_limit" // max_tokens, length
-    StopKindContextLimit StopKind = "context_limit" // model_context_window_exceeded
+    StopKindContextLimit StopKind = "context_limit" // model_context_window_exceeded, model_length
     StopKindRefusal     StopKind = "refusal"      // refusal, content_filter
     StopKindPause       StopKind = "pause"        // pause_turn
     StopKindIncomplete  StopKind = "incomplete"   // the provider ended early for a reason it did not name as a limit or refusal
@@ -523,7 +523,8 @@ func ClassifyStopReason(reason string) StopKind
 
 The classifier's table covers every provider Dive ships, not only the four
 adapters named below: Anthropic's `model_context_window_exceeded` (the
-context window, not `max_tokens`, cut the response) is its own kind, and
+context window, not `max_tokens`, cut the response) is its own kind, as is
+Mistral's `model_length`, which means the same, and
 Ollama, Mistral, Grok and OpenRouter spellings are listed from their
 adapters. Providers keep their raw values (Anthropic `end_turn`/`max_tokens`/`refusal`/
 `pause_turn`, Gemini `stop`/`max_tokens`/`other`, chat completions
@@ -1108,9 +1109,10 @@ const (
 
 // AnswerUnansweredToolCalls returns messages in which every tool_use block
 // is followed by a tool_result for its ID. A missing result is inserted as
-// an error result with ToolCallUnknownText, into the next user message when
-// there is one and otherwise as a new tool-result message after the
-// assistant message. The unknown text is used because history alone cannot
+// an error result with ToolCallUnknownText, into the next message when it is
+// a tool-result message and otherwise as a new tool-result message after the
+// assistant message, so a user message holding no results (a reminder an
+// encoder may render in a system or developer role) is never mixed with them. The unknown text is used because history alone cannot
 // say whether the call ran, and "unknown" is the safe claim. Server tool
 // calls are left alone. Copy-on-write: messages is returned as is when
 // nothing is missing.
@@ -1568,13 +1570,24 @@ would make neither reviewable.
    resyncing from its store after a failed write (healing a torn append on
    the way), and the CLI's `errors.Is`. `ErrSaveRejected` moves to step 6,
    where `Persistence` first reads it.
-2. **Model boundary plumbing** (sections 4 and 11). `llm.StopKind` and
-   `ClassifyStopReason` with the full spelling table, the Responses and
-   Google adapter fixes, the chat-completions bare EOF as
-   `io.ErrUnexpectedEOF`, `Response.StopReason` and `StopDetails`, an
-   accumulator method reporting which blocks never stopped, and
-   `llm.AnswerUnansweredToolCalls` in the four encoders. The backstop only
-   repairs requests that would fail today, so it ships early.
+2. **Model boundary plumbing** (sections 4 and 11). Done:
+   `llm.StopKind` and `ClassifyStopReason` with the spelling table of every
+   adapter family (Anthropic and Ollama, Responses and Grok and Meta, Chat
+   Completions and Mistral, OpenRouter and DeepInfra, Gemini), the
+   Responses precedence fix, Gemini finish reasons kept distinct,
+   `Response.StopReason` and `StopDetails`,
+   `ResponseAccumulator.UnfinishedContent`, and
+   `llm.AnswerUnansweredToolCalls` with the two texts in all four encoders.
+   Chat Completions reports a bare EOF as `io.ErrUnexpectedEOF`; a stream
+   that ends at `[DONE]` with no `finish_reason` reports `tool_use` or
+   `stop` by whether it made calls, and non-streaming `Generate`, which set
+   no stop reason at all, reports one. Left for step 6: the Anthropic and
+   Responses iterators end without an error when the transport closes
+   before their terminal event, so the agent treats a stream whose
+   accumulator never saw `message_stop` as interrupted; the Gemini iterator
+   still closes a stream that ends without a finish reason cleanly, a
+   deliberate choice of #271 that hides a cut-off response, and step 6
+   decides whether to change it.
 3. **Exit-path refactor.** One turn accumulator fed by the resume phase,
    the generation loop and Stop-hook continuations; the `Response` created
    before PreGeneration; every exit after the boundary through one function.

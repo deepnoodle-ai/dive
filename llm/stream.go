@@ -130,7 +130,10 @@ type ResponseAccumulator struct {
 	// serverInputs buffers input_json_delta fragments for server-side tool
 	// calls (ServerToolUseContent, MCPToolUseContent) until the block stops.
 	serverInputs map[int][]byte
-	complete     bool
+	// stopped records the indices of blocks that received
+	// content_block_stop (see UnfinishedContent).
+	stopped  map[int]bool
+	complete bool
 }
 
 // NewResponseAccumulator creates a new ResponseAccumulator.
@@ -140,6 +143,7 @@ func NewResponseAccumulator() *ResponseAccumulator {
 		skippedBlocks:    make(map[int]bool),
 		skippedResultIDs: make(map[string]bool),
 		serverInputs:     make(map[int][]byte),
+		stopped:          make(map[int]bool),
 	}
 }
 
@@ -269,6 +273,7 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		// A call with no arguments can stream no input deltas at all. Complete
 		// it as the empty object Generate would have returned.
 		if event.Index != nil {
+			r.stopped[*event.Index] = true
 			if toolUse, ok := r.contentBlocks[*event.Index].(*ToolUseContent); ok && len(toolUse.Input) == 0 {
 				toolUse.Input = json.RawMessage("{}")
 			}
@@ -413,6 +418,28 @@ func dropServerToolCalls(content []Content, ids map[string]bool) []Content {
 		kept = append(kept, c)
 	}
 	return kept
+}
+
+// UnfinishedContent returns the content blocks that never received
+// content_block_stop, in index order. They are the same values Response
+// holds, so a caller can recognize them there. After a stream that ended
+// early these are the blocks the model was still writing: a text block is
+// usable as far as it goes, a tool call's input may be incomplete JSON, a
+// thinking block lacks its signature, and a server tool call still has its
+// placeholder input.
+func (r *ResponseAccumulator) UnfinishedContent() []Content {
+	indices := make([]int, 0, len(r.contentBlocks))
+	for index := range r.contentBlocks {
+		if !r.stopped[index] {
+			indices = append(indices, index)
+		}
+	}
+	sort.Ints(indices)
+	unfinished := make([]Content, len(indices))
+	for i, index := range indices {
+		unfinished[i] = r.contentBlocks[index]
+	}
+	return unfinished
 }
 
 func (r *ResponseAccumulator) IsComplete() bool {

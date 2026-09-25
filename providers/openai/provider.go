@@ -203,8 +203,10 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		return responses.ResponseNewParams{}, fmt.Errorf("no messages provided")
 	}
 
-	// Convert input messages to the OpenAI SDK input type
-	rendered, err := llm.RenderReminders(config.Messages, func(_ int, _ []*llm.Message) (llm.Role, bool) {
+	// Convert input messages to the OpenAI SDK input type. Any tool call the
+	// history left without a result is answered first, since the API would
+	// reject it; see llm.AnswerUnansweredToolCalls.
+	rendered, err := llm.RenderReminders(llm.AnswerUnansweredToolCalls(config.Messages), func(_ int, _ []*llm.Message) (llm.Role, bool) {
 		if p.Name() == ProviderName && strings.TrimRight(p.endpoint, "/") == DefaultEndpoint {
 			return llm.Developer, true
 		}
@@ -539,43 +541,40 @@ func applyResponseFormat(params *responses.ResponseNewParams, config *llm.Config
 	return nil
 }
 
-// determineStopReason maps SDK response data to standard stop reasons
+// determineStopReason maps SDK response data to standard stop reasons. The
+// status comes first: a stop reason says why the response ended, and a
+// response cut off at max_output_tokens, filtered, or otherwise left
+// incomplete keeps that reason even when it also carries tool calls, which
+// must then not run on output the API says did not complete. Only a
+// completed response with tool calls is "tool_use".
 func determineStopReason(response *responses.Response) string {
-	// Check if the response contains any tool calls
+	switch response.Status {
+	case "incomplete":
+		switch response.IncompleteDetails.Reason {
+		case "max_output_tokens":
+			return "max_tokens"
+		case "content_filter":
+			return "content_filter"
+		case "run_cancelled":
+			return "cancelled"
+		case "run_expired":
+			return "timeout"
+		case "run_failed":
+			return "error"
+		default:
+			return "incomplete"
+		}
+	case "failed":
+		return "error"
+	case "cancelled":
+		return "cancelled"
+	case "in_progress", "queued":
+		return "incomplete"
+	}
 	for _, item := range response.Output {
 		if strings.HasSuffix(item.Type, "_call") {
 			return "tool_use"
 		}
 	}
-
-	// Handle different response statuses
-	switch response.Status {
-	case "completed":
-		return "end_turn"
-	case "incomplete":
-		// Map specific incomplete reasons if available
-		if response.IncompleteDetails.Reason != "" {
-			switch response.IncompleteDetails.Reason {
-			case "max_output_tokens":
-				return "max_tokens"
-			case "content_filter":
-				return "content_filter"
-			case "run_cancelled":
-				return "cancelled"
-			case "run_expired":
-				return "timeout"
-			case "run_failed":
-				return "error"
-			default:
-				return "incomplete"
-			}
-		}
-		return "incomplete"
-	case "failed":
-		return "error"
-	case "in_progress":
-		return "incomplete"
-	default:
-		return "end_turn"
-	}
+	return "end_turn"
 }

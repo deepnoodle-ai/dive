@@ -240,17 +240,17 @@ func modalityCounts(details []*genai.ModalityTokenCount, total int, label string
 	return counts, true, nil
 }
 
-// convertFinishReason maps a genai finish reason to Dive's stop reason
-// vocabulary for this provider (matching convertGoogleResponse).
+// convertFinishReason maps a genai finish reason to the stop reason this
+// provider reports: the finish reason lowercased, so STOP is "stop",
+// MAX_TOKENS is "max_tokens", SAFETY is "safety" and UNEXPECTED_TOOL_CALL is
+// "unexpected_tool_call". Keeping each reason distinct lets
+// llm.ClassifyStopReason tell a refusal or a malformed call from a normal
+// end. A missing finish reason is "other".
 func convertFinishReason(reason genai.FinishReason) string {
-	switch reason {
-	case genai.FinishReasonStop:
-		return "stop"
-	case genai.FinishReasonMaxTokens:
-		return "max_tokens"
-	default:
+	if reason == "" {
 		return "other"
 	}
+	return strings.ToLower(string(reason))
 }
 
 // toolCallCounter provides unique suffixes for synthesized tool call IDs.

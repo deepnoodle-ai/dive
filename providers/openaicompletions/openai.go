@@ -126,7 +126,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessagesForProvider(config.Messages, p.Name())
+	// Answer any tool call the history left without a result, which the API
+	// would reject; see llm.AnswerUnansweredToolCalls.
+	msgs, err := convertMessagesForProvider(llm.AnswerUnansweredToolCalls(config.Messages), p.Name())
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -228,11 +230,12 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		responseModel = result.Model
 	}
 	response := &llm.Response{
-		ID:      result.ID,
-		Model:   responseModel,
-		Role:    llm.Assistant,
-		Content: contentBlocks,
-		Usage:   result.Usage.toLLMUsage(),
+		ID:         result.ID,
+		Model:      responseModel,
+		Role:       llm.Assistant,
+		Content:    contentBlocks,
+		StopReason: generateStopReason(choice),
+		Usage:      result.Usage.toLLMUsage(),
 	}
 	p.applyReportedUsageCost(result.Usage, &response.Usage, response.Model)
 	if p.disableCatalogCost && response.Usage.Cost == nil {
@@ -273,7 +276,9 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessagesForProvider(config.Messages, p.Name())
+	// Answer any tool call the history left without a result, which the API
+	// would reject; see llm.AnswerUnansweredToolCalls.
+	msgs, err := convertMessagesForProvider(llm.AnswerUnansweredToolCalls(config.Messages), p.Name())
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -386,6 +391,32 @@ func applyReportedUsageCost(wire Usage, usage *llm.Usage, model, currency, field
 		Source:               source,
 		BreakdownUnavailable: true,
 	}
+}
+
+// generateStopReason is the stop reason of a non-streaming response. A
+// server that omits finish_reason gets the same fallback as a stream that
+// ends at [DONE] without one: "tool_use" when the response made tool calls,
+// "stop" otherwise.
+func generateStopReason(choice Choice) string {
+	if choice.FinishReason == "" {
+		if len(choice.Message.ToolCalls) > 0 {
+			return "tool_use"
+		}
+		return "stop"
+	}
+	return stopReasonFromFinish(choice.FinishReason)
+}
+
+// stopReasonFromFinish maps a Chat Completions finish_reason to the stop
+// reason this provider reports. A response that ended to call tools reports
+// "tool_use", as Anthropic does, whether the server spelled it tool_calls or
+// the legacy function_call; other values pass through unchanged.
+func stopReasonFromFinish(finishReason string) string {
+	switch finishReason {
+	case "tool_calls", "function_call":
+		return "tool_use"
+	}
+	return finishReason
 }
 
 func validateMessages(messages []*llm.Message) error {

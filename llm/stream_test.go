@@ -340,3 +340,38 @@ func TestResponseAccumulatorPreservesContentMetadataAndThinkingID(t *testing.T) 
 	assert.Equal(t, "rs_123", thinking.ID)
 	assert.Equal(t, "true", thinking.Metadata["google.thought"])
 }
+
+func TestResponseAccumulatorUnfinishedContent(t *testing.T) {
+	acc := NewResponseAccumulator()
+	idx0, idx1, idx2 := 0, 1, 2
+	events := []*Event{
+		{Type: EventTypeMessageStart, Message: &Response{ID: "m", Role: Assistant}},
+		{Type: EventTypeContentBlockStart, Index: &idx0, ContentBlock: &EventContentBlock{Type: ContentTypeText}},
+		{Type: EventTypeContentBlockDelta, Index: &idx0, Delta: &EventDelta{Type: EventDeltaTypeText, Text: "done"}},
+		{Type: EventTypeContentBlockStop, Index: &idx0},
+		{Type: EventTypeContentBlockStart, Index: &idx1, ContentBlock: &EventContentBlock{Type: ContentTypeText}},
+		{Type: EventTypeContentBlockDelta, Index: &idx1, Delta: &EventDelta{Type: EventDeltaTypeText, Text: "half"}},
+		{Type: EventTypeContentBlockStart, Index: &idx2, ContentBlock: &EventContentBlock{Type: ContentTypeToolUse, ID: "call", Name: "t"}},
+		{Type: EventTypeContentBlockDelta, Index: &idx2, Delta: &EventDelta{Type: EventDeltaTypeInputJSON, PartialJSON: `{"a":`}},
+	}
+	for _, event := range events {
+		assert.NoError(t, acc.AddEvent(event))
+	}
+	assert.False(t, acc.IsComplete())
+
+	unfinished := acc.UnfinishedContent()
+	assert.Equal(t, len(unfinished), 2)
+	assert.Equal(t, unfinished[0].(*TextContent).Text, "half")
+	assert.Equal(t, string(unfinished[1].(*ToolUseContent).Input), `{"a":`)
+
+	// The unfinished blocks are the ones the partial response holds.
+	resp := acc.Response()
+	assert.Equal(t, len(resp.Content), 3)
+	assert.True(t, resp.Content[1] == unfinished[0])
+	assert.True(t, resp.Content[2] == unfinished[1])
+
+	// Once the blocks stop, nothing is unfinished.
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeContentBlockStop, Index: &idx1}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeContentBlockStop, Index: &idx2}))
+	assert.Equal(t, len(acc.UnfinishedContent()), 0)
+}
