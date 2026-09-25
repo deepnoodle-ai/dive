@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   is an error**, wrapping `io.ErrUnexpectedEOF`. `[DONE]` alone still ends it.
 - **Gemini finish reasons stay distinct**: `safety`, `unexpected_tool_call` and
   the rest, lowercased, where all but `stop` and `max_tokens` were `other`.
+- **`Response.CreatedAt` is set before PreGeneration hooks run**, so the
+  response's time span covers them.
 
 ### Fixed
 

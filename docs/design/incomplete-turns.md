@@ -1,6 +1,6 @@
 # Incomplete Turns
 
-_Last updated: 2026-09-24_
+_Last updated: 2026-09-25_
 _Status: accepted; implementation in progress (see "Order of work"). Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
 revision, after six reviews: the pull-request review (a running call must
@@ -805,13 +805,14 @@ session holds it, and reloads before acting on the session when it is not
 `saved`.
 
 **The contract by exit class.** The `Response` is created before
-PreGeneration hooks run (today it is created after them), and every exit
-after the boundary goes through one function that closes the turn, saves,
-emits the terminal item, and builds the return. That function reads one
-accumulator for the turn, fed alike by the resume phase, the generation loop
-and Stop-hook continuations, into which every model response and every tool
-result is recorded before the callbacks and hooks that could fail run; today
-that state is spread over four slices and reassembled on the error path.
+PreGeneration hooks run, and every exit after the boundary goes through one
+function that closes the turn, saves, emits the terminal item, and builds the
+return. That function reads one accumulator for the turn, fed alike by the
+resume phase, the generation loop and Stop-hook continuations, into which
+every model response and every tool result is recorded before the callbacks
+and hooks that could fail run. Step 3 put the accumulator and the function
+in place (`turnRecord` and `turn.end`); tool results of a batch that fails
+part way reach the record in step 5.
 
 | Exit                                                                  | Returns                                   | `Status`     | `Persistence`      |
 | --------------------------------------------------------------------- | ----------------------------------------- | ------------ | ------------------ |
@@ -1588,10 +1589,19 @@ would make neither reviewable.
    still closes a stream that ends without a finish reason cleanly, a
    deliberate choice of #271 that hides a cut-off response, and step 6
    decides whether to change it.
-3. **Exit-path refactor.** One turn accumulator fed by the resume phase,
-   the generation loop and Stop-hook continuations; the `Response` created
-   before PreGeneration; every exit after the boundary through one function.
-   No behaviour change: the existing tests pass unmodified.
+3. **Exit-path refactor.** Done: one turn record (`turnRecord` in
+   `turn.go`) fed by the resume phase, the generation loop and Stop-hook
+   continuations, into which each model response, its usage and stop reason
+   are recorded before the callback that could fail; the `Response` created
+   before PreGeneration; every exit after the boundary through `turn.end`,
+   which builds the `*GenerationError` from the record, and finishes a
+   completed or suspended turn. The existing tests pass unmodified, and new
+   tests pinning each exit's return pass on the old code and the new. The
+   one visible difference is that `Response.CreatedAt` now precedes the
+   PreGeneration hooks. Found on the way, for step 5: tool calls the resume
+   phase runs do not report their background task handles, so
+   `Response.BackgroundTasks` misses a background task a resumed call
+   started.
 4. **The envelope** (sections 1, 6 and 13). `ResponseStatusIncomplete`, the
    outcome types, `Response.Turn`, `(resp, err)` on every exit,
    `GenerationError.Response`, `turn_ended`. Additive; nothing new is saved

@@ -764,11 +764,37 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	maps.Copy(hctx.Values, options.Values)
 	maps.Copy(hctx.Values, sessionStartValues)
 
+	// The turn begins here, immediately before the PreGeneration hooks.
+	// Every exit from now on goes through t.end, which reads the one record
+	// that the resume phase, the generation loop and Stop-hook
+	// continuations all feed.
+	t := &turn{
+		agent:  a,
+		logger: logger,
+		hctx:   hctx,
+		response: &Response{
+			Model:     model.Name(),
+			CreatedAt: time.Now(),
+		},
+		record: newTurnRecord(),
+		emit: func(ctx context.Context, item *ResponseItem) error {
+			if options.EventCallback != nil {
+				return options.EventCallback(ctx, item)
+			}
+			return nil
+		},
+		inputMessages: inputMessages,
+		sess:          sess,
+		suspendable:   suspendable,
+		rs:            rs,
+	}
+	eventCallback := t.record.collecting(t.emit)
+
 	// Run PreGeneration hooks
 	for _, hook := range a.hooks.PreGeneration {
 		if err := hook(ctx, hctx); err != nil {
 			logger.Error("pre-generation hook error", "error", err)
-			return nil, fmt.Errorf("pre-generation hook error: %w", err)
+			return t.end(ctx, failedExit(fmt.Errorf("pre-generation hook error: %w", err)))
 		}
 	}
 
@@ -784,37 +810,24 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		defer cancel()
 	}
 
-	response = &Response{
-		Model:     model.Name(),
-		CreatedAt: time.Now(),
-	}
-
-	eventCallback := func(ctx context.Context, item *ResponseItem) error {
-		if options.EventCallback != nil {
-			return options.EventCallback(ctx, item)
-		}
-		return nil
-	}
-
 	// Resume-specific handling before entering the generate loop:
 	//  1. Fire PostToolUse/PostToolUseFailure hooks for caller-supplied results.
 	//  2. If partial resume (some pending not supplied), short-circuit and
 	//     re-save the suspended turn.
 	//  3. Otherwise execute any "not-started" tool calls; if any re-suspend,
 	//     capture and unwind.
-	var resumeExtraItems []*ResponseItem
 	if rs != nil {
 		// Resolve tools once for the entire resume phase: used both to
 		// populate HookContext.Tool on post hooks and to execute any
 		// not-started tool calls.
 		_, resumeToolsByName, err := a.resolveTools(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("tool resolution error: %w", err)
+			return t.end(ctx, failedExit(fmt.Errorf("tool resolution error: %w", err)))
 		}
 
 		// Fire post hooks for caller-supplied results.
 		if err := a.fireResumePostHooks(ctx, hctx, rs, resumeToolsByName); err != nil {
-			return nil, err
+			return t.end(ctx, failedExit(err))
 		}
 		// Caller-supplied resume results are part of the turn just like results
 		// produced by in-process tools. Emit them after post hooks so streaming
@@ -829,16 +842,11 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				Type:           ResponseItemTypeToolCallResult,
 				ToolCallResult: result,
 			}
-			resumeExtraItems = append(resumeExtraItems, item)
 			if err := eventCallback(ctx, item); err != nil {
 				// Mirror the not-started execution path below: expose the
 				// items already emitted via *GenerationError so callers can
 				// recover partial work (no LLM calls yet, so usage is zero).
-				return nil, &GenerationError{
-					Err:   fmt.Errorf("resume tool-result event callback: %w", err),
-					Usage: &llm.Usage{},
-					Items: slices.Clone(resumeExtraItems),
-				}
+				return t.end(ctx, failedExitWithPartialWork(fmt.Errorf("resume tool-result event callback: %w", err)))
 			}
 		}
 		batchHalted := resumedBatchHalted(rs, resumeToolsByName)
@@ -851,38 +859,18 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				CompletedToolCalls: rs.CompletedToolCalls(),
 				BatchHalted:        batchHalted,
 			}
-			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, true)
+			return t.end(ctx, suspendedExit(snap, true))
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
-			// The mutex guards the append: during parallel tool execution,
-			// tool goroutines invoke this callback for stream/progress
-			// events concurrently with the drain loop in the main goroutine.
-			var resumeItems []*ResponseItem
-			var resumeItemsMu sync.Mutex
-			resumeCallback := func(ctx context.Context, item *ResponseItem) error {
-				resumeItemsMu.Lock()
-				resumeItems = append(resumeItems, item)
-				resumeItemsMu.Unlock()
-				return eventCallback(ctx, item)
-			}
-			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback, batchHalted)
+			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, eventCallback, batchHalted)
 			if err != nil {
 				// Mirror the generate loop: expose the items accumulated
 				// during the resume phase via a *GenerationError so callers
 				// can recover partial work (no LLM calls have happened yet,
-				// so usage is zero). Snapshot under the mutex — parallel
-				// tool goroutines may still be appending as we unwind.
-				resumeItemsMu.Lock()
-				itemsSnapshot := slices.Clone(resumeItems)
-				resumeItemsMu.Unlock()
-				return nil, &GenerationError{
-					Err:   err,
-					Usage: &llm.Usage{},
-					Items: append(slices.Clone(resumeExtraItems), itemsSnapshot...),
-				}
+				// so usage is zero).
+				return t.end(ctx, failedExitWithPartialWork(err))
 			}
-			resumeExtraItems = append(resumeExtraItems, resumeItems...)
 			// Merge completed outcomes into the tool_result message.
 			completed := batch.Completed()
 			if len(completed) > 0 {
@@ -898,7 +886,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				snap := buildSuspendedSnapshot(rs.NotStartedToolCalls, batch)
 				// Prepend previously-completed calls from the original suspend.
 				snap.CompletedToolCalls = append(rs.CompletedToolCalls(), snap.CompletedToolCalls...)
-				return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, false)
+				return t.end(ctx, suspendedExit(snap, false))
 			}
 		}
 
@@ -919,17 +907,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	stopHookActive := false
 
-	// Accumulators persist across Stop-hook continuations so every
-	// iteration's output (plus any synthetic user reason injected by a Stop
-	// hook) is preserved on the Response and in the saved session turn.
-	// generate() builds a fresh outputMessages slice on each call, so
-	// without this accumulation a Stop-hook continuation that later
-	// suspends would drop the first iteration's assistant turn.
-	var accumulatedOutput []*llm.Message
-	var accumulatedItems []*ResponseItem
-	accumulatedUsage := &llm.Usage{}
-	var accumulatedBackgroundTasks []*BackgroundTaskHandle
-
 	// Inject background results as a synthetic user message when the caller
 	// provided WithBackgroundResults. This fires PostBackgroundToolUse hooks
 	// and prepends the completed-task summary to the message history, so the
@@ -940,298 +917,84 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		var injErr error
 		messages, injErr = a.injectBackgroundResults(ctx, hctx, messages, options.BackgroundHandles, options.BackgroundResults)
 		if injErr != nil {
-			return nil, injErr
+			return t.end(ctx, failedExit(injErr))
 		}
 		hctx.Messages = messages
 		// The injected synthetic user message must also be part of the
-		// persisted turn: the session save below builds the turn from
-		// inputMessages + response.OutputMessages, so without this the
-		// saved history would pair two consecutive assistant messages and
-		// permanently lose the background results. Clone before appending
-		// so the caller's options.Messages backing array is not mutated.
+		// persisted turn: the session save builds the turn from the input
+		// messages and the output, so without this the saved history would
+		// pair two consecutive assistant messages and permanently lose the
+		// background results. Clone before appending so the caller's
+		// options.Messages backing array is not mutated.
 		if injected := messages[preInjectLen:]; len(injected) > 0 {
-			inputMessages = append(slices.Clone(inputMessages), injected...)
+			t.inputMessages = append(slices.Clone(t.inputMessages), injected...)
 		}
 	}
 
-generateLoop:
-	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, promptCacheKey, eventCallback, model)
-	if err != nil {
-		logger.Error("failed to generate response", "error", err)
-		// generate wraps loop failures in *GenerationError scoped to that
-		// single generate call. Fold in state accumulated before it —
-		// resume-phase items and prior Stop-hook continuation iterations —
-		// so the error reflects the whole turn's partial work. The partial
-		// turn is deliberately NOT saved to the session: a half-turn can
-		// violate provider role-alternation invariants (see GenerationError).
-		var genErr *GenerationError
-		if errors.As(err, &genErr) {
-			if genErr.Usage == nil {
-				genErr.Usage = &llm.Usage{}
-			}
-			accumulatedUsage.Add(genErr.Usage)
-			genErr.Usage = accumulatedUsage
-			genErr.OutputMessages = append(slices.Clone(accumulatedOutput), genErr.OutputMessages...)
-			turnItems := slices.Clone(resumeExtraItems)
-			turnItems = append(turnItems, accumulatedItems...)
-			turnItems = append(turnItems, genErr.Items...)
-			genErr.Items = turnItems
+	for {
+		genResult, err := a.generate(ctx, hctx, t.record, messages, systemPrompt, promptCacheKey, eventCallback, model)
+		if err != nil {
+			logger.Error("failed to generate response", "error", err)
+			// The error carries the whole turn's partial work: resume-phase
+			// items and prior Stop-hook continuation iterations included.
+			// The partial turn is deliberately NOT saved to the session: a
+			// half-turn can violate provider role-alternation invariants
+			// (see GenerationError).
+			return t.end(ctx, failedExitWithPartialWork(err))
 		}
-		return nil, err
-	}
+		t.syncResponse(true)
 
-	accumulatedOutput = append(accumulatedOutput, genResult.OutputMessages...)
-	accumulatedItems = append(accumulatedItems, genResult.Items...)
-	if genResult.Usage != nil {
-		accumulatedUsage.Add(genResult.Usage)
-	}
-	accumulatedBackgroundTasks = append(accumulatedBackgroundTasks, genResult.BackgroundTasks...)
+		// Handle suspension from generate.
+		if genResult.Suspended != nil {
+			return t.end(ctx, suspendedExit(genResult.Suspended, false))
+		}
 
-	response.FinishedAt = Ptr(time.Now())
-	response.Usage = accumulatedUsage
-	response.Items = accumulatedItems
-	response.OutputMessages = accumulatedOutput
-	response.StopReason = genResult.StopReason
-	response.StopDetails = genResult.StopDetails
+		// Run Stop hooks before PostGeneration. A hook that asks to continue
+		// re-enters the generate loop with its reason as a new user message.
+		continued := false
+		if len(a.hooks.Stop) > 0 {
+			hctx.Response = t.response
+			hctx.OutputMessages = t.response.OutputMessages
+			hctx.Usage = t.response.Usage
+			hctx.StopHookActive = stopHookActive
 
-	// Merge any resume-phase items into the response, keeping chronological order.
-	if len(resumeExtraItems) > 0 {
-		response.Items = append(resumeExtraItems, response.Items...)
-	}
-
-	// Handle suspension from generate.
-	if genResult.Suspended != nil {
-		response.BackgroundTasks = accumulatedBackgroundTasks
-		return a.finishSuspended(ctx, logger, hctx, response, inputMessages, genResult.Suspended, nil, eventCallback, sess, rs, false)
-	}
-
-	// Run Stop hooks before PostGeneration
-	if len(a.hooks.Stop) > 0 {
-		hctx.Response = response
-		hctx.OutputMessages = accumulatedOutput
-		hctx.Usage = accumulatedUsage
-		hctx.StopHookActive = stopHookActive
-
-		for _, hook := range a.hooks.Stop {
-			decision, err := hook(ctx, hctx)
-			if err != nil {
-				var abortErr *HookAbortError
-				if errors.As(err, &abortErr) {
-					abortErr.HookType = "Stop"
-					logger.Error("stop hook aborted", "error", abortErr)
-					return nil, abortErr
+			for _, hook := range a.hooks.Stop {
+				decision, err := hook(ctx, hctx)
+				if err != nil {
+					var abortErr *HookAbortError
+					if errors.As(err, &abortErr) {
+						abortErr.HookType = "Stop"
+						logger.Error("stop hook aborted", "error", abortErr)
+						return t.end(ctx, failedExit(abortErr))
+					}
+					logger.Error("stop hook error", "error", err)
+					continue
 				}
-				logger.Error("stop hook error", "error", err)
-				continue
-			}
-			if decision != nil && decision.Continue {
-				// Inject reason as user message and re-enter generate loop.
-				// The reason message becomes part of the conversation the LLM
-				// sees, so it must also be accumulated onto the response /
-				// saved turn so a subsequent suspend doesn't drop it.
-				reasonReminder, reminderErr := NewContextReminder("stop-continuation", "The following input arrived from the user: "+decision.Reason)
-				if reminderErr != nil {
-					return nil, reminderErr
+				if decision != nil && decision.Continue {
+					// Inject reason as user message and re-enter generate loop.
+					// The reason message becomes part of the conversation the LLM
+					// sees, so it must also be recorded in the turn so a
+					// subsequent suspend doesn't drop it.
+					reasonReminder, reminderErr := NewContextReminder("stop-continuation", "The following input arrived from the user: "+decision.Reason)
+					if reminderErr != nil {
+						return t.end(ctx, failedExit(reminderErr))
+					}
+					reasonMsg := NewReminderMessage(reasonReminder)
+					messages = append(messages, genResult.OutputMessages...)
+					messages = append(messages, reasonMsg)
+					t.record.addOutput(reasonMsg)
+					t.syncResponse(false)
+					hctx.Messages = messages
+					stopHookActive = true
+					continued = true
+					break
 				}
-				reasonMsg := NewReminderMessage(reasonReminder)
-				messages = append(messages, genResult.OutputMessages...)
-				messages = append(messages, reasonMsg)
-				accumulatedOutput = append(accumulatedOutput, reasonMsg)
-				response.OutputMessages = accumulatedOutput
-				hctx.Messages = messages
-				stopHookActive = true
-				goto generateLoop
 			}
 		}
-	}
-
-	// Run PostGeneration hooks
-	hctx.Response = response
-	hctx.OutputMessages = accumulatedOutput
-	hctx.Usage = accumulatedUsage
-	for _, hook := range a.hooks.PostGeneration {
-		if err := hook(ctx, hctx); err != nil {
-			// Check if this is a fatal abort error
-			var abortErr *HookAbortError
-			if errors.As(err, &abortErr) {
-				abortErr.HookType = "PostGeneration"
-				logger.Error("post-generation hook aborted", "error", abortErr)
-				return nil, abortErr
-			}
-			// Regular errors are logged but don't affect the response
-			logger.Error("post-generation hook error", "error", err)
+		if !continued {
+			return t.end(ctx, completedExit())
 		}
 	}
-
-	// Save session turn. On resume, replace the suspended event with the
-	// combined turn (pre-suspend turn messages plus new output). Otherwise
-	// append a new turn with input + output. Persistence failures are fatal:
-	// returning a successful Response while the session is out of sync would
-	// strand the caller with state that doesn't match disk.
-	//
-	// On a resume completion we also populate Response.Suspension with the
-	// final merged turn snapshot (PendingToolCalls = nil) so stateless
-	// callers can flush the turn into their local history in one append
-	// without reconciling a stale partial tool_result from their saved
-	// state.
-	if rs != nil {
-		turnMsgs := make([]*llm.Message, 0, len(rs.TurnMessages)+len(response.OutputMessages))
-		turnMsgs = append(turnMsgs, rs.TurnMessages...)
-		turnMsgs = append(turnMsgs, response.OutputMessages...)
-		switch {
-		case suspendable != nil:
-			if err := suspendable.SaveResumedTurn(ctx, turnMsgs, response.Usage); err != nil {
-				logger.Error("session save error", "error", err)
-				return nil, fmt.Errorf("save resumed turn: %w", err)
-			}
-		case sess != nil:
-			// Plain session: the suspend never hit SaveTurn (only
-			// SuspendableSessions auto-persist suspended turns), so this
-			// resume completion is the first write for this turn. Append.
-			if err := sess.SaveTurn(ctx, turnMsgs, response.Usage); err != nil {
-				logger.Error("session save error", "error", err)
-				return nil, fmt.Errorf("save turn: %w", err)
-			}
-		}
-		response.Suspension = &SuspensionState{
-			CompletedToolCalls: rs.CompletedToolCalls(),
-			TurnMessages:       turnMsgs,
-		}
-	} else if sess != nil {
-		turnMessages := make([]*llm.Message, 0, len(inputMessages)+len(response.OutputMessages))
-		turnMessages = append(turnMessages, inputMessages...)
-		turnMessages = append(turnMessages, response.OutputMessages...)
-		if err := sess.SaveTurn(ctx, turnMessages, response.Usage); err != nil {
-			logger.Error("session save error", "error", err)
-			return nil, fmt.Errorf("save turn: %w", err)
-		}
-	}
-
-	response.Status = ResponseStatusCompleted
-	if len(accumulatedBackgroundTasks) > 0 {
-		response.BackgroundTasks = accumulatedBackgroundTasks
-	}
-	return response, nil
-}
-
-// finishSuspended populates the suspended response, runs OnSuspend and
-// PostGeneration hooks, persists the suspended turn (if a
-// SuspendableSession is present), and emits the terminal suspended stream
-// item. Hooks run before persistence so a hook abort leaves the session
-// untouched — no compensation needed.
-//
-// Suspension works without a session: when sess is nil or does not
-// implement SuspendableSession, the Response.Suspension payload is still
-// populated and returned to the caller, who is responsible for persisting
-// history and state themselves.
-//
-// If skipSuspendNotifications is true, OnSuspend hooks and the terminal
-// stream item are skipped. This is used for pure partial resumes, which
-// continue an existing suspension rather than announcing a new one.
-func (a *Agent) finishSuspended(
-	ctx context.Context,
-	logger llm.Logger,
-	hctx *HookContext,
-	response *Response,
-	inputMessages []*llm.Message,
-	snap *suspendedSnapshot,
-	extraItems []*ResponseItem,
-	callback EventCallback,
-	sess Session,
-	rs *resumeState,
-	skipSuspendNotifications bool,
-) (*Response, error) {
-	if response.FinishedAt == nil {
-		response.FinishedAt = Ptr(time.Now())
-	}
-
-	// Build the turn the caller will need on resume. For a generate-driven
-	// suspend this is inputMessages + the assistant tool_use and any partial
-	// tool_result. For a partial resume it is the existing turn plus any
-	// tool_result updates captured in rs.
-	var turnMsgs []*llm.Message
-	if rs != nil {
-		turnMsgs = append(turnMsgs, rs.TurnMessages...)
-		turnMsgs = append(turnMsgs, response.OutputMessages...)
-	} else {
-		turnMsgs = append(turnMsgs, inputMessages...)
-		turnMsgs = append(turnMsgs, response.OutputMessages...)
-	}
-
-	response.Status = ResponseStatusSuspended
-	response.Suspension = &SuspensionState{
-		PendingToolCalls:   snap.PendingToolCalls,
-		CompletedToolCalls: snap.CompletedToolCalls,
-		TurnMessages:       turnMsgs,
-		BatchHalted:        snap.BatchHalted,
-	}
-	if len(extraItems) > 0 {
-		response.Items = append(extraItems, response.Items...)
-	}
-
-	suspendable, _ := sess.(SuspendableSession)
-
-	hctx.Response = response
-	hctx.OutputMessages = response.OutputMessages
-	hctx.Usage = response.Usage
-
-	// Run OnSuspend hooks before PostGeneration and before persistence.
-	// Aborting here leaves the session in its previous state.
-	if !skipSuspendNotifications {
-		for _, hook := range a.hooks.OnSuspend {
-			if err := hook(ctx, hctx); err != nil {
-				var abortErr *HookAbortError
-				if errors.As(err, &abortErr) {
-					abortErr.HookType = "OnSuspend"
-					logger.Error("on-suspend hook aborted", "error", abortErr)
-					return nil, abortErr
-				}
-				logger.Error("on-suspend hook error", "error", err)
-			}
-		}
-	}
-
-	// Run PostGeneration hooks (they see Status=Suspended). Still before
-	// persistence so an abort cannot strand a saved suspended turn.
-	for _, hook := range a.hooks.PostGeneration {
-		if err := hook(ctx, hctx); err != nil {
-			var abortErr *HookAbortError
-			if errors.As(err, &abortErr) {
-				abortErr.HookType = "PostGeneration"
-				logger.Error("post-generation hook aborted", "error", abortErr)
-				return nil, abortErr
-			}
-			logger.Error("post-generation hook error", "error", err)
-		}
-	}
-
-	// Persist the suspended turn only after hooks succeed, and only if the
-	// caller opted into auto-persistence via a SuspendableSession. Plain
-	// sessions and session-less callers rely on the Response.Suspension
-	// payload to drive their own persistence.
-	if suspendable != nil {
-		if err := suspendable.SaveSuspendedTurn(ctx, turnMsgs, response.Usage, response.Suspension); err != nil {
-			// If we can't persist the suspend, we must not return a
-			// suspended Response with pending IDs that don't exist in the
-			// session. Fail the call loudly.
-			logger.Error("session save error", "error", err)
-			return nil, fmt.Errorf("save suspended turn: %w", err)
-		}
-	}
-
-	// Emit the terminal suspended stream item only after any persistence
-	// succeeds and hooks have succeeded, so a stream consumer never sees a
-	// suspended terminal for a call that ultimately returned an error.
-	if !skipSuspendNotifications && callback != nil {
-		if err := callback(ctx, &ResponseItem{
-			Type:       ResponseItemTypeSuspended,
-			Suspension: response.Suspension,
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	return response, nil
 }
 
 // resumeState captures all information needed to resume a suspended session
@@ -1855,9 +1618,11 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 }
 
 // generate runs the LLM generation and tool execution loop. It handles the
-// interaction between the agent and the LLM, including tool calls. Returns the
-// final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, promptCacheKey string, callback EventCallback, model llm.LLM) (result *generateResult, err error) {
+// interaction between the agent and the LLM, including tool calls. Every
+// model response, output message and background task is recorded in record
+// as it happens, so an error return leaves the partial work there. callback
+// must record the items it is passed (turnRecord.collecting).
+func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRecord, messages []*llm.Message, systemPrompt string, promptCacheKey string, callback EventCallback, model llm.LLM) (*generateResult, error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -1867,56 +1632,14 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	// durable transcript blocks whose original adjacency must be preserved.
 	updatedMessages = append(updatedMessages, hctx.reminders.modelOnly...)
 
-	// New messages that are the output
-	var outputMessages []*llm.Message
-
-	// All response items in chronological order
-	var items []*ResponseItem
-
-	// Background task handles collected across all tool batches
-	var backgroundTasks []*BackgroundTaskHandle
-
-	// Wrap callback to collect all items. The mutex guards the append:
-	// during parallel tool execution, tool goroutines invoke this callback
-	// for stream/progress events concurrently with the drain loop in the
-	// main goroutine.
-	var itemsMu sync.Mutex
-	collectingCallback := func(ctx context.Context, item *ResponseItem) error {
-		itemsMu.Lock()
-		items = append(items, item)
-		itemsMu.Unlock()
-		return callback(ctx, item)
-	}
-
-	// Accumulates usage across multiple LLM calls
-	totalUsage := &llm.Usage{}
-
-	// The stop reason of the last model response
-	var stopReason string
-	var stopDetails *llm.StopDetails
-
-	// Wrap any loop failure in a *GenerationError carrying the state
-	// accumulated before the failure, so callers can recover cost
-	// accounting and partial work via errors.As. The items snapshot is
-	// taken under the mutex because parallel tool goroutines may still be
-	// appending via collectingCallback as an error unwinds.
-	defer func() {
-		if err != nil {
-			itemsMu.Lock()
-			itemsSnapshot := slices.Clone(items)
-			itemsMu.Unlock()
-			err = &GenerationError{
-				Err:            err,
-				Usage:          totalUsage,
-				OutputMessages: outputMessages,
-				Items:          itemsSnapshot,
-			}
-		}
-	}()
+	// The output of this call starts here in the turn record; earlier
+	// output belongs to the resume phase or to a previous Stop-hook
+	// continuation.
+	outputStart := record.outputLen()
 
 	newMessage := func(msg *llm.Message) {
 		updatedMessages = append(updatedMessages, msg)
-		outputMessages = append(outputMessages, msg)
+		record.addOutput(msg)
 	}
 	deliverReminders := func(deliveries []reminderDelivery) {
 		for _, delivery := range deliveries {
@@ -2011,7 +1734,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		var response *llm.Response
 		var ttfc float64
 		if streamingLLM, ok := model.(llm.StreamingLLM); ok {
-			response, ttfc, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, collectingCallback)
+			response, ttfc, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, callback)
 		} else {
 			response, err = model.Generate(chatCtx, iterOpts...)
 		}
@@ -2040,16 +1763,14 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			"generation_number", i+1,
 		)
 
-		// Remember the assistant response message
+		// Record the assistant response message, its usage and its stop
+		// reason before the callback, which can fail.
 		assistantMsg := response.Message()
 		newMessage(assistantMsg)
-		stopReason, stopDetails = response.StopReason, response.StopDetails
-
-		// Track total token usage
-		totalUsage.Add(&response.Usage)
+		record.addModelResponse(response)
 
 		// Always call callback for every LLM-generated message
-		if err := collectingCallback(ctx, &ResponseItem{
+		if err := callback(ctx, &ResponseItem{
 			Type:    ResponseItemTypeMessage,
 			Message: assistantMsg,
 			Usage:   response.Usage.Copy(),
@@ -2064,7 +1785,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		}
 
 		// Execute all requested tool calls
-		batch, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, collectingCallback, false)
+		batch, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, callback, false)
 		if err != nil {
 			return nil, err
 		}
@@ -2072,7 +1793,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		// Collect background task handles from completed outcomes.
 		for _, o := range batch.Outcomes {
 			if o.Result != nil && o.Result.BackgroundHandle != nil {
-				backgroundTasks = append(backgroundTasks, o.Result.BackgroundHandle)
+				record.addBackgroundTask(o.Result.BackgroundHandle)
 			}
 		}
 
@@ -2094,15 +1815,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		}
 
 		if batch.Suspended {
-			snapshot := buildSuspendedSnapshot(toolCalls, batch)
 			return &generateResult{
-				OutputMessages:  outputMessages,
-				Items:           items,
-				Usage:           totalUsage,
-				StopReason:      stopReason,
-				StopDetails:     stopDetails,
-				Suspended:       snapshot,
-				BackgroundTasks: backgroundTasks,
+				OutputMessages: record.outputSince(outputStart),
+				Suspended:      buildSuspendedSnapshot(toolCalls, batch),
 			}, nil
 		}
 
@@ -2128,12 +1843,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	}
 
 	return &generateResult{
-		OutputMessages:  outputMessages,
-		Items:           items,
-		Usage:           totalUsage,
-		StopReason:      stopReason,
-		StopDetails:     stopDetails,
-		BackgroundTasks: backgroundTasks,
+		OutputMessages: record.outputSince(outputStart),
 	}, nil
 }
 
@@ -3181,24 +2891,17 @@ func newPromptCacheKeyForAgent() string {
 	return "dive-agent-" + uuid.NewString()
 }
 
+// generateResult is what one generate call returns besides what it recorded
+// in the turn record.
 type generateResult struct {
+	// OutputMessages is the output of this call alone. A Stop-hook
+	// continuation appends it to the working message set.
 	OutputMessages []*llm.Message
-	Items          []*ResponseItem
-	Usage          *llm.Usage
-
-	// StopReason and StopDetails are those of the last model response.
-	StopReason  string
-	StopDetails *llm.StopDetails
 
 	// Suspended is non-nil if the terminal iteration of the loop unwound
 	// because at least one tool returned SuspendResult. CreateResponse uses
 	// this to persist the partial turn and return a suspended Response.
 	Suspended *suspendedSnapshot
-
-	// BackgroundTasks collects handles for all background tasks that were
-	// started during this generate() call. Populated from ToolCallResult
-	// entries that have BackgroundHandle set.
-	BackgroundTasks []*BackgroundTaskHandle
 }
 
 // suspendedSnapshot describes the state captured when generate() returns
