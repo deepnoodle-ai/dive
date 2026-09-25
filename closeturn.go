@@ -164,6 +164,9 @@ func turnOutcomeText(o *TurnOutcome) string {
 		text = "The previous turn reached its limit of tool calls before finishing. Finish with the information already gathered, or ask the user before continuing."
 	case TurnReasonProviderStopped:
 		text = fmt.Sprintf("The previous turn ended because the provider stopped the response before it finished (reason: %s). Any tool call it made was not run. Everything above this note happened as shown. Continue from the completed work; if the same stop repeats, tell the user rather than retrying.", o.Error)
+	case TurnReasonProcessExit:
+		text = "The previous turn was interrupted before it finished: the process running it stopped. " + asShown +
+			" Continue from the completed work: do not repeat steps that completed, and do not assume steps that did not complete have happened."
 	case TurnReasonPause:
 		text = "The previous turn's server tool loop was paused before it finished. Its trailing call was not completed; start it again if the user still wants it."
 	default:

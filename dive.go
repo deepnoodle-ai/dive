@@ -3,6 +3,7 @@ package dive
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -82,14 +83,19 @@ type SuspendableSession interface {
 // turn stays open, and a WithContinue invocation folds into it instead of
 // adding a turn of its own. session.Session implements it.
 //
+// With DurabilityOptions.CheckpointSteps the agent also checkpoints the turn
+// at each step of the invocation, with ResponseStatusRunning. A store that
+// supports this should append each such checkpoint rather than rewrite the
+// session, since there is one per model response and tool call.
+//
 // Load takes a context and returns an error, unlike LoadSuspension, so a
 // remote store can implement it.
 type TurnStore interface {
 	Session
 
 	// Load returns the history needed to build context, the open turn if
-	// any (suspended or incomplete), and the session revision a later
-	// checkpoint must carry.
+	// any (suspended, incomplete, or running when a step checkpoint left
+	// it), and the session revision a later checkpoint must carry.
 	Load(ctx context.Context) (*SessionSnapshot, error)
 
 	// CheckpointTurn records the turn's state and returns the new session
@@ -113,9 +119,11 @@ type SessionSnapshot struct {
 	// sees them.
 	History []*llm.Message
 
-	// OpenTurn is the last turn when it is suspended or incomplete, and nil
-	// when it completed. Its Messages are closed; an incomplete turn's end
-	// with the outcome reminder.
+	// OpenTurn is the last turn when it is suspended, incomplete or
+	// running, and nil when it completed. Its Messages are closed; an
+	// incomplete turn's end with the outcome reminder. A running turn's are
+	// as the last step checkpoint left them: the calls it records as
+	// running have no result.
 	OpenTurn *Turn
 
 	// Revision is the session revision the snapshot was read at.
@@ -123,7 +131,8 @@ type SessionSnapshot struct {
 
 	// LatestOutcome is the outcome of the session's latest turn when that
 	// turn is incomplete, even when a compaction followed it and it is no
-	// longer open. Nil when the latest turn completed or is suspended.
+	// longer open. Nil when the latest turn completed, is suspended or is
+	// running.
 	LatestOutcome *TurnOutcome
 }
 
@@ -139,6 +148,46 @@ type revisionConflictError struct{}
 func (*revisionConflictError) Error() string { return "dive: session revision conflict" }
 
 func (*revisionConflictError) Is(target error) bool { return target == ErrSaveRejected }
+
+// SessionClaimer is an optional TurnStore extension for execution
+// ownership: several processes that run the agent on one session claim it
+// before an invocation does any work, so that only one of them runs tools
+// and writes to the session at a time. The in-process lock (LockSession)
+// serializes invocations within one process only, and a revision conflict
+// rejects a stale write only after both processes have run their tools.
+//
+// A claim is a lease: it lasts until the owner releases it or its time to
+// live passes, so a claim left by a process that exited expires. The agent
+// claims the session when DurabilityOptions.Claim is set, renews the claim
+// while the invocation runs, and releases it at the end.
+type SessionClaimer interface {
+	TurnStore
+
+	// ClaimSession claims the session for owner for ttl, or renews owner's
+	// claim. It fails with an error that wraps ErrSessionClaimed while
+	// another owner holds a claim that has not expired. Once it succeeds,
+	// Load reflects every write the store holds, including those another
+	// process made, and the store refuses a checkpoint through this session
+	// with ErrSessionClaimed if another owner claims the session after this
+	// claim expires.
+	ClaimSession(ctx context.Context, owner string, ttl time.Duration) error
+
+	// ReleaseSession ends owner's claim. Releasing a claim owner does not
+	// hold does nothing.
+	ReleaseSession(ctx context.Context, owner string) error
+}
+
+// ErrSessionClaimed is wrapped by the error of SessionClaimer.ClaimSession
+// when another owner holds the session, and of a checkpoint refused because
+// the session is now another owner's. A checkpoint refused with it wrote
+// nothing: errors.Is(err, ErrSaveRejected) holds.
+var ErrSessionClaimed error = &sessionClaimedError{}
+
+type sessionClaimedError struct{}
+
+func (*sessionClaimedError) Error() string { return "dive: session is claimed by another owner" }
+
+func (*sessionClaimedError) Is(target error) bool { return target == ErrSaveRejected }
 
 // ErrConflictingToolResult is returned when a resume supplies a result for a
 // call that already has a different one. It also matches

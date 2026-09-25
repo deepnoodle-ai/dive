@@ -41,6 +41,10 @@ The core of the harness: `Agent.CreateResponse` runs the generate → tool-call
   status and the state of each tool call; `session.Session` stores them as a
   `TurnStore` with a revision that resumes and imports are checked against,
   and a resume can be sent again without running a result's hooks twice.
+- **Durable turns** — with `DurabilityOptions.CheckpointSteps` a turn is
+  recorded at each model response and tool call, so a turn whose process
+  exits is found running and closed with `process_exit`, its running calls
+  unknown; `DurabilityOptions.Claim` lets several processes share a session.
 - **Stop-reason handling** — the agent reads each response's stop reason: an
   output or context limit, a refusal and a provider stop run no tool call, a
   paused server tool loop is sent again, and a stream that ends before its end

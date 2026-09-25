@@ -356,7 +356,73 @@ func sumUsage(a, b *llm.Usage) *llm.Usage {
 // eventAppender is the internal interface used by Session to persist events.
 type eventAppender interface {
 	appendEvent(ctx context.Context, sessionID string, evt *event) error
+	appendStep(ctx context.Context, sessionID string, step *stepRecord) error
 	putSession(ctx context.Context, sess *sessionData) error
+}
+
+// stepRecord is a step checkpoint of a running turn as a store appends it:
+// the whole event for the turn's first step, or the change since the last.
+// A store that rewrites the session writes a running turn's event as a
+// step record with Event set, and a finished turn's as an event, so that a
+// reader that skips step records, as versions before step checkpoints do,
+// sees each finished turn once and no running one.
+type stepRecord struct {
+	// Event is the running turn's whole event, for its first step.
+	Event *event `json:"event,omitempty"`
+
+	// EventID names the event a change applies to. The event keeps its
+	// first From messages, followed by Messages, and takes the usage, turn
+	// state, revision and timestamp given here.
+	EventID   string         `json:"event_id,omitempty"`
+	From      int            `json:"from,omitempty"`
+	Messages  []*llm.Message `json:"messages,omitempty"`
+	Usage     *llm.Usage     `json:"usage,omitempty"`
+	Turn      *turnState     `json:"turn,omitempty"`
+	Revision  uint64         `json:"revision,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
+}
+
+// apply returns the event the change makes of prev.
+func (r *stepRecord) apply(prev *event) (*event, error) {
+	if r.From < 0 || r.From > len(prev.Messages) {
+		return nil, fmt.Errorf("step for event %s keeps %d of its %d messages", prev.ID, r.From, len(prev.Messages))
+	}
+	evt := prev.copy()
+	evt.Messages = append(evt.Messages[:r.From:r.From], r.Messages...)
+	evt.Usage = r.Usage
+	evt.Turn = r.Turn
+	evt.Revision = r.Revision
+	evt.Timestamp = r.Timestamp
+	return evt, nil
+}
+
+// stepChange returns the step record that makes next of prev, two versions
+// of one running turn's event: the messages they share, compared by their
+// encoding, are kept.
+func stepChange(prev, next *event) *stepRecord {
+	from := 0
+	for from < len(prev.Messages) && from < len(next.Messages) && sameMessage(prev.Messages[from], next.Messages[from]) {
+		from++
+	}
+	return &stepRecord{
+		EventID:   next.ID,
+		From:      from,
+		Messages:  next.Messages[from:],
+		Usage:     next.Usage,
+		Turn:      next.Turn,
+		Revision:  next.Revision,
+		Timestamp: next.Timestamp,
+	}
+}
+
+// sameMessage reports whether two messages encode the same.
+func sameMessage(a, b *llm.Message) bool {
+	if a == b {
+		return true
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(ja) == string(jb)
 }
 
 // sessionData is the internal storage representation of a session.
@@ -402,6 +468,12 @@ type Session struct {
 	mu       sync.RWMutex
 	data     *sessionData
 	appender eventAppender // nil for in-memory sessions
+
+	// claim is the session's claim when its store does not keep claims
+	// itself (see ClaimSession), and claimOwner the owner this instance
+	// last claimed the session as, or empty.
+	claim      *sessionClaim
+	claimOwner string
 }
 
 // New creates an in-memory session with the given ID.
@@ -510,16 +582,39 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 // evt.Revision, persisting it with the store's append. On a store error the
 // session resyncs from the store. Caller must hold s.mu.
 func (s *Session) appendLocked(ctx context.Context, evt *event) error {
+	return s.recordLocked(ctx, len(s.data.Events), evt, func(a eventAppender) error {
+		return a.appendEvent(ctx, s.data.ID, evt)
+	})
+}
+
+// recordLocked puts evt at index i of the log, or at its end when i is its
+// length, advances the revision to evt.Revision, and persists the change
+// with persist, which appends to the store. On a store error the session
+// resyncs from the store. Caller must hold s.mu.
+func (s *Session) recordLocked(ctx context.Context, i int, evt *event, persist func(eventAppender) error) error {
+	if err := s.checkClaimLocked(ctx); err != nil {
+		return err
+	}
 	prevLen := len(s.data.Events)
 	prevUpdatedAt := s.data.UpdatedAt
 	prevRevision := s.data.Revision
-	s.data.Events = append(s.data.Events, evt)
+	var prev *event
+	if i < prevLen {
+		prev = s.data.Events[i]
+		s.data.Events[i] = evt
+	} else {
+		s.data.Events = append(s.data.Events, evt)
+	}
 	s.data.UpdatedAt = evt.Timestamp
 	s.data.Revision = evt.Revision
 	if s.appender != nil {
-		if err := s.appender.appendEvent(ctx, s.data.ID, evt); err != nil {
+		if err := persist(s.appender); err != nil {
 			s.resyncAfterWriteError(ctx, func() {
-				s.data.Events = s.data.Events[:prevLen]
+				if prev != nil {
+					s.data.Events[i] = prev
+				} else {
+					s.data.Events = s.data.Events[:prevLen]
+				}
 				s.data.UpdatedAt = prevUpdatedAt
 				s.data.Revision = prevRevision
 			})
@@ -608,6 +703,9 @@ func (s *Session) restoreSnapshot(snap sessionSnapshot) {
 // When the session has no appender (in-memory mode), mutate still runs but
 // no rollback is performed — there is nothing to recover from.
 func (s *Session) withRollback(ctx context.Context, mutate func()) error {
+	if err := s.checkClaimLocked(ctx); err != nil {
+		return err
+	}
 	snap := s.snapshotMutated()
 	s.data.Revision++
 	mutate()
@@ -855,10 +953,10 @@ type forkOptions struct {
 }
 
 // ForkWithOpenTurn copies an open turn into the fork as well. An incomplete
-// turn is copied as it is. A suspended turn is copied closed, as
-// Agent.CancelSuspendedTurn closes one: its pending calls are answered as
-// unknown, since the original's owner may still run them, and the turn is
-// incomplete with TurnReasonCanceled and TurnNextReconcile.
+// turn is copied as it is. A suspended or running turn is copied closed, as
+// Agent.CancelSuspendedTurn closes one: its pending or running calls are
+// answered as unknown, since the original's owner may still run them, and
+// the turn is incomplete with TurnReasonCanceled and TurnNextReconcile.
 func ForkWithOpenTurn() ForkOption {
 	return func(o *forkOptions) { o.openTurn = true }
 }
@@ -867,10 +965,10 @@ func ForkWithOpenTurn() ForkOption {
 // the last completed turn. The forked session records the original as its
 // parent. To persist the fork, save it to a store with store.Put.
 //
-// An open turn, a last turn that is suspended or incomplete, is left out
-// unless ForkWithOpenTurn is passed. A forked session is never suspended:
-// pending out-of-band tool calls are owned by whoever launched the original
-// suspend and cannot be resumed against a divergent branch.
+// An open turn, a last turn that is suspended, incomplete or running, is
+// left out unless ForkWithOpenTurn is passed. A forked session is never
+// suspended: pending out-of-band tool calls are owned by whoever launched
+// the original suspend and cannot be resumed against a divergent branch.
 func (s *Session) Fork(newID string, opts ...ForkOption) *Session {
 	var o forkOptions
 	for _, opt := range opts {
@@ -888,8 +986,8 @@ func (s *Session) Fork(newID string, opts ...ForkOption) *Session {
 		if !o.openTurn {
 			continue
 		}
-		if s.data.Suspended {
-			events = append(events, s.closedSuspendedEventLocked(e))
+		if s.data.Suspended || s.eventStatusLocked(i) == dive.ResponseStatusRunning {
+			events = append(events, s.closedOpenEventLocked(e))
 		} else {
 			events = append(events, e.copy())
 		}

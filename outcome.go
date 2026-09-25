@@ -34,7 +34,8 @@ type Turn struct {
 	Origin *TurnOrigin `json:"origin,omitempty"`
 
 	// Status is the turn's state as this invocation left it: completed,
-	// suspended or incomplete. It is Response.Status.
+	// suspended or incomplete. It is Response.Status. A step checkpoint
+	// stores a turn still in progress as running.
 	Status ResponseStatus `json:"status,omitempty"`
 
 	// Messages is what a session saves for this invocation, closed so it
@@ -65,7 +66,7 @@ type Turn struct {
 
 	// ToolCalls is the state of every client tool call in the turn, in
 	// order: completed, waiting for a result on a suspended turn,
-	// not_started, or unknown.
+	// not_started, or unknown, and running in a step checkpoint.
 	ToolCalls []ToolCallRecord `json:"tool_calls,omitempty"`
 
 	// Superseded is set on an incomplete turn that later turns followed
@@ -235,6 +236,13 @@ const (
 	// TurnReasonPause: a server tool loop paused (pause_turn) more times
 	// than the agent continues it in one invocation.
 	TurnReasonPause TurnReason = "pause"
+
+	// TurnReasonProcessExit: the invocation advancing the turn ended without
+	// recording how the turn ended, as when its process exited. The agent
+	// sets it when it loads a turn a step checkpoint left running
+	// (DurabilityOptions.CheckpointSteps); the calls recorded as running
+	// are unknown.
+	TurnReasonProcessExit TurnReason = "process_exit"
 )
 
 // TurnNext says what an incomplete turn needs next.
@@ -276,6 +284,11 @@ const (
 	// ToolCallStateWaiting: the call suspended and its turn is waiting for
 	// its result (SuspensionState.PendingToolCalls).
 	ToolCallStateWaiting ToolCallState = "waiting"
+
+	// ToolCallStateRunning: a step checkpoint recorded the call as started
+	// and no result yet. Only a running turn has such a call; when the turn
+	// is closed, the call is unknown.
+	ToolCallStateRunning ToolCallState = "running"
 )
 
 // failureOutcome classifies the error that ended an invocation. A context
@@ -320,7 +333,8 @@ func failureOutcome(err error, record *turnRecord) *TurnOutcome {
 func defaultNext(reason TurnReason) TurnNext {
 	switch reason {
 	case TurnReasonDeadline, TurnReasonProviderError, TurnReasonStreamInterrupted, TurnReasonCallbackError,
-		TurnReasonOutputLimit, TurnReasonIterationLimit, TurnReasonProviderStopped, TurnReasonPause:
+		TurnReasonOutputLimit, TurnReasonIterationLimit, TurnReasonProviderStopped, TurnReasonPause,
+		TurnReasonProcessExit:
 		return TurnNextContinue
 	default:
 		return TurnNextInput

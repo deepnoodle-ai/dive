@@ -389,6 +389,7 @@ Session types (`session` package):
 - `sess.Load(ctx)` / `sess.CheckpointTurn(ctx, rev, turn)` - `dive.TurnStore`: history, open turn and revision; record (or import) a turn, `dive.ErrRevisionConflict` when stale
 - `sess.Turns(ctx)` - every turn's record (`Turn.Superseded` for an abandoned incomplete turn)
 - `sess.RemoveLastTurn(ctx)` - delete the last turn, whatever its state (`CancelSuspension` is deprecated)
+- `sess.ClaimSession(ctx, owner, ttl)` / `sess.ReleaseSession(ctx, owner)` - `dive.SessionClaimer`: exclude other owners (other processes, for a `FileStore`) until released or expired; `dive.ErrSessionClaimed`
 - `sess.Compact(ctx, summarizer)` - replace events with summary
 - `sess.TotalUsage()` - sum token usage
 - `session.ForkSession(ctx, store, fromID, newID, opts...)` - fork + persist
@@ -450,6 +451,7 @@ Key types and helpers:
 - `dive.WithResume(state, results)` / `dive.WithToolResults(results)` — resume options; a result already accepted is skipped, a different one is `ErrConflictingToolResult`
 - `dive.WithResumeRequest(dive.ResumeRequest{TurnID, ExpectedRevision, ToolResults})` — resume only if the session's open turn and revision are still those (`ErrRevisionConflict`)
 - `agent.CancelSuspendedTurn(ctx, opts...)` — close a suspended turn without a model call: pending calls `unknown`, `canceled`, nil error
+- `dive.AgentOptions.Durability{CheckpointSteps, Claim, Owner, ClaimTTL}` — `CheckpointSteps` records the turn `running` at each model response and tool call (`ToolCallStateRunning`), and a turn found running is closed with `TurnReasonProcessExit`; `Claim` holds a `SessionClaimer` session for the invocation
 - `dive.OnSuspendHook` — fires before persistence; an abort ends the turn incomplete with the suspending calls `unknown`
 - `dive.SuspendableSession` — optional `Session` extension for auto-persistence
 - `session.ListOptions{Suspended: dive.Ptr(true)}` — sweep for stale suspended sessions

@@ -215,6 +215,11 @@ type turn struct {
 
 	// syncedVersion is the record version the response was last synced at.
 	syncedVersion int
+
+	// batch is the tool batch in flight, for step checkpoints, guarded by
+	// stepMu, which also serializes the checkpoints.
+	stepMu sync.Mutex
+	batch  *stepBatch
 }
 
 // turnExitKind says how an invocation ends.
@@ -319,6 +324,13 @@ func (t *turn) end(ctx context.Context, exit turnExit) (*Response, error) {
 // IncompleteTurnOptions.Discard is set. A failed partial resume returns no
 // response: the turn is still suspended.
 func (t *turn) fail(ctx context.Context, err error) (*Response, error) {
+	// A context cancelled with a cause, as a lost session claim cancels the
+	// invocation, reports the cause with the cancellation.
+	if errors.Is(err, context.Canceled) {
+		if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
+			err = fmt.Errorf("%w: %w", err, cause)
+		}
+	}
 	if t.partialResume {
 		r := t.record
 		r.mu.Lock()

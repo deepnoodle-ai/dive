@@ -127,6 +127,12 @@ func (s *MemoryStore) appendEvent(ctx context.Context, sessionID string, evt *ev
 	return nil
 }
 
+// appendStep implements eventAppender for MemoryStore: like appendEvent, a
+// no-op.
+func (s *MemoryStore) appendStep(ctx context.Context, sessionID string, step *stepRecord) error {
+	return nil
+}
+
 // putSession implements eventAppender for MemoryStore. Used by Compact.
 func (s *MemoryStore) putSession(ctx context.Context, data *sessionData) error {
 	// No-op: MemoryStore shares data directly with Session.
