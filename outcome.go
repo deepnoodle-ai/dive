@@ -172,16 +172,6 @@ const (
 	TurnReasonPause TurnReason = "pause"
 )
 
-// stoppedByModel reports whether the reason is a stop the model or provider
-// made, which ends the invocation without an error.
-func (r TurnReason) stoppedByModel() bool {
-	switch r {
-	case TurnReasonOutputLimit, TurnReasonContextLimit, TurnReasonIterationLimit, TurnReasonProviderStopped, TurnReasonPause:
-		return true
-	}
-	return false
-}
-
 // TurnNext says what an incomplete turn needs next.
 type TurnNext string
 

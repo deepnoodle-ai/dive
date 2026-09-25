@@ -274,13 +274,22 @@ func subagentFailure(response *dive.Response, err error) string {
 	return text
 }
 
-// partialAnswer returns the answer text of an incomplete subagent response,
-// or "".
+// partialAnswer returns the answer text of the last assistant message an
+// incomplete subagent response kept, or "". It reads OutputMessages rather
+// than OutputText, since text a stream was cut off in, or a message an
+// OnIncompleteTurn hook wrote, has no message item.
 func partialAnswer(response *dive.Response) string {
 	if response == nil || response.Status != dive.ResponseStatusIncomplete {
 		return ""
 	}
-	return response.OutputText()
+	for i := len(response.OutputMessages) - 1; i >= 0; i-- {
+		if msg := response.OutputMessages[i]; msg.Role == llm.Assistant {
+			if text := msg.AnswerText(); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 // subagentOutput renders a completed subagent response as text. Subagents are
@@ -289,7 +298,7 @@ func partialAnswer(response *dive.Response) string {
 // stopped short (an output or iteration limit) says why before its answer.
 func subagentOutput(response *dive.Response) string {
 	if response != nil && response.Status == dive.ResponseStatusIncomplete && response.Turn != nil && response.Turn.Outcome != nil {
-		return fmt.Sprintf("Subagent stopped before finishing (%s). Its answer so far:\n%s", response.Turn.Outcome.Reason, response.OutputText())
+		return fmt.Sprintf("Subagent stopped before finishing (%s). Its answer so far:\n%s", response.Turn.Outcome.Reason, partialAnswer(response))
 	}
 	if response != nil && response.Status == dive.ResponseStatusSuspended {
 		if response.Suspension != nil && len(response.Suspension.PendingToolCalls) > 0 {

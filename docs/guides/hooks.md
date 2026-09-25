@@ -326,7 +326,8 @@ Hooks: dive.Hooks{
         func(ctx context.Context, hctx *dive.HookContext) error {
             for _, p := range hctx.Response.Suspension.PendingToolCalls {
                 if err := postWebhook(ctx, p); err != nil {
-                    return err // aborts persistence; caller sees the error
+                    // Abort the suspension; a plain error is only logged.
+                    return dive.AbortGenerationWithCause("webhook failed", err)
                 }
             }
             return nil

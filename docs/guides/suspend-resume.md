@@ -348,7 +348,8 @@ func webhookNotifier(ctx context.Context, hctx *dive.HookContext) error {
             "tool_call":   p,
         }
         if err := postJSON(ctx, payload); err != nil {
-            return err // aborts persistence — caller sees the error
+            // Abort the suspension; a plain error is only logged.
+            return dive.AbortGenerationWithCause("webhook failed", err)
         }
     }
     return nil
@@ -361,10 +362,10 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 })
 ```
 
-Because the hook runs before persistence, returning
-`dive.AbortGeneration("...")` (or any error on the critical path) aborts
-the transition: the caller sees an error and the session stays in its
-previous state. No compensating rollback needed.
+Returning `dive.AbortGeneration("...")` aborts the suspension: the turn
+ends incomplete with `hook_abort`, the suspending calls are recorded as
+`unknown` (their requests may already be dispatched), and the closed turn
+is saved, so the session is not suspended. Other errors are logged.
 
 `PostGeneration` still runs on suspended responses with
 `Status == ResponseStatusSuspended`, so existing hook authors (metrics,
