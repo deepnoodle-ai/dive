@@ -2128,6 +2128,7 @@ the contracts into them. Candidates, each independent:
    checked an unknown email before finishing; Haiku checked in two of four
    runs and assumed the email sent in the others, and "check before relying
    on it or repeating it" did no better (two of three, one resend). The
-   wording stays; an application whose tools have effects that must not be
-   assumed should reconcile unknown calls itself (`RequireReconcile`). Other
-   providers are not yet checked.
+   wording stays. An application whose tools have effects that must not be
+   assumed can set `RequireReconcile`, so that new input waits until the turn
+   is continued, where every model checked, or removed. Other providers are
+   not yet checked.
