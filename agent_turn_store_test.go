@@ -521,3 +521,26 @@ func TestResumeRequestWithoutSuspension(t *testing.T) {
 	assert.Equal(t, mock.calls(), 1)
 	assert.Equal(t, sess.EventCount(), 1)
 }
+
+// A resume request with no results on a suspended session re-saves the
+// suspension unchanged: no hook runs and no model is called.
+func TestResumeRequestWithoutResultsStaysSuspended(t *testing.T) {
+	mock := &responseLLM{responses: []*llm.Response{
+		callResponse("tool_use", toolUse("toolu_1", "approve", `{}`)),
+	}}
+	sess := session.New("request-no-results")
+	agent, err := NewAgent(AgentOptions{Model: mock, Session: sess, Tools: []Tool{suspendingTool("approve", nil)}})
+	assert.NoError(t, err)
+	resp, err := agent.CreateResponse(context.Background(), WithInput("go"))
+	assert.NoError(t, err)
+
+	resp, err = agent.CreateResponse(context.Background(), WithResumeRequest(ResumeRequest{
+		TurnID: resp.Turn.ID, ExpectedRevision: resp.Turn.Revision,
+	}))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_1")
+	assert.Equal(t, mock.calls(), 1)
+	assert.True(t, sess.IsSuspended())
+}
