@@ -627,7 +627,10 @@ func TestHookAbortError(t *testing.T) {
 
 		resp, err := agent.CreateResponse(context.Background(), WithInput("test"))
 		assert.Error(t, err)
-		assert.Nil(t, resp)
+		assert.Equal(t, resp.Status, ResponseStatusIncomplete)
+		assert.Equal(t, resp.Turn.Outcome.Reason, TurnReasonHookAbort)
+		assert.Equal(t, resp.Turn.Outcome.Hook, "PostGeneration")
+		assert.Equal(t, resp.Turn.Outcome.Next, TurnNextInput)
 
 		var abortErr *HookAbortError
 		assert.ErrorAs(t, err, &abortErr)
@@ -649,7 +652,8 @@ func TestHookAbortError(t *testing.T) {
 
 		resp, err := agent.CreateResponse(context.Background(), WithInput("test"))
 		assert.Error(t, err)
-		assert.Nil(t, resp)
+		assert.Equal(t, resp.Status, ResponseStatusIncomplete)
+		assert.Equal(t, resp.Turn.Outcome.Reason, TurnReasonError)
 		assert.ErrorContains(t, err, "pre-generation hook error: setup failed")
 	})
 

@@ -840,7 +840,8 @@ stays as the compatibility route with its existing fields, which become
 views of the same response.
 
 Other fields on an incomplete response: `Items` is everything emitted,
-including the synthesized not-run and unknown results and the terminal item;
+including the synthesized not-run and unknown results, but not the terminal
+item, which mirrors the response itself;
 `BackgroundTasks` carries the handles of background tasks started before the
 end and one handle per unknown call.
 
@@ -1585,10 +1586,10 @@ would make neither reviewable.
    no stop reason at all, reports one. Left for step 6: the Anthropic and
    Responses iterators end without an error when the transport closes
    before their terminal event, so the agent treats a stream whose
-   accumulator never saw `message_stop` as interrupted; the Gemini iterator
-   still closes a stream that ends without a finish reason cleanly, a
-   deliberate choice of #271 that hides a cut-off response, and step 6
-   decides whether to change it.
+   accumulator never saw `message_stop` as interrupted. The Gemini iterator
+   keeps closing a stream that ends without a finish reason cleanly, as #271
+   chose (decided on 25 September): its stop reason is
+   `other`, so the text is kept and no tool call in it runs.
 3. **Exit-path refactor.** Done: one turn record (`turnRecord` in
    `turn.go`) fed by the resume phase, the generation loop and Stop-hook
    continuations, into which each model response, its usage and stop reason
@@ -1598,14 +1599,38 @@ would make neither reviewable.
    completed or suspended turn. The existing tests pass unmodified, and new
    tests pinning each exit's return pass on the old code and the new. The
    one visible difference is that `Response.CreatedAt` now precedes the
-   PreGeneration hooks. Found on the way, for step 5: tool calls the resume
-   phase runs do not report their background task handles, so
-   `Response.BackgroundTasks` misses a background task a resumed call
-   started.
-4. **The envelope** (sections 1, 6 and 13). `ResponseStatusIncomplete`, the
-   outcome types, `Response.Turn`, `(resp, err)` on every exit,
-   `GenerationError.Response`, `turn_ended`. Additive; nothing new is saved
-   yet, so error exits report `Persistence == none`.
+   PreGeneration hooks. Found on the way: tool calls the resume phase runs
+   did not report their background task handles, so
+   `Response.BackgroundTasks` missed a background task a resumed call
+   started; step 4 records each handle in the turn record as its task
+   starts, which fixes that and keeps handles on an error exit.
+4. **The envelope** (sections 1, 6 and 13). Done:
+   `ResponseStatusIncomplete`, `Turn`, `TurnOutcome`, `TurnReason`,
+   `TurnNext`, `ToolCallRecord`, `PersistenceState`, `Response.Turn`,
+   `GenerationError.Response` and `turn_ended` (`outcome.go`, `turn.go`).
+   Every error exit after the boundary returns `(resp, err)` with the error
+   wrapped in a `*GenerationError`, classified from the error chain and from
+   the errors the turn record saw the event callback and the model call
+   return: `canceled`, `deadline`, `hook_abort`, `callback_error`,
+   `provider_error`, `stream_interrupted` (a stream that had delivered an
+   event, or `io.ErrUnexpectedEOF`) and `error`. Nothing new is saved, so
+   an incomplete turn reports `Persistence == none` and its messages are
+   not closed yet. Decided while building it:
+   - A completed or suspended turn whose save fails returns `(resp, err)`
+     with `Persistence == unknown`; `failed` and `ErrSaveRejected` come with
+     step 6.
+   - `turn_ended` is not added to `Response.Items`, like the suspended item
+     before it: the response already is what the item mirrors. A callback
+     error on either terminal item is logged.
+   - A failed partial resume returns `(nil, err)` at all of its failure
+     points, with `err` wrapping a `*GenerationError` whose `Response` is nil,
+     and emits no `turn_ended`, since the turn has not ended.
+   - An `OnSuspend` or PostGeneration abort on a new suspension is
+     incomplete with `hook_abort`; the response carries no suspension, since
+     nothing recorded it.
+   - Reasons from model stops (`output_limit` and the rest), `ToolCalls`,
+     `reconcile` and `UsageUnknown` arrive with steps 5 and 6, and their
+     constants with them.
 5. **Tool batch outcomes** (section 3, rule 3, and section 10). Both batch
    paths return the partial batch with a state per call, the non-blocking
    drain, the unknown-call handles and their forwarder, the not-run and

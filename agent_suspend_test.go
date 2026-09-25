@@ -645,12 +645,16 @@ func TestStreamingSuspendedItem(t *testing.T) {
 		}),
 	)
 	assert.NoError(t, err)
-	// Last item emitted should be the suspended terminal
-	assert.True(t, len(items) > 0)
+	// The suspended item is followed by the terminal turn_ended item.
+	assert.True(t, len(items) > 1)
+	suspended := items[len(items)-2]
+	assert.Equal(t, suspended.Type, ResponseItemTypeSuspended)
+	assert.NotNil(t, suspended.Suspension)
+	assert.Len(t, suspended.Suspension.PendingToolCalls, 1)
 	last := items[len(items)-1]
-	assert.Equal(t, last.Type, ResponseItemTypeSuspended)
-	assert.NotNil(t, last.Suspension)
-	assert.Len(t, last.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, last.Type, ResponseItemTypeTurnEnded)
+	assert.True(t, last.Turn.Suspension == suspended.Suspension)
+	assert.Equal(t, last.Turn.Persistence, PersistenceSaved)
 }
 
 func TestSuspendNoRegressionForNonSuspendingTools(t *testing.T) {

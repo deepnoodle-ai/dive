@@ -44,13 +44,12 @@ var (
 	ErrBatchHalted = errors.New("dive: not executed because an earlier call in the batch failed")
 )
 
-// GenerationError wraps a failure that occurred inside the generation loop,
-// carrying the usage, output messages, and response items accumulated before
-// the failure. When iteration N of a turn fails after earlier iterations
-// succeeded — meaning tools with real side effects may have already run and
-// tokens have already been paid for — CreateResponse still returns
-// (nil, err), but err wraps a *GenerationError so callers can recover cost
-// accounting and partial work via errors.As:
+// GenerationError wraps a failure after the turn began, carrying the usage,
+// output messages, and response items accumulated before the failure. When
+// iteration N of a turn fails after earlier iterations succeeded — meaning
+// tools with real side effects may have already run and tokens have already
+// been paid for — callers can recover cost accounting and partial work via
+// errors.As:
 //
 //	resp, err := agent.CreateResponse(ctx, ...)
 //	if err != nil {
@@ -59,6 +58,14 @@ var (
 //	        recordUsage(genErr.Usage)
 //	    }
 //	}
+//
+// CreateResponse returns the incomplete Response alongside the error, and
+// Response is the same value; it is nil only when a partial resume fails,
+// since the turn is then still suspended. A partial resume can fail in its
+// session write after the write landed, so the caller reloads the
+// suspension (SuspendableSession.LoadSuspension) before resubmitting; a
+// result the session already accepted is refused with
+// ErrUnknownPendingToolCall.
 //
 // The partial turn is intentionally NOT persisted to the session: a turn
 // that ends mid-loop (e.g. with a trailing tool_result and no final
@@ -80,6 +87,10 @@ type GenerationError struct {
 
 	// Items are the response items accumulated before the failure.
 	Items []*ResponseItem
+
+	// Response is the incomplete response CreateResponse returned with this
+	// error, or nil for a failed partial resume.
+	Response *Response
 }
 
 func (e *GenerationError) Error() string {
@@ -787,12 +798,19 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		sess:          sess,
 		suspendable:   suspendable,
 		rs:            rs,
+		partialResume: rs != nil && len(rs.RemainingPending) > 0,
 	}
 	eventCallback := t.record.collecting(t.emit)
+
+	hctx.backgroundTaskStarted = t.record.addBackgroundTask
 
 	// Run PreGeneration hooks
 	for _, hook := range a.hooks.PreGeneration {
 		if err := hook(ctx, hctx); err != nil {
+			var abortErr *HookAbortError
+			if errors.As(err, &abortErr) {
+				abortErr.HookType = "PreGeneration"
+			}
 			logger.Error("pre-generation hook error", "error", err)
 			return t.end(ctx, failedExit(fmt.Errorf("pre-generation hook error: %w", err)))
 		}
@@ -846,7 +864,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				// Mirror the not-started execution path below: expose the
 				// items already emitted via *GenerationError so callers can
 				// recover partial work (no LLM calls yet, so usage is zero).
-				return t.end(ctx, failedExitWithPartialWork(fmt.Errorf("resume tool-result event callback: %w", err)))
+				return t.end(ctx, failedExit(fmt.Errorf("resume tool-result event callback: %w", err)))
 			}
 		}
 		batchHalted := resumedBatchHalted(rs, resumeToolsByName)
@@ -869,7 +887,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				// during the resume phase via a *GenerationError so callers
 				// can recover partial work (no LLM calls have happened yet,
 				// so usage is zero).
-				return t.end(ctx, failedExitWithPartialWork(err))
+				return t.end(ctx, failedExit(err))
 			}
 			// Merge completed outcomes into the tool_result message.
 			completed := batch.Completed()
@@ -940,7 +958,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			// The partial turn is deliberately NOT saved to the session: a
 			// half-turn can violate provider role-alternation invariants
 			// (see GenerationError).
-			return t.end(ctx, failedExitWithPartialWork(err))
+			return t.end(ctx, failedExit(err))
 		}
 		t.syncResponse(true)
 
@@ -1674,6 +1692,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		if len(a.hooks.PreIteration) > 0 {
 			for _, hook := range a.hooks.PreIteration {
 				if err := hook(ctx, hctx); err != nil {
+					var abortErr *HookAbortError
+					if errors.As(err, &abortErr) {
+						abortErr.HookType = "PreIteration"
+					}
 					return nil, fmt.Errorf("pre-iteration hook error: %w", err)
 				}
 			}
@@ -1733,8 +1755,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		var err error
 		var response *llm.Response
 		var ttfc float64
+		var streamStarted bool
 		if streamingLLM, ok := model.(llm.StreamingLLM); ok {
-			response, ttfc, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, callback)
+			response, ttfc, streamStarted, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, callback)
 		} else {
 			response, err = model.Generate(chatCtx, iterOpts...)
 		}
@@ -1750,6 +1773,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		}
 		chatSpan.End(err)
 		if err != nil {
+			record.addModelError(err, streamStarted)
 			return nil, err
 		}
 
@@ -1790,12 +1814,8 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 			return nil, err
 		}
 
-		// Collect background task handles from completed outcomes.
-		for _, o := range batch.Outcomes {
-			if o.Result != nil && o.Result.BackgroundHandle != nil {
-				record.addBackgroundTask(o.Result.BackgroundHandle)
-			}
-		}
+		// Background task handles were recorded as their tasks started
+		// (HookContext.backgroundTaskStarted).
 
 		// Build the tool_result message from completed outcomes only. On a
 		// suspended batch, this is the PARTIAL tool_result that gets persisted
@@ -1850,41 +1870,42 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
 // Returns the accumulated response, the time-to-first-chunk in seconds
-// (zero for pre-first-chunk failures), and any error.
+// (zero for pre-first-chunk failures), whether the stream delivered any
+// event, and any error.
 func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
 	callback EventCallback,
-) (*llm.Response, float64, error) {
+) (response *llm.Response, ttfc float64, started bool, err error) {
 	accum := llm.NewResponseAccumulator()
 	streamStart := time.Now()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
 	defer iter.Close()
 
-	var ttfc float64
 	for iter.Next() {
+		started = true
 		event := iter.Event()
 		if ttfc == 0 && eventHasContent(event) {
 			ttfc = time.Since(streamStart).Seconds()
 		}
 		if err := accum.AddEvent(event); err != nil {
-			return nil, ttfc, err
+			return nil, ttfc, started, err
 		}
 		if err := callback(ctx, &ResponseItem{
 			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
-			return nil, ttfc, err
+			return nil, ttfc, started, err
 		}
 	}
 	if err := iter.Err(); err != nil {
-		return nil, ttfc, err
+		return nil, ttfc, started, err
 	}
-	return accum.Response(), ttfc, nil
+	return accum.Response(), ttfc, started, nil
 }
 
 // eventHasContent reports whether the event carries assistant content
@@ -2370,6 +2391,9 @@ func (a *Agent) executeToolCallsParallel(
 				Description: bg.description,
 				Done:        bg.done,
 			}
+			if hctx.backgroundTaskStarted != nil {
+				hctx.backgroundTaskStarted(bgHandle)
+			}
 			result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
 		}
 
@@ -2592,6 +2616,9 @@ func (a *Agent) executeOneToolCall(
 			ToolUseID:   toolCall.ID,
 			Description: bg.description,
 			Done:        bg.done,
+		}
+		if hctx.backgroundTaskStarted != nil {
+			hctx.backgroundTaskStarted(bgHandle)
 		}
 		result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
 	}
