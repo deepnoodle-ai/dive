@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/deepnoodle-ai/dive v1.33.1
+	github.com/deepnoodle-ai/dive v1.34.0
 	github.com/deepnoodle-ai/wonton v0.2.1
 )
 

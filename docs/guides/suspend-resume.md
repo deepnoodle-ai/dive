@@ -269,7 +269,7 @@ write itself, the write may still have landed.
 
 Sending a resume again is safe either way. A result the session already
 accepted for a call is skipped: its hooks do not run and no item is emitted
-again. A *different* result for that call fails with
+again. A _different_ result for that call fails with
 `dive.ErrConflictingToolResult` (which also matches
 `ErrUnknownPendingToolCall`). `Suspension.CompletedToolCalls` lists the
 accepted results as they were supplied.
@@ -300,7 +300,7 @@ key for a service that supports one.
 
 ## When a resume fails
 
-A *full* resume (every pending call has a result) that fails after it began,
+A _full_ resume (every pending call has a result) that fails after it began,
 before or after its model call, is closed like any incomplete turn: the
 results you supplied are kept, calls it had not run are answered "not run",
 calls still running in a parallel batch are "unknown", and the closed turn

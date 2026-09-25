@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-09-25
+
 ### Added
 
 - **`dive.LockSession`.** Takes the per-session lock `CreateResponse` holds, so

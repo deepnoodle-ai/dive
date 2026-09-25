@@ -68,7 +68,7 @@ contract stores messages; the structured record rides along in the outcome
 reminder's details so the projection can be rebuilt, and `CloseTurn` is the
 one function that computes it. In Phase 2 the session stores the record and
 computes the projection on load, with the same function. v1.34 is therefore
-*conversation preservation* and Phase 2 is *turn recovery*; the two names are
+_conversation preservation_ and Phase 2 is _turn recovery_; the two names are
 used below so that neither promises what the other delivers.
 
 ## Summary of decisions
@@ -114,8 +114,8 @@ used below so that neither promises what the other delivers.
   `failed` only when the store rejected the write before writing; any other
   error is `unknown`, and the session resyncs from its store.
 - **`OnIncompleteTurn` hook**, **`WithSoftCancel`**, an **encoder backstop**
-  for unanswered calls, and **`IncompleteTurns{Discard, DropPartialText,
-  SaveTimeout}`** as before.
+  for unanswered calls, and
+  **`IncompleteTurns{Discard, DropPartialText, SaveTimeout}`** as before.
 - **One terminal stream item, `turn_ended`**, for every invocation end.
 
 ### What it looks like in an application
@@ -178,16 +178,16 @@ and never sees a provider error.
 Everything below was confirmed against v1.33.1, most of it by the independent
 review's probes.
 
-| What happened                                                          | `CreateResponse` returns          | The session keeps                                   |
-| ---------------------------------------------------------------------- | --------------------------------- | --------------------------------------------------- |
-| Normal finish                                                          | Completed                         | the turn                                            |
-| A tool suspends                                                        | Suspended                         | the partial turn (SuspendableSession only)          |
-| Cancel, provider error or callback error after tools ran               | `nil, *GenerationError`           | nothing: the input and the tool effects are forgotten |
-| `max_tokens`, `refusal`, `pause_turn`, or a stream ending at EOF with no finish reason | Completed, no stop reason exposed | saved as if finished                     |
-| Iteration limit reached while the model keeps calling tools            | Completed, `OutputText() == ""`   | a turn ending in a tool result, its calls executed  |
-| `max_tokens` cuts off a `tool_use`                                     | the tool runs on truncated JSON, then `GenerationError` on the next call | nothing |
-| `SaveTurn` fails, or a Stop, PostGeneration or OnSuspend hook aborts   | `nil, err`, the finished answer and its usage lost | nothing                          |
-| A resume, then the model call fails                                    | `GenerationError`                 | still suspended; a retry reruns the tools and hooks |
+| What happened                                                                          | `CreateResponse` returns                                                 | The session keeps                                     |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------- |
+| Normal finish                                                                          | Completed                                                                | the turn                                              |
+| A tool suspends                                                                        | Suspended                                                                | the partial turn (SuspendableSession only)            |
+| Cancel, provider error or callback error after tools ran                               | `nil, *GenerationError`                                                  | nothing: the input and the tool effects are forgotten |
+| `max_tokens`, `refusal`, `pause_turn`, or a stream ending at EOF with no finish reason | Completed, no stop reason exposed                                        | saved as if finished                                  |
+| Iteration limit reached while the model keeps calling tools                            | Completed, `OutputText() == ""`                                          | a turn ending in a tool result, its calls executed    |
+| `max_tokens` cuts off a `tool_use`                                                     | the tool runs on truncated JSON, then `GenerationError` on the next call | nothing                                               |
+| `SaveTurn` fails, or a Stop, PostGeneration or OnSuspend hook aborts                   | `nil, err`, the finished answer and its usage lost                       | nothing                                               |
+| A resume, then the model call fails                                                    | `GenerationError`                                                        | still suspended; a retry reruns the tools and hooks   |
 
 Four details matter for the design.
 
@@ -327,21 +327,21 @@ const (
 The reason decides two things: whether the invocation returns an error, and
 the default `Next`.
 
-| Reason               | `err`   | Default `Next` | Notes                                                                                      |
-| -------------------- | ------- | -------------- | ------------------------------------------------------------------------------------------ |
-| `canceled`           | non-nil | `input`        | `errors.Is(err, context.Canceled)`; the person chose to stop, so the next move is theirs    |
-| `deadline`           | non-nil | `continue`     | `errors.Is(err, context.DeadlineExceeded)`; a limit was hit, not a choice                  |
-| `provider_error`     | non-nil | `continue`     | the provider's own retries were already spent; a later invocation retries the model step   |
-| `stream_interrupted` | non-nil | `continue`     | partial output kept                                                                        |
-| `hook_abort`         | non-nil | `input`        | the application stopped it; `Hook` names the hook                                          |
-| `callback_error`     | non-nil | `continue`     |                                                                                            |
-| `error`              | non-nil | `input`        |                                                                                            |
-| `output_limit`       | nil     | `continue`     | the model's own stop; the answer is valid as far as it goes                                |
-| `context_limit`      | nil     | `input`        | the same history cannot be sent again; the application shortens it first (see section 4)   |
-| `iteration_limit`    | nil     | `continue`     | the requested calls were not run                                                           |
+| Reason               | `err`   | Default `Next` | Notes                                                                                                                                                           |
+| -------------------- | ------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canceled`           | non-nil | `input`        | `errors.Is(err, context.Canceled)`; the person chose to stop, so the next move is theirs                                                                        |
+| `deadline`           | non-nil | `continue`     | `errors.Is(err, context.DeadlineExceeded)`; a limit was hit, not a choice                                                                                       |
+| `provider_error`     | non-nil | `continue`     | the provider's own retries were already spent; a later invocation retries the model step                                                                        |
+| `stream_interrupted` | non-nil | `continue`     | partial output kept                                                                                                                                             |
+| `hook_abort`         | non-nil | `input`        | the application stopped it; `Hook` names the hook                                                                                                               |
+| `callback_error`     | non-nil | `continue`     |                                                                                                                                                                 |
+| `error`              | non-nil | `input`        |                                                                                                                                                                 |
+| `output_limit`       | nil     | `continue`     | the model's own stop; the answer is valid as far as it goes                                                                                                     |
+| `context_limit`      | nil     | `input`        | the same history cannot be sent again; the application shortens it first (see section 4)                                                                        |
+| `iteration_limit`    | nil     | `continue`     | the requested calls were not run                                                                                                                                |
 | `provider_stopped`   | nil     | `continue`     | the provider reported an early end it did not name as a limit or refusal, or a stop reason Dive does not recognize; `Error` carries the raw value; no call runs |
-| `pause`              | nil     | `continue`     | only after the agent's own pause continuations were spent                                  |
-| `process_exit`       | none    | `continue`     | Phase 2, set on load; no invocation returned it                                            |
+| `pause`              | nil     | `continue`     | only after the agent's own pause continuations were spent                                                                                                       |
+| `process_exit`       | none    | `continue`     | Phase 2, set on load; no invocation returned it                                                                                                                 |
 
 Whatever the reason, `Next` is `reconcile` when any call in `ToolCalls` is
 `unknown` and its tool is not annotated `ReadOnlyHint`: something may have
@@ -452,6 +452,7 @@ provider accepts. The rules, in order:
    `AdditionalContext` text after them, the same shape as any batch. A soft
    cancel (section 10) never leaves a call unknown, because a running batch
    is allowed to finish.
+
 4. **Text the model was still writing is kept** as the last assistant
    message, with `DropPartialText` to leave it out. `generateStreaming`
    returns the accumulator's partial response with the error, and
@@ -602,7 +603,7 @@ The agent's rules:
   `err == nil`, `Next == continue`, and `Error` carrying the raw stop
   reason. A `StopKindOther` response with no client tool call is completed.
 - **Iteration limit.** Today the last allowed iteration sends `tool_choice:
-  none` and a nudge; if the model still requests tools, the calls run and
+none` and a nudge; if the model still requests tools, the calls run and
   the loop ends with their results unseen. They no longer run: the turn is
   incomplete with `iteration_limit`, the calls are answered "not run", and a
   continuation gives the model more iterations. `Response.OutputText()`
@@ -683,17 +684,17 @@ call that is not completed:
 > running when the turn ended; whether it took effect is unknown, so check
 > before repeating it.
 
-| Reason                                                          | Wording                                                                                                                                                                                           |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `canceled`                                                      | The previous turn was stopped by the user before it finished. Everything above this note, including every tool result, happened as shown. Do not repeat completed steps or assume unfinished ones happened. Wait for the user's next instruction rather than resuming the stopped work on your own. |
-| `deadline`, `provider_error`, `stream_interrupted`, `callback_error`, `error` | The previous turn failed before it finished. Error: `<error>`. Everything above this note, including every tool result, happened as shown. Continue from the completed work: do not repeat steps that completed, and do not assume steps that did not complete have happened. |
-| `hook_abort`                                                    | The previous turn was stopped by the application before it finished: `<error>`. Everything above this note happened as shown. Do not retry the stopped step unless the user asks.                  |
-| `output_limit`                                                  | The previous response was cut off at the output limit before it finished. Continue from exactly where it stopped, without repeating what was already written.                                        |
-| `context_limit`                                                 | The previous response stopped because the conversation reached the model's context window. Everything above this note happened as shown. Continue from where it stopped, without repeating what was already written. |
-| `iteration_limit`                                               | The previous turn reached its limit of tool calls before finishing. Finish with the information already gathered, or ask the user before continuing.                                                 |
-| `provider_stopped`                                              | The previous turn ended because the provider stopped the response before it finished (reason: `<reason>`). Any tool call it made was not run. Everything above this note happened as shown. Continue from the completed work; if the same stop repeats, tell the user rather than retrying. |
-| `pause`                                                         | The previous turn's server tool loop was paused before it finished. Its trailing call was not completed; start it again if the user still wants it.                                                  |
-| `process_exit` (Phase 2)                                        | The previous turn was interrupted: the process ended before it finished. Everything above this note happened as shown.                                                                             |
+| Reason                                                                        | Wording                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canceled`                                                                    | The previous turn was stopped by the user before it finished. Everything above this note, including every tool result, happened as shown. Do not repeat completed steps or assume unfinished ones happened. Wait for the user's next instruction rather than resuming the stopped work on your own. |
+| `deadline`, `provider_error`, `stream_interrupted`, `callback_error`, `error` | The previous turn failed before it finished. Error: `<error>`. Everything above this note, including every tool result, happened as shown. Continue from the completed work: do not repeat steps that completed, and do not assume steps that did not complete have happened.                       |
+| `hook_abort`                                                                  | The previous turn was stopped by the application before it finished: `<error>`. Everything above this note happened as shown. Do not retry the stopped step unless the user asks.                                                                                                                   |
+| `output_limit`                                                                | The previous response was cut off at the output limit before it finished. Continue from exactly where it stopped, without repeating what was already written.                                                                                                                                       |
+| `context_limit`                                                               | The previous response stopped because the conversation reached the model's context window. Everything above this note happened as shown. Continue from where it stopped, without repeating what was already written.                                                                                |
+| `iteration_limit`                                                             | The previous turn reached its limit of tool calls before finishing. Finish with the information already gathered, or ask the user before continuing.                                                                                                                                                |
+| `provider_stopped`                                                            | The previous turn ended because the provider stopped the response before it finished (reason: `<reason>`). Any tool call it made was not run. Everything above this note happened as shown. Continue from the completed work; if the same stop repeats, tell the user rather than retrying.         |
+| `pause`                                                                       | The previous turn's server tool loop was paused before it finished. Its trailing call was not completed; start it again if the user still wants it.                                                                                                                                                 |
+| `process_exit` (Phase 2)                                                      | The previous turn was interrupted: the process ended before it finished. Everything above this note happened as shown.                                                                                                                                                                              |
 
 For a deadline the `<error>` is worded as "the turn's time limit was
 reached" while `TurnOutcome.Error` keeps the raw error string.
@@ -814,16 +815,16 @@ and hooks that could fail run. Step 3 put the accumulator and the function
 in place (`turnRecord` and `turn.end`); tool results of a batch that fails
 part way reach the record in step 5.
 
-| Exit                                                                  | Returns                                   | `Status`     | `Persistence`      |
-| --------------------------------------------------------------------- | ----------------------------------------- | ------------ | ------------------ |
-| Before the turn begins                                                | `(nil, err)`                              |              |                    |
-| Completed                                                             | `(resp, nil)`                             | `completed`  | `saved` or `none`  |
-| Completed, save failed                                                | `(resp, err)`                             | `completed`  | `failed` or `unknown` |
-| Suspended                                                             | `(resp, nil)`                             | `suspended`  | `saved` or `none`  |
-| A new suspension whose `SaveSuspendedTurn` failed                     | `(resp, err)` (today `(nil, err)`); the caller reloads, and persists `resp.Suspension` itself only when the store does not hold it | `suspended`  | `failed` or `unknown` |
-| Incomplete, error reason                                              | `(resp, err)`, `err` wraps `*GenerationError{Response: resp}` | `incomplete` | `saved`, `none`, or `failed`/`unknown` with `errors.Join` |
-| Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `provider_stopped`, `pause`) | `(resp, nil)`    | `incomplete` | `saved` or `none`  |
-| Partial resume failed                                                 | `(nil, err)`, `err` wraps `*GenerationError` with the items so far and `Response == nil` | | unchanged |
+| Exit                                                                                           | Returns                                                                                                                            | `Status`     | `Persistence`                                             |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------ | --------------------------------------------------------- |
+| Before the turn begins                                                                         | `(nil, err)`                                                                                                                       |              |                                                           |
+| Completed                                                                                      | `(resp, nil)`                                                                                                                      | `completed`  | `saved` or `none`                                         |
+| Completed, save failed                                                                         | `(resp, err)`                                                                                                                      | `completed`  | `failed` or `unknown`                                     |
+| Suspended                                                                                      | `(resp, nil)`                                                                                                                      | `suspended`  | `saved` or `none`                                         |
+| A new suspension whose `SaveSuspendedTurn` failed                                              | `(resp, err)` (today `(nil, err)`); the caller reloads, and persists `resp.Suspension` itself only when the store does not hold it | `suspended`  | `failed` or `unknown`                                     |
+| Incomplete, error reason                                                                       | `(resp, err)`, `err` wraps `*GenerationError{Response: resp}`                                                                      | `incomplete` | `saved`, `none`, or `failed`/`unknown` with `errors.Join` |
+| Incomplete, model-stop reason (`output_limit`, `iteration_limit`, `provider_stopped`, `pause`) | `(resp, nil)`                                                                                                                      | `incomplete` | `saved` or `none`                                         |
+| Partial resume failed                                                                          | `(nil, err)`, `err` wraps `*GenerationError` with the items so far and `Response == nil`                                           |              | unchanged                                                 |
 
 The error reasons cover every exit that used to `return nil, err` on its own:
 a PreGeneration hook error, a PreIteration hook error, a tool resolution
@@ -1010,7 +1011,7 @@ Phase 2's checkpoint receives the outcome as a value and needs no scan.
 **Resumed turns.** Two cases, split by whether external work is still
 outstanding.
 
-A *full* resume, where every pending call has a result, caller-supplied or
+A _full_ resume, where every pending call has a result, caller-supplied or
 produced by rerunning the calls that were not started before the suspension,
 that stops at any point after the boundary, before or after the model call,
 is closed and written with `SaveResumedTurn` (`rs.TurnMessages` + output +
@@ -1023,7 +1024,7 @@ tools and hooks, and the results just supplied are exactly the part worth
 keeping. The retry is now `WithContinue`. `Discard` restores the old
 behaviour with the rest.
 
-A *partial* resume, where the caller supplied some results and others are
+A _partial_ resume, where the caller supplied some results and others are
 still pending, never calls the model. It can still fail, at four points: a
 PostToolUse or PostToolUseFailure hook aborting for a supplied result
 (`fireResumePostHooks`), the event callback rejecting the `tool_call_result`
@@ -1420,10 +1421,10 @@ What each of the three applications does after upgrading:
 - Third model call fails with a provider error: the first two iterations'
   messages and results are saved, then the reminder with `provider_error`
   and the error text; `(resp, err)` with `Status == Incomplete`, `Next ==
-  continue`; `errors.As` yields a `*GenerationError` whose `Response` is the
+continue`; `errors.As` yields a `*GenerationError` whose `Response` is the
   same; `WithContinue` then calls the model once and runs no tool.
 - A final answer cut at `max_tokens`: `Incomplete`, `output_limit`, `err ==
-  nil`, `Response.StopReason == "max_tokens"`, the reminder recorded;
+nil`, `Response.StopReason == "max_tokens"`, the reminder recorded;
   `WithContinue` continues with the `turn-continue` model-only reminder
   present in the request and absent from the session.
 - A response stopped with `model_context_window_exceeded`: `Incomplete`,
@@ -1523,7 +1524,7 @@ What each of the three applications does after upgrading:
   block, and the caller's messages are unchanged.
 - Salvage context: a session whose `SaveTurn` returns `ctx.Err()` still
   saves; a session that wraps `ErrSaveRejected` gives `Persistence ==
-  failed`; one that returns any other error, or blocks until `SaveTimeout`,
+failed`; one that returns any other error, or blocks until `SaveTimeout`,
   gives `unknown` with the error joined.
 - Snapshot isolation: mutating a returned `SuspensionState` or its messages
   does not change the session.
@@ -1961,13 +1962,13 @@ callers hold snapshots of one session.
 **Turn boundaries.** With turn identity, the rules become part of the
 contract:
 
-| Trigger                                | Turn                                                                                   |
-| -------------------------------------- | -------------------------------------------------------------------------------------- |
-| New input                              | starts a new turn; an open incomplete turn is marked superseded, its record intact     |
-| Supplied results for a suspended turn  | continues the turn                                                                     |
-| `WithContinue`                         | continues the turn                                                                     |
-| A Stop-hook continuation               | continues the turn, inside the invocation                                              |
-| Delivered background results           | starts a new turn whose origin links to the turn that started the task                 |
+| Trigger                               | Turn                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| New input                             | starts a new turn; an open incomplete turn is marked superseded, its record intact |
+| Supplied results for a suspended turn | continues the turn                                                                 |
+| `WithContinue`                        | continues the turn                                                                 |
+| A Stop-hook continuation              | continues the turn, inside the invocation                                          |
+| Delivered background results          | starts a new turn whose origin links to the turn that started the task             |
 
 New input never silently supersedes a suspended turn
 (`ErrInputOnSuspendedSession` stands), and with the opt-in strict mode never
@@ -2054,38 +2055,38 @@ the contracts into them. Candidates, each independent:
 
 ## Decisions taken across the proposal and the reviews
 
-| Suggested                                                  | Here                                                                 | Reason                                                                                              |
-| ---------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `ResponseStatusCancelled` and `Failed` (proposal, review 1) | one `Incomplete` status with `TurnOutcome.Reason`                    | one axis for what can happen next, one for what happened; every renderer needs the reason anyway     |
-| Six statuses incl. `running`, `waiting`, `failed`, `cancelled` (colleague) | three returned statuses; `running` is a turn-record state in Phase 2 and `waiting` is `suspended` | `CreateResponse` never returns a running turn; failed versus incomplete is the reason plus `Next` |
-| `turn-stopped` / `turn-failed` reminder names               | one name, `turn-incomplete`, reason in the details                   | one thing to match; wording varies by reason                                                        |
-| A running call answered "not run" (proposal)               | "unknown result", late result on `Response.BackgroundTasks`          | a tool that ignores cancellation can commit after the save; "no effect" would be false (review)     |
-| Two not-run texts by why the turn ended                    | two texts by what the call did                                       | the reminder says why the turn ended                                                                |
-| A new content type for the outcome                         | reminder details                                                     | older Dive versions must still open the session                                                     |
-| `OnIncompleteTurn func(msgs, err) msgs`                    | a hook in `Hooks` with a decision                                    | also notification and per-turn discard; composes through `Extension`                                |
-| `DiscardIncompleteTurns` on `AgentOptions`                 | `IncompleteTurns` with three knobs                                   | the partial-text choice needs a home                                                                |
-| Saving interrupted turns behind an opt-in (review 2)       | default on, `Discard` to opt out                                     | the requesting application's judgement: losing a turn is worse than keeping one                     |
-| `Response.TurnMessages` (review 2)                         | `Response.Turn` with messages, usage, outcome, suspension, persistence | the same idea with room for Phase 2's identity and revision                                       |
-| Expose stop reasons first, automate later (colleague)       | output limit exposed; pause continued up to a bound                  | a pause is mechanical and documented as "resend"; more output is a choice                            |
-| Checkpoint every step in the same release (proposal, colleague) | end-of-invocation save now, checkpoints in Phase 2               | needs a new session extension and store format; the close function is shared either way             |
-| A stopped turn hidden from the next request                 | Phase 2, a projection policy                                         | the cancelled wording addresses the motivating case                                                 |
-| Stop at a step boundary via the callback                   | `WithSoftCancel` on the context                                      | reaches subagents and tools; no sentinel through the callback                                       |
-| A fourth status, `cancelled`, for an abandoned turn (round 4) | a reason on `Incomplete`; Phase 2 marks a superseded turn on the record | the status stays the next-action axis; the disposition is record metadata                        |
-| A refusal is completed with its reason preserved (round 4)  | adopted                                                              | the model finished responding; there is nothing to continue                                         |
-| A finalization hook instead of broadening PostGeneration (round 4) | adopted: PostGeneration keeps its scope; `OnIncompleteTurn` is the end hook for incomplete turns | one end hook per outcome, no semantic change to existing hooks             |
-| `interrupted` as the reason for a stop (round 4)            | `canceled`                                                           | matches `context.Canceled`                                                                          |
-| `awaiting_result`, `not_started` state names (round 4)      | `waiting` kept; `not_started` adopted for both phases                | one vocabulary across v1.34 and Phase 2                                                             |
-| `[DONE]` without a finish reason is a valid end (round 4)   | adopted                                                              | protocol end versus transport end                                                                   |
-| A fourth persistence state for an uncertain commit (round 4) | adopted, `unknown`                                                  | an error must not imply that nothing was saved                                                      |
-| Stages: defects, envelope, recoverable turns, durability (round 4) | adopted as the ordering of Phase 2                            | keeps the default storage cost where it is                                                          |
-| A started read-only call answered "not run" (rev. 3)          | `unknown`; the annotation softens `Next` only                        | repeatability is a replay policy, not evidence (two reviews)                                        |
-| A suspension is never persisted after a cancellation (rev. 3) | the suspension is persisted; cancelling it is the application's explicit act | the tool or a hook may already have dispatched the work (review)                              |
-| A store error means the write did not land (rev. 3, 4)         | `failed` only for a pre-write rejection, `unknown` otherwise; the session resyncs | a rename can land before a later error (review)                                           |
-| An unknown stop reason is finished and its calls run (rev. 5)  | `other` never runs a call; text-only stays completed                 | the pinned Google SDK already has `UNEXPECTED_TOOL_CALL`, which the adapter does not name (review) |
-| `Turn.Messages` cumulative for every invocation (rev. 3)       | cumulative on a resume, this invocation's on a continuation           | v1.34 sessions append; only a resume replaces (review)                                              |
-| `model_context_window_exceeded` as an output limit (rev. 7 draft) | its own reason, `context_limit`, with `Next == input`             | continuing on the same history is rejected as too long; the application compacts first (review)     |
-| `LockSession` returns only `unlock` (rev. 6)                   | it also returns the locked context                                   | a caller that locks and then runs the agent must get `ErrReentrantSession`, not a deadlock          |
-| Three increments of work (rev. 6)                              | six steps, the exit-path refactor on its own                         | the refactor and the behaviour change are each reviewable alone                                     |
+| Suggested                                                                  | Here                                                                                              | Reason                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `ResponseStatusCancelled` and `Failed` (proposal, review 1)                | one `Incomplete` status with `TurnOutcome.Reason`                                                 | one axis for what can happen next, one for what happened; every renderer needs the reason anyway   |
+| Six statuses incl. `running`, `waiting`, `failed`, `cancelled` (colleague) | three returned statuses; `running` is a turn-record state in Phase 2 and `waiting` is `suspended` | `CreateResponse` never returns a running turn; failed versus incomplete is the reason plus `Next`  |
+| `turn-stopped` / `turn-failed` reminder names                              | one name, `turn-incomplete`, reason in the details                                                | one thing to match; wording varies by reason                                                       |
+| A running call answered "not run" (proposal)                               | "unknown result", late result on `Response.BackgroundTasks`                                       | a tool that ignores cancellation can commit after the save; "no effect" would be false (review)    |
+| Two not-run texts by why the turn ended                                    | two texts by what the call did                                                                    | the reminder says why the turn ended                                                               |
+| A new content type for the outcome                                         | reminder details                                                                                  | older Dive versions must still open the session                                                    |
+| `OnIncompleteTurn func(msgs, err) msgs`                                    | a hook in `Hooks` with a decision                                                                 | also notification and per-turn discard; composes through `Extension`                               |
+| `DiscardIncompleteTurns` on `AgentOptions`                                 | `IncompleteTurns` with three knobs                                                                | the partial-text choice needs a home                                                               |
+| Saving interrupted turns behind an opt-in (review 2)                       | default on, `Discard` to opt out                                                                  | the requesting application's judgement: losing a turn is worse than keeping one                    |
+| `Response.TurnMessages` (review 2)                                         | `Response.Turn` with messages, usage, outcome, suspension, persistence                            | the same idea with room for Phase 2's identity and revision                                        |
+| Expose stop reasons first, automate later (colleague)                      | output limit exposed; pause continued up to a bound                                               | a pause is mechanical and documented as "resend"; more output is a choice                          |
+| Checkpoint every step in the same release (proposal, colleague)            | end-of-invocation save now, checkpoints in Phase 2                                                | needs a new session extension and store format; the close function is shared either way            |
+| A stopped turn hidden from the next request                                | Phase 2, a projection policy                                                                      | the cancelled wording addresses the motivating case                                                |
+| Stop at a step boundary via the callback                                   | `WithSoftCancel` on the context                                                                   | reaches subagents and tools; no sentinel through the callback                                      |
+| A fourth status, `cancelled`, for an abandoned turn (round 4)              | a reason on `Incomplete`; Phase 2 marks a superseded turn on the record                           | the status stays the next-action axis; the disposition is record metadata                          |
+| A refusal is completed with its reason preserved (round 4)                 | adopted                                                                                           | the model finished responding; there is nothing to continue                                        |
+| A finalization hook instead of broadening PostGeneration (round 4)         | adopted: PostGeneration keeps its scope; `OnIncompleteTurn` is the end hook for incomplete turns  | one end hook per outcome, no semantic change to existing hooks                                     |
+| `interrupted` as the reason for a stop (round 4)                           | `canceled`                                                                                        | matches `context.Canceled`                                                                         |
+| `awaiting_result`, `not_started` state names (round 4)                     | `waiting` kept; `not_started` adopted for both phases                                             | one vocabulary across v1.34 and Phase 2                                                            |
+| `[DONE]` without a finish reason is a valid end (round 4)                  | adopted                                                                                           | protocol end versus transport end                                                                  |
+| A fourth persistence state for an uncertain commit (round 4)               | adopted, `unknown`                                                                                | an error must not imply that nothing was saved                                                     |
+| Stages: defects, envelope, recoverable turns, durability (round 4)         | adopted as the ordering of Phase 2                                                                | keeps the default storage cost where it is                                                         |
+| A started read-only call answered "not run" (rev. 3)                       | `unknown`; the annotation softens `Next` only                                                     | repeatability is a replay policy, not evidence (two reviews)                                       |
+| A suspension is never persisted after a cancellation (rev. 3)              | the suspension is persisted; cancelling it is the application's explicit act                      | the tool or a hook may already have dispatched the work (review)                                   |
+| A store error means the write did not land (rev. 3, 4)                     | `failed` only for a pre-write rejection, `unknown` otherwise; the session resyncs                 | a rename can land before a later error (review)                                                    |
+| An unknown stop reason is finished and its calls run (rev. 5)              | `other` never runs a call; text-only stays completed                                              | the pinned Google SDK already has `UNEXPECTED_TOOL_CALL`, which the adapter does not name (review) |
+| `Turn.Messages` cumulative for every invocation (rev. 3)                   | cumulative on a resume, this invocation's on a continuation                                       | v1.34 sessions append; only a resume replaces (review)                                             |
+| `model_context_window_exceeded` as an output limit (rev. 7 draft)          | its own reason, `context_limit`, with `Next == input`                                             | continuing on the same history is rejected as too long; the application compacts first (review)    |
+| `LockSession` returns only `unlock` (rev. 6)                               | it also returns the locked context                                                                | a caller that locks and then runs the agent must get `ErrReentrantSession`, not a deadlock         |
+| Three increments of work (rev. 6)                                          | six steps, the exit-path refactor on its own                                                      | the refactor and the behaviour change are each reviewable alone                                    |
 
 ## Open questions
 
@@ -2116,4 +2117,17 @@ the contracts into them. Candidates, each independent:
 7. **Wording.** The table in section 5 is a first draft; the name and the
    details are the contract. Worth a pass against a few models before
    release, in particular whether the cancelled wording makes a model too
-   passive on the next real request.
+   passive on the next real request. Checked before v1.34.0 against Claude
+   Haiku, Sonnet and Opus, with the texts as rendered but without a provider
+   round trip: after a cancel, no model was passive. Each did a new
+   request, resumed on "carry on", took a new instruction for the stopped
+   work, and answered a question without resuming. On a continue, each
+   checked an unknown deploy before retrying it, and none repeated a
+   completed step; after an output limit, Opus and Sonnet went on
+   mid-sentence where Haiku restarted the cut-off line. Opus and Sonnet
+   checked an unknown email before finishing; Haiku checked in two of four
+   runs and assumed the email sent in the others, and "check before relying
+   on it or repeating it" did no better (two of three, one resend). The
+   wording stays; an application whose tools have effects that must not be
+   assumed should reconcile unknown calls itself (`RequireReconcile`). Other
+   providers are not yet checked.
