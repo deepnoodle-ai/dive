@@ -1438,3 +1438,43 @@ func TestLoadSuspensionIsDeepCopy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, msgs[0].Text(), "start")
 }
+
+// A closed resumed turn replaces the suspended event with the outcome in
+// its metadata, and the suspension's usage so far is loaded with it.
+func TestResumedTurnOutcomeMetadata(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	sess, err := store.Open(ctx, "outcome-meta")
+	assert.NoError(t, err)
+
+	err = sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), &llm.Usage{InputTokens: 10}, singleSuspensionState())
+	assert.NoError(t, err)
+	assert.Equal(t, sess.LoadSuspension().Usage.InputTokens, 10)
+
+	outcome := &dive.TurnOutcome{Reason: dive.TurnReasonCanceled, Next: dive.TurnNextInput}
+	closed := append(suspendedTurnMessages(), dive.NewReminderMessage(dive.NewTurnOutcomeReminder(outcome)))
+	assert.NoError(t, sess.SaveResumedTurn(ctx, closed, nil))
+
+	files, err := filepath.Glob(filepath.Join(dir, "*"))
+	assert.NoError(t, err)
+	assert.Len(t, files, 1)
+	data, err := os.ReadFile(files[0])
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"outcome":"canceled"`)
+	assert.False(t, strings.Contains(string(data), `"suspended":true`))
+}
+
+// A write session.Session refuses before writing matches ErrSaveRejected.
+func TestRefusedWritesMatchErrSaveRejected(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("refused")
+	err := sess.SaveResumedTurn(ctx, suspendedTurnMessages(), nil)
+	assert.ErrorIs(t, err, dive.ErrSaveRejected)
+
+	assert.NoError(t, sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState()))
+	err = sess.SaveTurn(ctx, suspendedTurnMessages(), nil)
+	assert.ErrorIs(t, err, dive.ErrSaveRejected)
+	assert.ErrorIs(t, err, session.ErrSuspendedSession)
+}

@@ -54,13 +54,23 @@ var ErrNotFound = errors.New("session not found")
 // ErrSuspendedSession is returned when an operation is not permitted on a
 // session that is currently suspended. For example, Compact refuses to run
 // on a suspended session because compaction would destroy the in-progress
-// tool_use/tool_result messages the resume path depends on.
-var ErrSuspendedSession = errors.New("session is suspended")
+// tool_use/tool_result messages the resume path depends on. A write refused
+// with it wrote nothing: errors.Is(err, dive.ErrSaveRejected) holds.
+var ErrSuspendedSession error = &rejectedError{"session is suspended"}
 
 // ErrNotSuspended is returned from SaveResumedTurn when the session is not
 // actually in a suspended state. Protects against accidental overwrites of
-// the last event.
-var ErrNotSuspended = errors.New("session is not suspended")
+// the last event. errors.Is(err, dive.ErrSaveRejected) holds.
+var ErrNotSuspended error = &rejectedError{"session is not suspended"}
+
+// rejectedError is a write the session refused before writing anything. It
+// matches dive.ErrSaveRejected, so the agent reports the write as failed
+// rather than unknown.
+type rejectedError struct{ msg string }
+
+func (e *rejectedError) Error() string { return e.msg }
+
+func (e *rejectedError) Is(target error) bool { return target == dive.ErrSaveRejected }
 
 // cloneSuspensionState returns a deep copy of a SuspensionState so callers
 // cannot mutate the session's internal state through the returned pointer,
@@ -89,6 +99,7 @@ func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 		}
 	}
 	out.BatchHalted = src.BatchHalted
+	out.Usage = copyUsage(src.Usage)
 	return out
 }
 
@@ -253,6 +264,17 @@ func copyMessages(msgs []*llm.Message) []*llm.Message {
 		out[i] = msg.Copy()
 	}
 	return out
+}
+
+// outcomeMetadata returns the metadata of an event whose messages record an
+// incomplete turn's outcome (dive.FindTurnOutcome): "outcome" is its reason.
+// It returns nil for any other turn.
+func outcomeMetadata(messages []*llm.Message) map[string]any {
+	outcome, ok := dive.FindLatestTurnOutcome(messages)
+	if !ok {
+		return nil
+	}
+	return map[string]any{"outcome": string(outcome.Reason)}
 }
 
 // copyUsage returns a deep copy of usage, or nil when usage is nil.
@@ -425,6 +447,7 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 		// would silently rewrite stored history.
 		Messages: copyMessages(messages),
 		Usage:    copyUsage(usage),
+		Metadata: outcomeMetadata(messages),
 	}
 	prevLen := len(s.data.Events)
 	prevUpdatedAt := s.data.UpdatedAt
@@ -461,7 +484,9 @@ func (s *Session) LoadSuspension() *dive.SuspensionState {
 	// boundary on resume and stateless callers — or anyone rendering the
 	// in-progress turn to a UI — read this field directly.
 	if len(s.data.Events) > 0 {
-		state.TurnMessages = s.data.Events[len(s.data.Events)-1].Messages
+		last := s.data.Events[len(s.data.Events)-1]
+		state.TurnMessages = last.Messages
+		state.Usage = last.Usage
 	}
 	return cloneSuspensionState(state)
 }
@@ -641,7 +666,8 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 			// The replaced suspended event's usage covers tokens already
 			// paid before suspension; the agent passes only the resume
 			// call's own usage. Sum so TotalUsage reflects both phases.
-			Usage: sumUsage(prev.Usage, usage),
+			Usage:    sumUsage(prev.Usage, usage),
+			Metadata: outcomeMetadata(messages),
 		}
 		s.data.Events[len(s.data.Events)-1] = evt
 		s.data.Suspended = false

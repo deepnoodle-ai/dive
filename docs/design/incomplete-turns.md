@@ -1,7 +1,7 @@
 # Incomplete Turns
 
 _Last updated: 2026-09-25_
-_Status: accepted; implementation in progress (see "Order of work"). Answers the Noodle team's request "Dive:
+_Status: accepted; v1.34 implemented (see "Order of work"), Phase 2 next. Answers the Noodle team's request "Dive:
 keep turns that don't finish" (24 September 2026, against v1.33.0). Third
 revision, after six reviews: the pull-request review (a running call must
 not be recorded as "not run"; the partial-resume rule; the error contract;
@@ -1664,16 +1664,50 @@ would make neither reviewable.
      depending on whether its result landed before the drain stopped.
    - An `OnSuspend` abort's suspending calls stay out of `ToolCalls` until
      step 6, which answers them in the partial `tool_result` message.
-6. **Keeping the turn** (sections 3, 5, 7 to 9 and 12). `CloseTurn`,
-   `Reminder.Details` and the outcome reminder, saving on every exit with
-   the salvage context, `ErrSaveRejected` and `Persistence`,
-   `OnIncompleteTurn`, `IncompleteTurns`, closing a failed full resume,
-   persisting a suspension after a cancellation, the output-limit, refusal,
-   pause and iteration-limit rules, partial streamed text, `WithContinue`,
-   `Metadata["outcome"]`, `SuspensionState.Usage`, and the guides. This is
-   the behaviour change users notice and lands with the changelog entry
-   above; if it proves too large it splits into closing and saving error
-   exits first, then the model-stop rules and `WithContinue`.
+6. **Keeping the turn** (sections 3, 5, 7 to 9 and 12). Done, in one pull
+   request: `CloseTurn`, `Reminder.Details` and the outcome reminder
+   (`closeturn.go`), saving on every exit with the salvage context,
+   `ErrSaveRejected` and `PersistenceFailed`, `OnIncompleteTurn`,
+   `IncompleteTurns`, closing a failed full resume, persisting a suspension
+   after a cancellation, the output-limit, context-limit, refusal,
+   provider-stop, pause and iteration-limit rules, partial streamed text and
+   the stream that ends without `message_stop`, `WithContinue`,
+   `Metadata["outcome"]`, `SuspensionState.Usage`, the A2A mapping and the
+   subagent tool's partial answer from section 14, and the guides. Decided
+   while building it:
+   - `CloseTurn` modifies neither argument. The outcome it records, with a
+     `not_started` record for each call it answered, is read back with
+     `FindTurnOutcome`. The agent closes the output and, on a resume, the
+     suspended turn; a fresh turn's input messages are left alone, since a
+     stateless caller's input can carry its whole history.
+   - A call the close answers gets a `tool_call_result` item, preceded by a
+     `tool_call` item when it was never announced.
+   - The calls of a response that will not run them (a limit, a refusal, a
+     provider stop, the iteration limit) are answered in the loop, with
+     their items, as a stopped batch's are. A response left with nothing
+     once its truncated calls are dropped is not recorded.
+   - A pause is resent without spending a tool iteration;
+     `HookContext.Iteration` still counts every model call. A paused
+     response that carries a client tool call is `provider_stopped`, since
+     answering the call would break the pause protocol.
+   - In a partial streamed message, a tool call still streaming is dropped
+     whatever its input, and `DropPartialText` drops only the text blocks
+     still streaming. `UsageUnknown` is set only when a stream started and
+     reported no usage.
+   - Under `Discard` the output is left as the error found it: a stopped
+     batch's answers and the partial text are not added either.
+   - `WithContinue` rejects input on a session and any resume with
+     `ErrContinueWithInput`, treats a stateless caller's messages as
+     history, and skips SessionStart hooks. The `turn-continue` name is
+     exported as `ReminderNameTurnContinue`.
+   - A suspension also beats a cancellation inside a sequential batch: the
+     suspending call's result is reported before the context is checked.
+     A PostGeneration abort on a new suspension is handled like an
+     OnSuspend abort.
+   - `SaveTimeout` bounds the write through its context; a session that
+     ignores its context is not interrupted.
+   - `TurnReasonProcessExit` and `ToolCallStateWaiting` are left to Phase 2,
+     which sets them. The CLI's transcript marker (section 14) is not done.
 
 Phase 2a and 2b below are the seventh and eighth stages.
 

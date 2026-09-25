@@ -3,6 +3,7 @@ package dive_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func (r *itemRecorder) last() *ResponseItem {
 
 // assertIncomplete checks the shared shape of an incomplete return: the
 // error wraps a *GenerationError whose Response is resp, and the turn is
-// not saved.
+// closed by the outcome reminder.
 func assertIncomplete(t *testing.T, resp *Response, err error, reason TurnReason, next TurnNext) *GenerationError {
 	t.Helper()
 	assert.Error(t, err)
@@ -54,9 +55,21 @@ func assertIncomplete(t *testing.T, resp *Response, err error, reason TurnReason
 	assert.Equal(t, resp.Turn.Outcome.Reason, reason)
 	assert.Equal(t, resp.Turn.Outcome.Next, next)
 	assert.Equal(t, resp.Turn.Outcome.Error, err.Error())
-	assert.Equal(t, resp.Turn.Persistence, PersistenceNone)
 	assert.NotNil(t, resp.Turn.Usage)
+	assertClosedBy(t, resp.OutputMessages, reason)
+	assertClosedBy(t, resp.Turn.Messages, reason)
+	assertClosedBy(t, genErr.OutputMessages, reason)
 	return genErr
+}
+
+// assertClosedBy checks that messages end in the outcome reminder of an
+// incomplete turn with this reason.
+func assertClosedBy(t *testing.T, messages []*llm.Message, reason TurnReason) {
+	t.Helper()
+	assert.True(t, len(messages) > 0)
+	outcome, ok := FindTurnOutcome(messages[len(messages)-1])
+	assert.True(t, ok, "the last message is the outcome reminder")
+	assert.Equal(t, outcome.Reason, reason)
 }
 
 // A model error after a Stop-hook continuation reports the whole turn: both
@@ -88,7 +101,7 @@ func TestGenerationErrorAfterStopContinuationCarriesWholeTurn(t *testing.T) {
 	genErr := assertIncomplete(t, resp, err, TurnReasonProviderError, TurnNextContinue)
 	assert.Equal(t, mock.Calls(), 1)
 
-	assert.Len(t, genErr.OutputMessages, 2)
+	assert.Len(t, genErr.OutputMessages, 3)
 	assert.Equal(t, genErr.OutputMessages[0].Text(), "first round")
 	_, ok := FindReminder(genErr.OutputMessages[1], "stop-continuation")
 	assert.True(t, ok)
@@ -99,10 +112,10 @@ func TestGenerationErrorAfterStopContinuationCarriesWholeTurn(t *testing.T) {
 	assert.Equal(t, genErr.Usage.OutputTokens, 4)
 
 	// The response carries the same turn; Turn.Messages adds the input.
-	assert.Len(t, resp.OutputMessages, 2)
+	assert.Len(t, resp.OutputMessages, 3)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, resp.Usage.InputTokens, 10)
-	assert.Len(t, resp.Turn.Messages, 3)
+	assert.Len(t, resp.Turn.Messages, 4)
 	assert.Equal(t, resp.Turn.Messages[0].Text(), "start")
 	assert.Equal(t, resp.Turn.Usage.InputTokens, 10)
 
@@ -111,8 +124,11 @@ func TestGenerationErrorAfterStopContinuationCarriesWholeTurn(t *testing.T) {
 	assert.Equal(t, last.Type, ResponseItemTypeTurnEnded)
 	assert.True(t, last.Turn == resp.Turn)
 
-	// The partial turn is not saved.
-	assert.Equal(t, sess.EventCount(), 0)
+	// The closed turn is saved.
+	assert.Equal(t, resp.Turn.Persistence, PersistenceSaved)
+	saved, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, saved, 4)
 }
 
 // A callback error on the assistant message item still reports the message
@@ -142,7 +158,7 @@ func TestGenerationErrorWhenCallbackRejectsAssistantMessage(t *testing.T) {
 	)
 	assert.True(t, errors.Is(err, errRejected))
 	genErr := assertIncomplete(t, resp, err, TurnReasonCallbackError, TurnNextContinue)
-	assert.Len(t, genErr.OutputMessages, 1)
+	assert.Len(t, genErr.OutputMessages, 2)
 	assert.Equal(t, genErr.OutputMessages[0].Text(), "hello")
 	assert.Len(t, genErr.Items, 1)
 	assert.Equal(t, genErr.Usage.InputTokens, 7)
@@ -154,8 +170,8 @@ func TestGenerationErrorWhenCallbackRejectsAssistantMessage(t *testing.T) {
 }
 
 // A model error after a full resume reports the caller-supplied results
-// emitted in the resume phase, with zero usage. The session stays
-// suspended: nothing is saved yet.
+// emitted in the resume phase, with zero usage. The closed turn replaces the
+// suspended one, so the session is no longer suspended.
 func TestGenerationErrorAfterResumeCarriesResumeItems(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
@@ -179,17 +195,22 @@ func TestGenerationErrorAfterResumeCarriesResumeItems(t *testing.T) {
 	assert.Len(t, genErr.Items, 1)
 	assert.Equal(t, genErr.Items[0].Type, ResponseItemTypeToolCallResult)
 	assert.Equal(t, genErr.Items[0].ToolCallResult.ID, "toolu_a")
-	assert.Len(t, genErr.OutputMessages, 0)
+	assert.Len(t, genErr.OutputMessages, 1)
 	assert.NotNil(t, genErr.Usage)
 	assert.Equal(t, genErr.Usage.InputTokens, 0)
 	assert.Nil(t, resp.Usage)
 
-	// Turn.Messages is the suspended turn with the supplied result merged.
-	assert.Len(t, resp.Turn.Messages, 3)
+	// Turn.Messages is the suspended turn with the supplied result merged,
+	// then the outcome reminder.
+	assert.Len(t, resp.Turn.Messages, 4)
 	assert.Equal(t, resp.Turn.Messages[0].Text(), "start")
 	assert.Equal(t, resp.Turn.Messages[2].Role, llm.User)
 
-	assert.True(t, sessIsSuspended(sess))
+	assert.Equal(t, resp.Turn.Persistence, PersistenceSaved)
+	assert.False(t, sessIsSuspended(sess))
+	saved, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, saved, 4)
 }
 
 // A partial resume never calls the model, so it reports no usage and no
@@ -329,7 +350,8 @@ func TestSuspendedItemCallbackError(t *testing.T) {
 }
 
 // An OnSuspend abort ends the turn incomplete; the suspension is not
-// reported, since nothing recorded it.
+// reported, since nothing recorded it. The suspending call may have
+// dispatched its request, so it is unknown.
 func TestOnSuspendAbortIsIncomplete(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
@@ -353,11 +375,19 @@ func TestOnSuspendAbortIsIncomplete(t *testing.T) {
 	assert.NoError(t, err)
 
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
-	assertIncomplete(t, resp, err, TurnReasonHookAbort, TurnNextInput)
+	assertIncomplete(t, resp, err, TurnReasonHookAbort, TurnNextReconcile)
 	assert.Equal(t, resp.Turn.Outcome.Hook, "OnSuspend")
+	assert.Equal(t, resp.Turn.Outcome.ToolCalls, []ToolCallRecord{{ID: "toolu_a", Name: "approve", State: ToolCallStateUnknown}})
 	assert.Nil(t, resp.Suspension)
 	assert.Nil(t, resp.Turn.Suspension)
 	assert.False(t, sessIsSuspended(sess))
+
+	// The saved turn answers the call as unknown and ends in the outcome.
+	saved, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, saved, 4)
+	assert.True(t, strings.Contains(resultText(t, lastToolResults(t, saved)["toolu_a"]), "Unknown result:"))
+	assertClosedBy(t, saved, TurnReasonHookAbort)
 }
 
 // A completed turn reports what it saved.

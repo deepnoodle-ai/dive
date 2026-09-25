@@ -1,5 +1,7 @@
 package llm
 
+import "encoding/json"
+
 // ToolCallNotRunText is the result recorded for a tool call that never
 // started because its turn ended first. The call had no effect.
 const ToolCallNotRunText = "Not run: the turn ended before this call started. It had no effect."
@@ -28,6 +30,20 @@ const ToolCallUnknownText = "Unknown result: the turn ended while this call was 
 // The caller's messages are not modified. messages is returned as is when
 // nothing is missing.
 func AnswerUnansweredToolCalls(messages []*Message) []*Message {
+	return AnswerUnansweredToolCallsWith(messages, func(call *ToolUseContent) *ToolResultContent {
+		return &ToolResultContent{
+			ToolUseID:   call.ID,
+			ToolsetName: call.ToolsetName,
+			Content:     ToolCallUnknownText,
+			IsError:     true,
+		}
+	})
+}
+
+// AnswerUnansweredToolCallsWith is AnswerUnansweredToolCalls with the result
+// of each unanswered call chosen by answer, which is called once per such
+// call, in order. The result's ToolUseID must be the call's ID.
+func AnswerUnansweredToolCallsWith(messages []*Message, answer func(call *ToolUseContent) *ToolResultContent) []*Message {
 	var out []*Message
 	for i := 0; i < len(messages); i++ {
 		msg := messages[i]
@@ -43,7 +59,7 @@ func AnswerUnansweredToolCalls(messages []*Message) []*Message {
 		if i+1 < len(messages) && hasToolResults(messages[i+1]) {
 			next = messages[i+1]
 		}
-		missing := missingResults(calls, next)
+		missing := missingResults(calls, next, answer)
 		if len(missing) == 0 {
 			if out != nil {
 				out = append(out, msg)
@@ -96,9 +112,9 @@ func clientToolCalls(msg *Message) []*ToolUseContent {
 	return calls
 }
 
-// missingResults returns an unknown-result block for each call that next
-// does not answer, in call order.
-func missingResults(calls []*ToolUseContent, next *Message) []Content {
+// missingResults returns answer's result for each call that next does not
+// answer, in call order.
+func missingResults(calls []*ToolUseContent, next *Message, answer func(*ToolUseContent) *ToolResultContent) []Content {
 	answered := map[string]bool{}
 	if next != nil {
 		for _, c := range next.Content {
@@ -113,12 +129,7 @@ func missingResults(calls []*ToolUseContent, next *Message) []Content {
 			continue
 		}
 		answered[call.ID] = true
-		missing = append(missing, &ToolResultContent{
-			ToolUseID:   call.ID,
-			ToolsetName: call.ToolsetName,
-			Content:     ToolCallUnknownText,
-			IsError:     true,
-		})
+		missing = append(missing, answer(call))
 	}
 	return missing
 }
@@ -140,4 +151,59 @@ func withResults(msg *Message, results []Content) *Message {
 	cp := *msg
 	cp.Content = content
 	return &cp
+}
+
+// DropUnansweredServerToolCalls removes the server-side tool calls
+// (ServerToolUseContent, MCPToolUseContent) that have no result block with
+// the same ID among content. A request that follows such a call with more
+// input is rejected, so a response that stopped before a server tool call
+// finished, a stream cut off mid-call or a pause the agent gave up on, keeps
+// everything else. content is returned as is when nothing is dropped.
+func DropUnansweredServerToolCalls(content []Content) []Content {
+	answered := map[string]bool{}
+	hasCall := false
+	for _, c := range content {
+		switch c.(type) {
+		case *ServerToolUseContent, *MCPToolUseContent:
+			hasCall = true
+			continue
+		}
+		if id := contentToolUseID(c); id != "" {
+			answered[id] = true
+		}
+	}
+	if !hasCall {
+		return content
+	}
+	kept := make([]Content, 0, len(content))
+	for _, c := range content {
+		switch call := c.(type) {
+		case *ServerToolUseContent:
+			if !answered[call.ID] {
+				continue
+			}
+		case *MCPToolUseContent:
+			if !answered[call.ID] {
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	if len(kept) == len(content) {
+		return content
+	}
+	return kept
+}
+
+// contentToolUseID returns the tool_use_id a result block names, or "".
+func contentToolUseID(c Content) string {
+	switch c.(type) {
+	case *TextContent, *ThinkingContent, *RedactedThinkingContent, *ToolUseContent, *ToolResultContent, *ImageContent, *DocumentContent:
+		return ""
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	return blockToolUseID(data)
 }

@@ -32,7 +32,12 @@ type Session interface {
 	// Messages returns the conversation history.
 	Messages(ctx context.Context) ([]*llm.Message, error)
 
-	// SaveTurn persists messages from a single turn.
+	// SaveTurn persists messages from a single turn. An incomplete turn is
+	// saved the same way; its last message records the outcome (see
+	// FindTurnOutcome). The agent calls it on a context without the
+	// cancellation that may have ended the turn, bounded by
+	// IncompleteTurnOptions.SaveTimeout. An error that wraps ErrSaveRejected
+	// says nothing was written.
 	SaveTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error
 }
 
@@ -56,9 +61,10 @@ type SuspendableSession interface {
 	// equivalent value.
 	SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *SuspensionState) error
 
-	// SaveResumedTurn replaces the last (suspended) event with a completed
-	// turn and clears the stored suspension state. Implementations should
-	// return an error if the session is not currently suspended.
+	// SaveResumedTurn replaces the last (suspended) event with the resumed
+	// turn, completed or closed incomplete, and clears the stored suspension
+	// state. Implementations should return an error if the session is not
+	// currently suspended.
 	SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error
 
 	// CancelSuspension abandons a suspended turn, clearing the suspension
@@ -152,6 +158,10 @@ type CreateResponseOptions struct {
 	// start of the next generation. Set via WithBackgroundResults.
 	BackgroundHandles []*BackgroundTaskHandle
 	BackgroundResults map[string]*ToolResult
+
+	// Continue asks for another invocation of the conversation as recorded,
+	// with no new input. Set via WithContinue.
+	Continue bool
 }
 
 // EventCallback is a function called with each item produced while an agent
@@ -279,5 +289,31 @@ func WithResume(state *SuspensionState, results map[string]*ToolResult) CreateRe
 	return func(opts *CreateResponseOptions) {
 		opts.Suspension = state
 		opts.ToolResults = results
+	}
+}
+
+// ErrContinueWithInput is returned when WithContinue is combined with new
+// input on a session, or with a resume.
+var ErrContinueWithInput = errors.New("dive: WithContinue takes no new input and cannot resume a suspended turn")
+
+// WithContinue asks for another invocation of the conversation as recorded,
+// with no new input: the model is called on the history as it stands. It is
+// how a stopped, failed or cut-off turn is picked up without rerunning any
+// tool, since every tool result is already in the record. When the history
+// ends in an incomplete turn or in an assistant message, the agent adds a
+// model-only reminder, "turn-continue", saying the user asked to continue
+// from where the turn stopped, so the request never ends in an assistant
+// turn, which some models reject as a prefill.
+//
+// On a session, pass it without input: the continuation is saved as its own
+// turn, holding only its output, and Response.Turn.Messages is that output.
+// A stateless caller passes its history with WithMessages; the messages are
+// history, not input, so Response.Turn.Messages is again the output alone and
+// is appended to that history. It returns ErrResumeRequired on a suspended
+// session, which must be resumed first, ErrContinueWithInput with input on a
+// session or with a resume, and an error when there is no history at all.
+func WithContinue() CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
+		opts.Continue = true
 	}
 }

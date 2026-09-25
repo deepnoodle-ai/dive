@@ -56,6 +56,7 @@ import (
 //   - PostToolUseFailure: Agent, Session, Values, Tool, Call, Result
 //   - Stop: Agent, Session, Values, Response, OutputMessages, Usage, StopHookActive
 //   - PreIteration: Agent, Session, Values, SystemPrompt, Messages, Iteration
+//   - OnIncompleteTurn: Agent, Session, Values, SystemPrompt, Messages, Response, OutputMessages, Usage, Turn
 //
 // The Values map allows hooks to communicate with each other by storing
 // arbitrary data that persists across the hook chain within a single
@@ -134,6 +135,12 @@ type HookContext struct {
 	// Iteration is the zero-based iteration number within the generation loop.
 	Iteration int
 
+	// OnIncompleteTurn
+
+	// Turn is the turn as it will be returned and saved. Set for
+	// OnIncompleteTurn hooks, whose Turn.Outcome is mutable.
+	Turn *Turn
+
 	reminders          *reminderState
 	reminderDeliveries []reminderDelivery
 	toolScoped         bool
@@ -156,7 +163,9 @@ type HookContext struct {
 // CreateResponse returns that error. No subsequent hooks are called.
 type PreGenerationHook func(ctx context.Context, hctx *HookContext) error
 
-// PostGenerationHook is called after the LLM generation loop completes.
+// PostGenerationHook is called after the LLM generation loop completes, on a
+// completed or suspended turn. An incomplete turn runs OnIncompleteTurn hooks
+// instead.
 //
 // PostGeneration hooks run in order and can:
 //   - Read hctx.Response to access the complete response
@@ -309,6 +318,30 @@ type SessionStartHook func(ctx context.Context, hctx *HookContext) (*SessionStar
 // awaited results) do NOT re-fire OnSuspend, since they continue an existing
 // suspension rather than announcing a new one.
 type OnSuspendHook func(ctx context.Context, hctx *HookContext) error
+
+// IncompleteTurnHook runs when a turn ends incomplete, after the turn is
+// closed and before it is saved. It receives:
+//
+//   - hctx.Turn: the turn as it will be returned and saved. Turn.Outcome is
+//     mutable; the saved outcome reminder is built from it after the hooks.
+//   - hctx.OutputMessages: the closed output without the outcome reminder.
+//     A hook may replace or edit it; what it holds after the hooks is saved,
+//     followed by the outcome reminder.
+//   - hctx.Response, hctx.Usage and hctx.Messages.
+//
+// Its context is not cancelled even when a cancellation ended the turn, so
+// the hook can do I/O. Recorded reminders it appends are saved before the
+// outcome reminder. A regular error is logged; a decision with Discard set
+// drops the turn.
+type IncompleteTurnHook func(ctx context.Context, hctx *HookContext) (*IncompleteTurnDecision, error)
+
+// IncompleteTurnDecision tells the agent what to do with an incomplete turn.
+type IncompleteTurnDecision struct {
+	// Discard drops the turn: nothing is saved, as if
+	// IncompleteTurnOptions.Discard were set for this call. The response
+	// still reports the closed turn, with Persistence none.
+	Discard bool
+}
 
 // StopDecision tells the agent what to do after a stop hook runs.
 type StopDecision struct {

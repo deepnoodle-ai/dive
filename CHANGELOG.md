@@ -21,9 +21,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   call or tool call; running calls finish. The error wraps `context.Canceled`.
 - **`TurnOutcome.ToolCalls`** records each call of a stopped tool batch as
   `completed`, `not_started` or `unknown`; `Next` is `reconcile` for unknown.
+- **`WithContinue`** calls the model again on the history as it stands, with no
+  new input, so a stopped or failed turn is picked up without rerunning tools.
+- **`OnIncompleteTurn` hooks and `AgentOptions.IncompleteTurns`**
+  (`Discard`, `DropPartialText`, `SaveTimeout`).
+- **`CloseTurn`, `FindTurnOutcome` and `FindLatestTurnOutcome`**, over the
+  `turn-incomplete` reminder, whose `Reminder.Details` hold the `TurnOutcome`.
+- **`ErrSaveRejected` and `PersistenceFailed`** for a write the session refused
+  before writing; `session.Session`'s refusals wrap it.
+- **`SuspensionState.Usage`**, the suspended turn's usage, which a resumed
+  turn's `Response.Turn.Usage` includes.
+- **`llm.AnswerUnansweredToolCallsWith` and
+  `llm.DropUnansweredServerToolCalls`.**
 
 ### Changed
 
+- **Turns that stop before they finish are saved and reported.** A cancelled
+  or failed turn is closed, with a `turn-incomplete` reminder, and saved to the
+  session; set `IncompleteTurns.Discard` if your application saves it itself.
+- **A response cut at `max_tokens`, the context window or the iteration limit
+  returns `ResponseStatusIncomplete`** with a nil error, and runs no tool call;
+  nor does a refusal or an unrecognized stop reason. `pause_turn` is resent.
+- **A failed full resume closes the turn** instead of leaving the session
+  suspended; continue it with `WithContinue`.
+- **A suspension is persisted even when the run was cancelled meanwhile**, and
+  an `OnSuspend` abort records the suspending calls as `unknown`.
+- **A stream that ends without its end marker is interrupted**, keeping the
+  text the model had written.
 - **A Chat Completions stream that ends with no `finish_reason` or `[DONE]`
   is an error**, wrapping `io.ErrUnexpectedEOF`. `[DONE]` alone still ends it.
 - **Gemini finish reasons stay distinct**: `safety`, `unexpected_tool_call` and
@@ -33,7 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Errors after the turn begins return `(resp, err)`**, and `err` wraps
   `*GenerationError`; a failed partial resume still returns no response.
 - **A failed session save returns the response** with the error and
-  `Turn.Persistence == unknown`, where it returned `(nil, err)`.
+  `Turn.Persistence` `failed` or `unknown`, where it returned `(nil, err)`.
+  Session writes at the end of a call ignore the run's cancellation.
 - **`ResponseItemTypeSuspended` is deprecated**, and a callback error on it is
   logged instead of returned.
 - **A stopped tool batch keeps its finished results** and answers the other
@@ -58,6 +83,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `SaveSuspendedTurn` copy turn messages and completed-call results.
 - **A2A `Cancel` waits for the cancelled run's session write** before removing
   its suspension, and returns an error rather than `canceled` when it cannot.
+- **A2A reports incomplete turns**: a cancelled turn is `canceled`, any other
+  `failed`, each with the output it kept as the artifact.
+- **The subagent tool returns a stopped subagent's answer so far** with the
+  reason, where it returned only the error.
 - **The CLI no longer reports a cancelled turn as an error.**
 
 ## [1.33.1] - 2026-09-24

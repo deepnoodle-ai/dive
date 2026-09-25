@@ -13,14 +13,20 @@ import (
 // is set on Response.Turn for every status once the turn has begun, and on
 // the terminal ResponseItemTypeTurnEnded item.
 type Turn struct {
-	// Messages is what a session saves for this invocation. For a fresh
-	// turn it is the input and the output, including a synthetic
-	// background-results message, which OutputMessages does not carry. For
-	// a resume it is the whole suspended turn merged with this invocation's
-	// output, since the session replaces the suspended event.
+	// Messages is what a session saves for this invocation, closed so it
+	// can be sent again. For a fresh turn it is the input and the output,
+	// including a synthetic background-results message, which
+	// OutputMessages does not carry. For a resume it is the whole suspended
+	// turn merged with this invocation's output, since the session replaces
+	// the suspended event. For a continuation (WithContinue) it is the
+	// output alone. A stateless caller appends it to the history it held
+	// before the call (before the suspended turn, on a resume).
 	Messages []*llm.Message `json:"messages"`
 
-	// Usage is the usage of this invocation's model calls. It is never nil.
+	// Usage is the turn's usage: this invocation's model calls, plus, on a
+	// resume, what the suspended turn had accumulated
+	// (SuspensionState.Usage). It is never nil. Response.Usage is this
+	// invocation's alone, which is what a session is handed.
 	Usage *llm.Usage `json:"usage,omitempty"`
 
 	// Outcome is set when Status is ResponseStatusIncomplete.
@@ -40,30 +46,64 @@ type PersistenceState string
 const (
 	// PersistenceNone means nothing was saved: there is no session, the
 	// session does not store this kind of state (a suspension on a session
-	// that is not a SuspendableSession), or the turn is incomplete.
+	// that is not a SuspendableSession), or the turn was discarded
+	// (IncompleteTurnOptions.Discard, IncompleteTurnDecision.Discard).
 	PersistenceNone PersistenceState = "none"
 
 	// PersistenceSaved means the session acknowledged the write.
 	PersistenceSaved PersistenceState = "saved"
 
-	// PersistenceUnknown means the write returned an error. The write may
+	// PersistenceFailed means the session refused the write before writing
+	// anything: its error wraps ErrSaveRejected.
+	PersistenceFailed PersistenceState = "failed"
+
+	// PersistenceUnknown means the write returned any other error, or did
+	// not finish within IncompleteTurnOptions.SaveTimeout. The write may
 	// still have landed, as when a file store fails after replacing the
 	// file, so the caller reloads the session before acting on it.
 	PersistenceUnknown PersistenceState = "unknown"
 )
 
+// ErrSaveRejected is wrapped by a Session's write error when the session
+// refused the write before writing anything, as session.Session does for a
+// write its state does not allow. The agent then reports PersistenceFailed;
+// any other error is PersistenceUnknown, since the write may have landed.
+var ErrSaveRejected = errors.New("dive: session rejected the write before writing")
+
+// persistenceOf classifies the error of a session write.
+func persistenceOf(err error) PersistenceState {
+	switch {
+	case err == nil:
+		return PersistenceSaved
+	case errors.Is(err, ErrSaveRejected):
+		return PersistenceFailed
+	default:
+		return PersistenceUnknown
+	}
+}
+
 // TurnOutcome says how an incomplete turn stopped and what can continue it.
-// It is set on Response.Turn.Outcome.
+// It is set on Response.Turn.Outcome, given to OnIncompleteTurn hooks, and
+// recorded as the details of the turn-incomplete reminder that closes the
+// turn (see FindTurnOutcome).
 type TurnOutcome struct {
 	// Reason says what stopped the turn.
 	Reason TurnReason `json:"reason"`
 
-	// Error is the error that ended the invocation, as text.
+	// Error is the error that ended the invocation, as text, or the raw
+	// stop reason for TurnReasonProviderStopped. An OnIncompleteTurn hook
+	// may rewrite it before it is saved, for example to remove a request ID
+	// from a provider error.
 	Error string `json:"error,omitempty"`
 
 	// Hook is the hook type ("PreToolUse", "Stop", ...) for
 	// TurnReasonHookAbort.
 	Hook string `json:"hook,omitempty"`
+
+	// UsageUnknown is set when a model call's usage could not be observed,
+	// as when a stream died before its usage arrived, so a zero usage is
+	// not a measurement.
+	UsageUnknown bool `json:"usage_unknown,omitempty"`
 
 	// ToolCalls records every call of the batch in flight when the turn
 	// stopped, in call order, with what is known about it. Empty when the
@@ -106,6 +146,30 @@ const (
 
 	// TurnReasonError: any other error; TurnOutcome.Error says which.
 	TurnReasonError TurnReason = "error"
+
+	// TurnReasonOutputLimit: the model stopped at its output limit
+	// (max_tokens). The answer is valid as far as it goes; its tool calls
+	// were not run.
+	TurnReasonOutputLimit TurnReason = "output_limit"
+
+	// TurnReasonContextLimit: the response filled the model's context
+	// window. The same history cannot be sent again as it is: shorten it
+	// before continuing.
+	TurnReasonContextLimit TurnReason = "context_limit"
+
+	// TurnReasonIterationLimit: the model still requested tool calls when
+	// AgentOptions.ToolIterationLimit was reached. They were not run.
+	TurnReasonIterationLimit TurnReason = "iteration_limit"
+
+	// TurnReasonProviderStopped: the provider ended the response early for
+	// a reason it did not name as a limit or a refusal, or with a stop
+	// reason Dive does not recognize on a response that requested tool
+	// calls. TurnOutcome.Error is the raw stop reason; no call was run.
+	TurnReasonProviderStopped TurnReason = "provider_stopped"
+
+	// TurnReasonPause: a server tool loop paused (pause_turn) more times
+	// than the agent continues it in one invocation.
+	TurnReasonPause TurnReason = "pause"
 )
 
 // TurnNext says what an incomplete turn needs next.
@@ -158,6 +222,7 @@ func failureOutcome(err error, record *turnRecord) *TurnOutcome {
 	record.mu.Lock()
 	callbackErr, modelErr, streamStarted := record.callbackErr, record.modelErr, record.modelStreamStarted
 	toolCalls, reconcile := record.toolCalls, record.reconcile
+	outcome.UsageUnknown = record.usageUnknown
 	record.mu.Unlock()
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -186,9 +251,25 @@ func failureOutcome(err error, record *turnRecord) *TurnOutcome {
 // defaultNext is the Next an outcome with this reason advises.
 func defaultNext(reason TurnReason) TurnNext {
 	switch reason {
-	case TurnReasonDeadline, TurnReasonProviderError, TurnReasonStreamInterrupted, TurnReasonCallbackError:
+	case TurnReasonDeadline, TurnReasonProviderError, TurnReasonStreamInterrupted, TurnReasonCallbackError,
+		TurnReasonOutputLimit, TurnReasonIterationLimit, TurnReasonProviderStopped, TurnReasonPause:
 		return TurnNextContinue
 	default:
 		return TurnNextInput
+	}
+}
+
+// stopOutcome is the outcome of a turn the model or its provider stopped
+// short. detail is the raw stop reason for TurnReasonProviderStopped.
+func stopOutcome(reason TurnReason, detail string, records []ToolCallRecord, record *turnRecord) *TurnOutcome {
+	record.mu.Lock()
+	usageUnknown := record.usageUnknown
+	record.mu.Unlock()
+	return &TurnOutcome{
+		Reason:       reason,
+		Error:        detail,
+		UsageUnknown: usageUnknown,
+		ToolCalls:    records,
+		Next:         defaultNext(reason),
 	}
 }

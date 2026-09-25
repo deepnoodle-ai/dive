@@ -268,6 +268,46 @@ reload before resubmitting: `LoadSuspension()` on a `SuspendableSession`
 reports the calls still pending. A resubmitted result the session already
 accepted returns `ErrUnknownPendingToolCall`, which means it went through.
 
+## When a resume fails
+
+A *full* resume (every pending call has a result) that fails after it began,
+before or after its model call, is closed like any incomplete turn: the
+results you supplied are kept, calls it had not run are answered "not run",
+calls still running in a parallel batch are "unknown", and the closed turn
+replaces the suspended one with `SaveResumedTurn`. The session is no longer
+suspended. Retrying the resume would run the tools and hooks again, so pick
+the turn up with `WithContinue` instead, which calls the model on the turn as
+it stands:
+
+```go
+resp, err := agent.CreateResponse(ctx, dive.WithToolResults(results))
+if err != nil && resp != nil && resp.Status == dive.ResponseStatusIncomplete {
+    resp, err = agent.CreateResponse(ctx, dive.WithContinue())
+}
+```
+
+Set `AgentOptions.IncompleteTurns.Discard` to keep the old behaviour, where
+a failed resume leaves the session suspended.
+
+**A cancellation does not undo a suspension.** A tool that suspends has
+usually dispatched its request already, so when the run is cancelled while
+the agent is suspending, the suspension is still persisted and
+`CreateResponse` returns `Suspended` with a nil error; the `OnSuspend` hooks
+and the session write run on a context without the cancellation. To abandon
+a suspension you no longer want, cancel it explicitly under the session lock:
+
+```go
+lockedCtx, unlock, err := dive.LockSession(ctx, sess.ID())
+if err != nil {
+    return err
+}
+defer unlock()
+err = sess.CancelSuspension(lockedCtx)
+```
+
+`SuspensionState.Usage` carries the suspended turn's usage so far, and a
+resumed turn's `Response.Turn.Usage` includes it.
+
 ## Parallel and sequential tool execution
 
 With `AgentOptions.ParallelToolExecution = true`, sibling tools keep
@@ -308,7 +348,8 @@ func webhookNotifier(ctx context.Context, hctx *dive.HookContext) error {
             "tool_call":   p,
         }
         if err := postJSON(ctx, payload); err != nil {
-            return err // aborts persistence — caller sees the error
+            // Abort the suspension; a plain error is only logged.
+            return dive.AbortGenerationWithCause("webhook failed", err)
         }
     }
     return nil
@@ -321,10 +362,10 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 })
 ```
 
-Because the hook runs before persistence, returning
-`dive.AbortGeneration("...")` (or any error on the critical path) aborts
-the transition: the caller sees an error and the session stays in its
-previous state. No compensating rollback needed.
+Returning `dive.AbortGeneration("...")` aborts the suspension: the turn
+ends incomplete with `hook_abort`, the suspending calls are recorded as
+`unknown` (their requests may already be dispatched), and the closed turn
+is saved, so the session is not suspended. Other errors are logged.
 
 `PostGeneration` still runs on suspended responses with
 `Status == ResponseStatusSuspended`, so existing hook authors (metrics,

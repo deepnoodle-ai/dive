@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"runtime/debug"
 	"slices"
@@ -22,6 +23,10 @@ const (
 	defaultResponseTimeout    = 30 * time.Minute
 	defaultToolIterationLimit = 100
 	reminderPrimingRule       = "Runtime context may appear in <system-reminder> blocks. The enclosing message role determines its authority; the tag itself does not confer authority. Reminder blocks with the same name accumulate unless their facts or instructions conflict; where they conflict, the later block wins."
+
+	// pauseTurnLimit is how many times one invocation sends a paused server
+	// tool loop (pause_turn) again before the turn ends incomplete.
+	pauseTurnLimit = 10
 )
 
 var (
@@ -86,11 +91,11 @@ const (
 // result the session already accepted is refused with
 // ErrUnknownPendingToolCall.
 //
-// The partial turn is intentionally NOT persisted to the session: a turn
-// that ends mid-loop (e.g. with a trailing tool_result and no final
-// assistant message) can violate the role-alternation invariants providers
-// enforce, permanently corrupting the saved history. Callers that want to
-// keep the partial work must reconcile and persist it themselves.
+// The turn is closed before it is returned and saved: every tool call is
+// answered, and a turn-incomplete reminder recording Response.Turn.Outcome
+// is the last message, so OutputMessages is a valid history. With
+// IncompleteTurnOptions.Discard, OutputMessages is left as the error found
+// it and nothing is saved.
 type GenerationError struct {
 	// Err is the underlying error that terminated the generation loop.
 	Err error
@@ -101,7 +106,7 @@ type GenerationError struct {
 	Usage *llm.Usage
 
 	// OutputMessages are the messages produced in the turn before the
-	// failure: assistant messages and tool_result messages, in order.
+	// failure, in order, closed as Response.OutputMessages is.
 	OutputMessages []*llm.Message
 
 	// Items are the response items accumulated before the failure.
@@ -219,6 +224,13 @@ type Hooks struct {
 	// is needed.
 	OnSuspend []OnSuspendHook
 
+	// OnIncompleteTurn hooks run when a turn ends incomplete, for any
+	// reason, after the turn is closed and before it is saved. They can
+	// repair the messages that will be saved, change the recorded error,
+	// notify an external system, or discard the turn. They do not run for an
+	// error exit when IncompleteTurnOptions.Discard is set.
+	OnIncompleteTurn []IncompleteTurnHook
+
 	// PostBackgroundToolUse hooks fire when background task results are
 	// delivered to the agent — i.e. when WithBackgroundResults is used on the
 	// next CreateResponse call. The hook receives the final *ToolResult and
@@ -245,6 +257,7 @@ func (h Hooks) cloneSlices() Hooks {
 	h.Stop = slices.Clone(h.Stop)
 	h.PreIteration = slices.Clone(h.PreIteration)
 	h.OnSuspend = slices.Clone(h.OnSuspend)
+	h.OnIncompleteTurn = slices.Clone(h.OnIncompleteTurn)
 	h.PostBackgroundToolUse = slices.Clone(h.PostBackgroundToolUse)
 	return h
 }
@@ -329,6 +342,10 @@ type AgentOptions struct {
 	ResponseTimeout    time.Duration
 	ToolIterationLimit int
 
+	// IncompleteTurns configures what the agent does with a turn that stops
+	// before it completes.
+	IncompleteTurns IncompleteTurnOptions
+
 	// ParallelToolExecution enables concurrent execution of tool calls when
 	// the LLM returns multiple tool calls in a single message. When false
 	// (the default), tool calls are executed sequentially in order.
@@ -338,6 +355,36 @@ type AgentOptions struct {
 	// declared the tool calls.
 	ParallelToolExecution bool
 }
+
+// IncompleteTurnOptions configures what the agent does with a turn that stops
+// before it completes. By default such a turn is closed (every tool call
+// answered, the outcome recorded as a turn-incomplete reminder), passed to
+// OnIncompleteTurn hooks, and saved to the session like any other turn.
+type IncompleteTurnOptions struct {
+	// Discard restores the behaviour before v1.34 for a turn that ends in an
+	// error: nothing is saved, no OnIncompleteTurn hook runs, no not-run,
+	// unknown or turn_ended item is emitted, the output is left as the
+	// error found it, and a failed resume leaves the session suspended.
+	// CreateResponse still returns the incomplete Response with the error,
+	// with Turn.Persistence none. A turn the model itself stopped short
+	// (output limit, context limit, iteration limit, provider stop, pause)
+	// is still closed and saved. For applications that keep incomplete turns
+	// themselves.
+	Discard bool
+
+	// DropPartialText leaves out the text the model was still writing when
+	// a streamed response stopped.
+	DropPartialText bool
+
+	// SaveTimeout bounds the session write at the end of an invocation. The
+	// write, like the OnIncompleteTurn and OnSuspend hooks, runs on a
+	// context without the cancellation that may have ended the turn, so
+	// that the turn is kept. Default 30 seconds.
+	SaveTimeout time.Duration
+}
+
+// defaultSaveTimeout is IncompleteTurnOptions.SaveTimeout when unset.
+const defaultSaveTimeout = 30 * time.Second
 
 // Agent represents an intelligent AI entity that can autonomously use tools to
 // process information while responding to chat messages.
@@ -355,6 +402,7 @@ type Agent struct {
 	logger                llm.Logger
 	toolIterationLimit    int
 	parallelToolExecution bool
+	incompleteTurns       IncompleteTurnOptions
 	modelSettings         *ModelSettings
 	systemPrompt          string
 	session               Session
@@ -383,6 +431,9 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	if opts.Logger == nil {
 		opts.Logger = &llm.NullLogger{}
 	}
+	if opts.IncompleteTurns.SaveTimeout <= 0 {
+		opts.IncompleteTurns.SaveTimeout = defaultSaveTimeout
+	}
 	// Merge extensions into opts before building the agent. Clone the
 	// caller's slices first: appending directly may write into the caller's
 	// backing arrays, cross-contaminating a reused AgentOptions value
@@ -406,6 +457,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		opts.Hooks.Stop = append(opts.Hooks.Stop, extHooks.Stop...)
 		opts.Hooks.PreIteration = append(opts.Hooks.PreIteration, extHooks.PreIteration...)
 		opts.Hooks.OnSuspend = append(opts.Hooks.OnSuspend, extHooks.OnSuspend...)
+		opts.Hooks.OnIncompleteTurn = append(opts.Hooks.OnIncompleteTurn, extHooks.OnIncompleteTurn...)
 		opts.Hooks.PostBackgroundToolUse = append(opts.Hooks.PostBackgroundToolUse, extHooks.PostBackgroundToolUse...)
 		if rules := ext.Rules(); rules != "" {
 			opts.SystemPrompt = strings.TrimRight(opts.SystemPrompt, "\n") + "\n\n" + rules
@@ -425,6 +477,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		responseTimeout:       opts.ResponseTimeout,
 		toolIterationLimit:    opts.ToolIterationLimit,
 		parallelToolExecution: opts.ParallelToolExecution,
+		incompleteTurns:       opts.IncompleteTurns,
 		llmHooks:              opts.LLMHooks,
 		logger:                opts.Logger,
 		systemPrompt:          opts.SystemPrompt,
@@ -660,6 +713,20 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, ErrResumeRequired
 	}
 
+	// A continuation has no input. On a session the history is the
+	// session's; a stateless caller's messages are its history, so they are
+	// not part of the turn this invocation records.
+	if options.Continue {
+		if hasResumeIntent || (sess != nil && len(inputMessages) > 0) {
+			return nil, ErrContinueWithInput
+		}
+		if len(sessionMsgs) == 0 && len(inputMessages) == 0 {
+			return nil, errors.New("dive: WithContinue needs a conversation to continue")
+		}
+		sessionMsgs = append(slices.Clone(sessionMsgs), inputMessages...)
+		inputMessages = nil
+	}
+
 	// Fire SessionStart hooks at the start of a fresh conversation: the session
 	// has no prior messages and this turn is not resuming a suspended one. The
 	// resume guards above guarantee suspState == nil here when hasResumeIntent
@@ -667,7 +734,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// Returned messages are prepended to the conversation; those marked Persist
 	// are saved as a pre-turn so they survive later turns and resumes.
 	var sessionStartValues map[string]any
-	if !hasResumeIntent && len(sessionMsgs) == 0 && len(a.hooks.SessionStart) > 0 {
+	if !hasResumeIntent && !options.Continue && len(sessionMsgs) == 0 && len(a.hooks.SessionStart) > 0 {
 		startHctx := NewHookContext()
 		startHctx.Agent = a
 		startHctx.Session = sess
@@ -787,6 +854,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	for _, reminder := range options.ModelOnlyReminders {
 		hctx.reminders.appendModelOnly(NewReminderMessage(reminder))
 	}
+	if options.Continue && continueNeedsReminder(messages) {
+		hctx.reminders.appendModelOnly(NewReminderMessage(Reminder{
+			Name:    ReminderNameTurnContinue,
+			Tier:    ReminderTierContextual,
+			Content: turnContinueText,
+		}))
+	}
 
 	// Copy caller-provided values into hook context, then layer any values
 	// set by SessionStart hooks on top (they ran later and already saw the
@@ -818,6 +892,9 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		suspendable:   suspendable,
 		rs:            rs,
 		partialResume: rs != nil && len(rs.RemainingPending) > 0,
+	}
+	if suspState != nil && suspState.Usage != nil {
+		t.priorUsage = suspState.Usage.Copy()
 	}
 	eventCallback := t.record.collecting(t.emit)
 
@@ -907,12 +984,16 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				// suspended batch; its other calls completed before the
 				// suspension or were supplied by the caller.
 				closed := closeToolBatch(rs.NotStartedToolCalls, resumeToolsByName, batch)
-				rs.AppendToolResults(getToolResultContent(closed.results))
-				for _, tc := range getAdditionalContextContent(closed.completed) {
-					rs.AppendToolResultTextContent(tc)
-				}
-				for _, result := range closed.completed {
-					queueReminderDeliveries(hctx.reminders, result.reminderDeliveries)
+				if a.incompleteTurns.Discard {
+					closed.items = nil
+				} else {
+					rs.AppendToolResults(getToolResultContent(closed.results))
+					for _, tc := range getAdditionalContextContent(closed.completed) {
+						rs.AppendToolResultTextContent(tc)
+					}
+					for _, result := range closed.completed {
+						queueReminderDeliveries(hctx.reminders, result.reminderDeliveries)
+					}
 				}
 				t.record.stopBatch(resumedBatchRecords(rs, closed), closed)
 				return t.end(ctx, failedExit(err))
@@ -981,12 +1062,15 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		genResult, err := a.generate(ctx, hctx, t.record, messages, systemPrompt, promptCacheKey, eventCallback, model)
 		if err != nil {
 			logger.Error("failed to generate response", "error", err)
-			// The error carries the whole turn's partial work: resume-phase
-			// items and prior Stop-hook continuation iterations included.
-			// The partial turn is deliberately NOT saved to the session: a
-			// half-turn can violate provider role-alternation invariants
-			// (see GenerationError).
+			// The turn record holds the whole turn's partial work:
+			// resume-phase items and prior Stop-hook continuations included.
+			// The exit closes and saves it.
 			return t.end(ctx, failedExit(err))
+		}
+		if genResult.Stopped != nil {
+			// The model or its provider stopped the turn short. Stop hooks
+			// do not run on an incomplete turn.
+			return t.end(ctx, stoppedExit(genResult.Stopped))
 		}
 		t.syncResponse(true)
 
@@ -1703,16 +1787,21 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 	// and then automatically run any tool-use invocations. The first time
 	// through, we submit the primary generation. On subsequent loops, we are
 	// running tool-uses and responding with the results.
+	//
+	// i counts the tool iterations. A paused server tool loop is sent again
+	// without spending one; iteration counts every model call.
 	generationLimit := a.toolIterationLimit + 1
 	lastIteration := false
-	for i := range generationLimit {
+	iteration := 0
+	pauses := 0
+	for i := 0; i < generationLimit; i++ {
 		// Refresh per-iteration hook context state unconditionally, so every
 		// hook that fires during this iteration (PreIteration, PreToolUse,
 		// PostToolUse, ...) observes the current message set rather than a
 		// stale snapshot from the start of the turn. This must not depend on
 		// whether PreIteration hooks happen to be registered. The refresh is
 		// a cheap slice-header assignment — no copying.
-		hctx.Iteration = i
+		hctx.Iteration = iteration
 		hctx.SystemPrompt = systemPrompt
 		hctx.Messages = updatedMessages
 
@@ -1787,15 +1876,18 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 			PresencePenalty:  infoCfg.PresencePenalty,
 			SystemPrompt:     systemPrompt,
 			Messages:         updatedMessages,
-			Iteration:        i,
+			Iteration:        iteration,
 		})
+		iteration++
 
 		var err error
 		var response *llm.Response
-		var ttfc float64
-		var streamStarted bool
+		var stream streamResult
 		if streamingLLM, ok := model.(llm.StreamingLLM); ok {
-			response, ttfc, streamStarted, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, callback)
+			stream, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, callback)
+			if err == nil {
+				response = stream.response
+			}
 		} else {
 			response, err = model.Generate(chatCtx, iterOpts...)
 		}
@@ -1806,13 +1898,49 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		if response != nil {
 			chatSpan.SetResponse(response)
 		}
-		if ttfc > 0 {
-			chatSpan.SetTimeToFirstChunk(ttfc)
+		if stream.ttfc > 0 {
+			chatSpan.SetTimeToFirstChunk(stream.ttfc)
 		}
 		chatSpan.End(err)
 		if err != nil {
-			record.addModelError(err, streamStarted)
+			record.addModelError(err, stream.started)
+			// Keep what a stream delivered before it stopped: its usage, and
+			// the text the model was writing (see partialMessage).
+			if stream.response != nil && !a.incompleteTurns.Discard {
+				record.addPartialResponse(stream.response, stream.usageSeen)
+				if msg := a.partialMessage(stream.response, stream.unfinished); msg != nil {
+					newMessage(msg)
+				}
+			}
 			return nil, err
+		}
+
+		// Read the stop reason before acting on the response. Calls on a
+		// response the model did not finish, or that the provider stopped,
+		// are never run; a truncated call is dropped from the message.
+		stopKind := llm.ClassifyStopReason(response.StopReason)
+		var stopReason TurnReason
+		runCalls := true
+		switch stopKind {
+		case llm.StopKindOutputLimit:
+			stopReason, runCalls = TurnReasonOutputLimit, false
+		case llm.StopKindContextLimit:
+			stopReason, runCalls = TurnReasonContextLimit, false
+		case llm.StopKindRefusal:
+			runCalls = false
+		case llm.StopKindIncomplete:
+			stopReason, runCalls = TurnReasonProviderStopped, false
+		case llm.StopKindOther, llm.StopKindPause:
+			if len(response.ToolCalls()) > 0 {
+				stopReason, runCalls = TurnReasonProviderStopped, false
+			}
+		}
+		paused := stopKind == llm.StopKindPause && stopReason == ""
+		if paused && pauses >= pauseTurnLimit {
+			stopReason = TurnReasonPause
+		}
+		if stopReason != "" || !runCalls {
+			response.Content = llm.DropUnansweredServerToolCalls(dropTruncatedToolCalls(response.Content))
 		}
 
 		a.logger.Debug("llm response",
@@ -1826,23 +1954,65 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		)
 
 		// Record the assistant response message, its usage and its stop
-		// reason before the callback, which can fail.
+		// reason before the callback, which can fail. A response left with
+		// nothing once cleaned up is not recorded.
 		assistantMsg := response.Message()
-		newMessage(assistantMsg)
 		record.addModelResponse(response)
+		if len(assistantMsg.Content) > 0 {
+			newMessage(assistantMsg)
+			// Always call callback for every LLM-generated message
+			if err := callback(ctx, &ResponseItem{
+				Type:    ResponseItemTypeMessage,
+				Message: assistantMsg,
+				Usage:   response.Usage.Copy(),
+			}); err != nil {
+				return nil, err
+			}
+		}
 
-		// Always call callback for every LLM-generated message
-		if err := callback(ctx, &ResponseItem{
-			Type:    ResponseItemTypeMessage,
-			Message: assistantMsg,
-			Usage:   response.Usage.Copy(),
-		}); err != nil {
-			return nil, err
+		// A paused server tool loop is sent again as it stands, with no new
+		// message, up to pauseTurnLimit times.
+		if paused && stopReason == "" {
+			pauses++
+			i--
+			continue
+		}
+
+		toolCalls := response.ToolCalls()
+		if runCalls && lastIteration && len(toolCalls) > 0 {
+			// The model kept calling tools past the iteration limit.
+			stopReason, runCalls = TurnReasonIterationLimit, false
+		}
+
+		// Answer the calls that will not run, so the output stays a valid
+		// history.
+		var records []ToolCallRecord
+		if !runCalls && len(toolCalls) > 0 {
+			closed := closeToolBatch(toolCalls, toolsByName, &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))})
+			newMessage(closedToolResultMessage(closed))
+			for _, item := range closed.items {
+				if err := callback(ctx, item); err != nil {
+					return nil, err
+				}
+			}
+			records = closed.records
+		}
+		if stopReason != "" {
+			detail := ""
+			if stopReason == TurnReasonProviderStopped {
+				detail = response.StopReason
+				if detail == "" {
+					detail = "none"
+				}
+			}
+			return &generateResult{
+				OutputMessages: record.outputSince(outputStart),
+				Stopped:        stopOutcome(stopReason, detail, records, record),
+			}, nil
 		}
 
 		// Check for tool calls
-		toolCalls := response.ToolCalls()
-		if len(toolCalls) == 0 {
+		if !runCalls || len(toolCalls) == 0 {
 			break
 		}
 
@@ -1852,9 +2022,14 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 			// Every call of the stopped batch is answered by what is known
 			// about it, so the output stays a valid history.
 			closed := closeToolBatch(toolCalls, toolsByName, batch)
-			newMessage(closedToolResultMessage(closed))
-			for _, result := range closed.completed {
-				deliverReminders(result.reminderDeliveries)
+			if a.incompleteTurns.Discard {
+				// The output is left as the error found it.
+				closed.items = nil
+			} else {
+				newMessage(closedToolResultMessage(closed))
+				for _, result := range closed.completed {
+					deliverReminders(result.reminderDeliveries)
+				}
 			}
 			record.stopBatch(closed.records, closed)
 			return nil, err
@@ -1913,45 +2088,158 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 	}, nil
 }
 
+// streamResult is what a streamed model call delivered.
+type streamResult struct {
+	// response is the accumulated response. After an error it is the
+	// partial response, or nil when the stream never started a message.
+	response *llm.Response
+
+	// unfinished are the blocks of a partial response that never received
+	// content_block_stop.
+	unfinished []llm.Content
+
+	// ttfc is the time to the first content chunk in seconds, zero when
+	// none arrived.
+	ttfc float64
+
+	// started reports whether the stream delivered any event.
+	started bool
+
+	// usageSeen reports whether the stream reported usage.
+	usageSeen bool
+}
+
+// errStreamEnded is the error of a stream that ended without its message_stop
+// event: the transport closed before the response finished.
+var errStreamEnded = fmt.Errorf("dive: model stream ended before the response finished: %w", io.ErrUnexpectedEOF)
+
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
-// Returns the accumulated response, the time-to-first-chunk in seconds
-// (zero for pre-first-chunk failures), whether the stream delivered any
-// event, and any error.
+// On an error the result holds whatever the stream delivered first. A stream
+// that ends without message_stop is an error, errStreamEnded.
 func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
 	callback EventCallback,
-) (response *llm.Response, ttfc float64, started bool, err error) {
+) (result streamResult, err error) {
 	accum := llm.NewResponseAccumulator()
 	streamStart := time.Now()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
-		return nil, 0, false, err
+		return result, err
 	}
 	defer iter.Close()
+	defer func() {
+		if err != nil {
+			result.response = accum.Response()
+			if result.response != nil {
+				result.unfinished = accum.UnfinishedContent()
+			}
+		}
+	}()
 
 	for iter.Next() {
-		started = true
+		result.started = true
 		event := iter.Event()
-		if ttfc == 0 && eventHasContent(event) {
-			ttfc = time.Since(streamStart).Seconds()
+		if result.ttfc == 0 && eventHasContent(event) {
+			result.ttfc = time.Since(streamStart).Seconds()
+		}
+		if eventHasUsage(event) {
+			result.usageSeen = true
 		}
 		if err := accum.AddEvent(event); err != nil {
-			return nil, ttfc, started, err
+			return result, err
 		}
 		if err := callback(ctx, &ResponseItem{
 			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
-			return nil, ttfc, started, err
+			return result, err
 		}
 	}
 	if err := iter.Err(); err != nil {
-		return nil, ttfc, started, err
+		return result, err
 	}
-	return accum.Response(), ttfc, started, nil
+	if !accum.IsComplete() {
+		return result, errStreamEnded
+	}
+	result.response = accum.Response()
+	return result, nil
+}
+
+// eventHasUsage reports whether a stream event reports usage.
+func eventHasUsage(event *llm.Event) bool {
+	if event == nil {
+		return false
+	}
+	if event.Usage != nil {
+		return true
+	}
+	if event.Type == llm.EventTypeMessageStart && event.Message != nil {
+		u := event.Message.Usage
+		return u.InputTokens > 0 || u.OutputTokens > 0
+	}
+	return false
+}
+
+// partialMessage returns the message a stream delivered before it stopped,
+// cleaned up so that it can be sent again, or nil when nothing is left. A
+// text block is kept as far as it goes, unless DropPartialText is set and it
+// was still streaming. A tool call still streaming, or whose input is not
+// complete JSON, is dropped, and so is a thinking block still streaming,
+// since its signature arrives last, and a server tool call without its
+// result. A tool call that finished is kept; the turn answers it "not run".
+func (a *Agent) partialMessage(partial *llm.Response, unfinished []llm.Content) *llm.Message {
+	open := make(map[llm.Content]bool, len(unfinished))
+	for _, c := range unfinished {
+		open[c] = true
+	}
+	var content []llm.Content
+	for _, c := range partial.Content {
+		switch block := c.(type) {
+		case *llm.TextContent:
+			if open[c] && (a.incompleteTurns.DropPartialText || block.Text == "") {
+				continue
+			}
+		case *llm.ToolUseContent, *llm.ThinkingContent:
+			if open[c] {
+				continue
+			}
+		case *llm.ServerToolUseContent, *llm.MCPToolUseContent:
+			if open[c] {
+				continue
+			}
+		}
+		content = append(content, c)
+	}
+	content = llm.DropUnansweredServerToolCalls(dropTruncatedToolCalls(content))
+	if len(content) == 0 {
+		return nil
+	}
+	return &llm.Message{ID: partial.ID, Role: llm.Assistant, Content: content}
+}
+
+// dropTruncatedToolCalls removes client tool calls whose input is not
+// complete JSON, as in a response cut off at its output limit: such a call
+// cannot be sent again, let alone run.
+func dropTruncatedToolCalls(content []llm.Content) []llm.Content {
+	var kept []llm.Content
+	for i, c := range content {
+		if call, ok := c.(*llm.ToolUseContent); ok && (len(call.Input) == 0 || !json.Valid(call.Input)) {
+			if kept == nil {
+				kept = append(make([]llm.Content, 0, len(content)), content[:i]...)
+			}
+			continue
+		}
+		if kept != nil {
+			kept = append(kept, c)
+		}
+	}
+	if kept == nil {
+		return content
+	}
+	return kept
 }
 
 // eventHasContent reports whether the event carries assistant content
@@ -2672,24 +2960,27 @@ func (a *Agent) executeOneToolCall(
 		}
 	}
 	outcome.Result = result
+
+	// Suspend path: emit the tool_call_result event but skip PostToolUse
+	// hooks. The caller inspects result.Result.Suspend to classify as pending.
+	// A suspension stands even when the turn was cancelled meanwhile: the
+	// tool may already have dispatched its request, so the turn suspends.
+	if result != nil && result.Result != nil && result.Result.Suspend != nil {
+		outcome.reported = true
+		return callback(context.WithoutCancel(ctx), &ResponseItem{
+			Type:           ResponseItemTypeToolCallResult,
+			ToolCallResult: result,
+		})
+	}
+
 	if err := ctx.Err(); err != nil {
 		// The call's own result is kept, without PostToolUse hooks, which
-		// would run on a cancelled turn. The caller classifies a suspension.
+		// would run on a cancelled turn.
 		if handle := startBackgroundTask(hctx, toolCall, result); handle != nil {
 			handle.hookCtx = preHctx
 			result.BackgroundHandle = handle
 		}
 		return err
-	}
-
-	// Suspend path: emit the tool_call_result event but skip PostToolUse
-	// hooks. The caller inspects result.Result.Suspend to classify as pending.
-	if result != nil && result.Result != nil && result.Result.Suspend != nil {
-		outcome.reported = true
-		return callback(ctx, &ResponseItem{
-			Type:           ResponseItemTypeToolCallResult,
-			ToolCallResult: result,
-		})
 	}
 
 	// Background path: synthesize a "started" message as the tool result so
@@ -3005,6 +3296,11 @@ type generateResult struct {
 	// because at least one tool returned SuspendResult. CreateResponse uses
 	// this to persist the partial turn and return a suspended Response.
 	Suspended *suspendedSnapshot
+
+	// Stopped is non-nil when the model or its provider stopped the turn
+	// short (an output limit, the iteration limit, ...): the turn ends
+	// incomplete without an error.
+	Stopped *TurnOutcome
 }
 
 // suspendedSnapshot describes the state captured when generate() returns
@@ -3096,4 +3392,19 @@ func toPendingToolCall(toolCall *llm.ToolUseContent, sr *SuspendResult) *Pending
 		p.Metadata = sr.Metadata
 	}
 	return p
+}
+
+// continueNeedsReminder reports whether a continuation of history gets the
+// turn-continue reminder: when the history ends in an incomplete turn, or in
+// an assistant message, which some models would take as a prefill.
+func continueNeedsReminder(history []*llm.Message) bool {
+	if len(history) == 0 {
+		return false
+	}
+	last := history[len(history)-1]
+	if last.Role == llm.Assistant {
+		return true
+	}
+	_, ok := FindTurnOutcome(last)
+	return ok
 }

@@ -287,39 +287,109 @@ returned.
 ## When a Turn Stops Short
 
 Once a turn has begun (just before the PreGeneration hooks), `CreateResponse`
-returns a `Response` even when it returns an error. The response's `Status`
-is `ResponseStatusIncomplete`, and `Response.Turn.Outcome` says what stopped
-it and what can continue it:
+returns a `Response` even when it returns an error. A turn that stops before
+it finishes has `Status == ResponseStatusIncomplete`, and
+`Response.Turn.Outcome` says what stopped it and what can continue it:
 
 ```go
-resp, err := agent.CreateResponse(ctx, dive.WithInput("..."))
-if err != nil {
-    if resp != nil && resp.Status == dive.ResponseStatusIncomplete {
-        outcome := resp.Turn.Outcome
-        log.Printf("turn stopped (%s), next: %s", outcome.Reason, outcome.Next)
-        // resp.OutputMessages, resp.Items and resp.Usage hold the work done.
+resp, err := agent.CreateResponse(ctx, dive.WithInput(text), dive.WithEventCallback(render))
+switch {
+case resp == nil:
+    return err // the turn never started: bad input, session failed to load
+case resp.Status == dive.ResponseStatusSuspended:
+    askUser(resp.Turn.Suspension)
+case resp.Status == dive.ResponseStatusIncomplete:
+    o := resp.Turn.Outcome
+    switch o.Reason {
+    case dive.TurnReasonCanceled:
+        notice("Stopped.")
+    case dive.TurnReasonOutputLimit:
+        notice("The answer was cut off.") // offer "continue"
+    default:
+        notice("The turn failed: " + o.Error)
     }
-    return err
+default:
+    show(resp.OutputText())
 }
 ```
 
-`Outcome.Reason` is `canceled`, `deadline`, `provider_error`,
-`stream_interrupted`, `hook_abort` (with `Outcome.Hook`), `callback_error`
-or `error`. The error still wraps a `*dive.GenerationError`, whose `Response`
-is the same value.
+`Outcome.Reason` says what happened. An error ended the turn for `canceled`,
+`deadline`, `provider_error`, `stream_interrupted`, `hook_abort` (with
+`Outcome.Hook`), `callback_error` and `error`: `err` is non-nil and wraps a
+`*dive.GenerationError` whose `Response` is the same value. The model or its
+provider stopped the turn short for `output_limit` (the response hit
+`max_tokens`), `context_limit` (it filled the context window), `iteration_limit`
+(the model still called tools at `ToolIterationLimit`), `provider_stopped`
+(the provider ended the response early, or with a stop reason Dive does not
+recognize while calling tools; `Outcome.Error` is the raw value) and `pause`
+(a server tool loop paused more than ten times): `err` is nil.
+`Outcome.Next` advises what the turn needs: `continue`, `reconcile` or
+`input`.
 
-`Response.Turn` is set for every status: `Messages` is what a session saves
-for the call (the input and the output, or the suspended turn and the output
-on a resume), `Usage` is the call's usage, and `Persistence` is `saved` when
-the session acknowledged the write, `none` when nothing was saved, and
-`unknown` when the write returned an error. A completed or suspended turn
-whose save fails is returned with that error and `Persistence == unknown`;
-reload the session before acting on it. An incomplete turn is not saved yet.
+The agent reads every response's stop reason before running its tools. A
+response cut off at a limit, a refusal, and a provider stop run none of their
+tool calls: a call whose input was cut off is dropped from the message, and
+the others are answered "not run". A refusal is still a completed turn;
+`Response.StopReason` and `Response.StopDetails` say it was one. A paused
+server tool loop (`pause_turn`) is sent again, up to ten times. A stream that
+ends before its end marker is interrupted, and `Outcome.UsageUnknown` is set
+when no usage arrived.
 
-A turn that stops during a tool batch answers every call of the batch, so
-`Turn.Messages` stays a history a provider accepts. A call whose tool returned
-keeps its result. A call that never started is answered with
-`dive.ToolCallNotRunText`: it had no effect. A parallel call that was still
+**The turn is kept.** Before an incomplete turn is returned, it is closed:
+every tool call is answered, the text the model was still writing is kept as
+the last assistant message (a half-written tool call or thinking block is
+dropped), and a `turn-incomplete` reminder recording the outcome is the last
+message. Then `OnIncompleteTurn` hooks run, and the turn is saved to the
+session like any other, so the next call sends it and the model knows how the
+last turn ended. `Response.Turn.Messages` is the closed turn, and a stateless
+caller appends it to its history for every status. Read an outcome back from
+history with `dive.FindTurnOutcome` or `dive.FindLatestTurnOutcome`, and close
+turns you keep yourself with `dive.CloseTurn`.
+
+`Response.Turn.Persistence` is `saved` when the session acknowledged the
+write, `none` when nothing was saved, `failed` when the session refused the
+write before writing (its error wraps `dive.ErrSaveRejected`), and `unknown`
+for any other error: reload the session before acting on it. A save error is
+returned with the response, joined with the turn's own error. Every session
+write at the end of a call runs on a context without the cancellation that may
+have ended the turn, bounded by `IncompleteTurns.SaveTimeout` (30 seconds by
+default).
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:   model,
+    Session: sess,
+    IncompleteTurns: dive.IncompleteTurnOptions{
+        DropPartialText: true,             // leave out text still streaming
+        SaveTimeout:     10 * time.Second, // bound the final session write
+        // Discard: true,                  // the pre-v1.34 behaviour for error exits
+    },
+})
+```
+
+`Discard` restores the old behaviour for a turn that ends in an error: nothing
+is saved, no `OnIncompleteTurn` hook runs, no not-run, unknown or `turn_ended`
+item is emitted, and a failed resume leaves the session suspended. Use it
+while your application still saves incomplete turns itself. A turn the model
+stopped short is saved either way.
+
+**Continuing.** `dive.WithContinue()` calls the model again on the history as
+it stands, with no new input, so a stopped, failed or cut-off turn is picked
+up without running any tool again. When the history ends in an incomplete
+turn or an assistant message, the request carries a model-only reminder
+saying the user asked to continue. On a session the continuation is saved as
+its own turn; a stateless caller passes its history with `WithMessages`.
+
+```go
+resp, err = agent.CreateResponse(ctx, dive.WithContinue())
+```
+
+A `context_limit` turn cannot be sent again as it stands: shorten the history
+first (`session.Compact`, or a PreGeneration hook that trims it).
+
+A turn that stops during a tool batch answers every call of the batch. A call
+whose tool returned keeps its result. A call that never started is answered
+with `dive.ToolCallNotRunText`: it had no effect. A parallel call that was still
 running is answered with `dive.ToolCallUnknownText`: it may have taken effect.
 The agent does not wait for it; its handle is on `Response.BackgroundTasks`,
 and `dive.AwaitBackgroundTasks` and `dive.WithBackgroundResults` deliver its

@@ -130,10 +130,19 @@ func TestSessionStartValuesReplacementHonored(t *testing.T) {
 
 // TestGenerationErrorExposesPartialWork pins §4.7: when iteration N of a turn
 // fails after iteration N-1 succeeded (and a tool with side effects already
-// ran), CreateResponse still returns (nil, err) — but err wraps a
-// *GenerationError exposing the accumulated usage, output messages, and items.
-// The partial turn must NOT be saved to the session.
+// ran), CreateResponse returns the incomplete response with an error that
+// wraps a *GenerationError exposing the accumulated usage, output messages,
+// and items. The turn is closed and saved; with IncompleteTurns.Discard the
+// output is left as the error found it and nothing is saved.
 func TestGenerationErrorExposesPartialWork(t *testing.T) {
+	for _, discard := range []bool{false, true} {
+		t.Run(fmt.Sprintf("discard=%v", discard), func(t *testing.T) {
+			testGenerationErrorExposesPartialWork(t, discard)
+		})
+	}
+}
+
+func testGenerationErrorExposesPartialWork(t *testing.T, discard bool) {
 	llmFailure := errors.New("provider exploded mid-turn")
 	callCount := 0
 	mock := &mockLLM{
@@ -161,10 +170,20 @@ func TestGenerationErrorExposesPartialWork(t *testing.T) {
 		},
 	}
 	sess := newMemSession("partial-work")
-	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	agent, err := NewAgent(AgentOptions{
+		Model:           mock,
+		Tools:           []Tool{tool},
+		Session:         sess,
+		IncompleteTurns: IncompleteTurnOptions{Discard: discard},
+	})
 	assert.NoError(t, err)
 
-	resp, err := agent.CreateResponse(context.Background(), WithInput("do work"))
+	var streamed []ResponseItemType
+	resp, err := agent.CreateResponse(context.Background(), WithInput("do work"),
+		WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
+			streamed = append(streamed, item.Type)
+			return nil
+		}))
 	assert.Error(t, err)
 	assert.True(t, toolRan, "the side-effecting tool ran before the failure")
 
@@ -180,15 +199,19 @@ func TestGenerationErrorExposesPartialWork(t *testing.T) {
 	assert.Equal(t, resp.Status, ResponseStatusIncomplete)
 	assert.Equal(t, resp.Turn.Outcome.Reason, TurnReasonProviderError)
 	assert.Equal(t, resp.Turn.Outcome.Next, TurnNextContinue)
-	assert.Equal(t, resp.Turn.Persistence, PersistenceNone)
 
 	// Cost accounting from the successful first iteration is recoverable.
 	assert.NotNil(t, genErr.Usage)
 	assert.Equal(t, genErr.Usage.InputTokens, 10)
 	assert.Equal(t, genErr.Usage.OutputTokens, 5)
 
-	// The turn's partial messages: assistant tool_use + tool_result.
-	assert.Len(t, genErr.OutputMessages, 2)
+	// The turn's messages: assistant tool_use + tool_result, then the
+	// outcome reminder unless the turn is discarded.
+	wantOutput := 3
+	if discard {
+		wantOutput = 2
+	}
+	assert.Len(t, genErr.OutputMessages, wantOutput)
 	assert.Equal(t, genErr.OutputMessages[0].Role, llm.Assistant)
 	assert.True(t, hasToolUseContent(genErr.OutputMessages[0]))
 	assert.Equal(t, genErr.OutputMessages[1].Role, llm.User)
@@ -205,10 +228,21 @@ func TestGenerationErrorExposesPartialWork(t *testing.T) {
 		ResponseItemTypeToolCallResult,
 	})
 
-	// The half-turn must not be persisted (it could violate role alternation).
 	msgs, msgsErr := sess.Messages(context.Background())
 	assert.NoError(t, msgsErr)
-	assert.Len(t, msgs, 0, "partial turn must not be saved to the session")
+	if discard {
+		assert.Equal(t, resp.Turn.Persistence, PersistenceNone)
+		assert.Len(t, msgs, 0, "a discarded turn is not saved")
+		assert.NotEqual(t, streamed[len(streamed)-1], ResponseItemTypeTurnEnded)
+		return
+	}
+	assert.Equal(t, resp.Turn.Persistence, PersistenceSaved)
+	assert.Len(t, msgs, 4)
+	outcome, ok := FindTurnOutcome(msgs[3])
+	assert.True(t, ok)
+	assert.Equal(t, outcome.Reason, TurnReasonProviderError)
+	assert.Equal(t, outcome.Error, llmFailure.Error())
+	assert.Equal(t, streamed[len(streamed)-1], ResponseItemTypeTurnEnded)
 }
 
 // TestHookMessagesRefreshedWithoutPreIterationHooks pins §4.8: hctx.Messages

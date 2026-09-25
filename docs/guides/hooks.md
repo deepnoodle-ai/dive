@@ -37,6 +37,8 @@ SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Exec
                                                                                   (tool returned SuspendResult)
                                                                                              ↓
                                                                                   OnSuspend → PostGeneration
+
+(the turn stops before it finishes) → OnIncompleteTurn
 ```
 
 0. **SessionStart** runs once at the very beginning, only when the session has
@@ -49,6 +51,10 @@ SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Exec
 5. **PostGeneration** runs last.
 6. On suspend, **OnSuspend** fires before `PostGeneration` and before the session is persisted.
    See [Suspend & Resume](suspend-resume.md).
+7. When the turn stops before it finishes (an error, a cancellation, a hook
+   abort, or the model stopping at a limit), **OnIncompleteTurn** runs in place
+   of `Stop` and `PostGeneration`, before the turn is saved. Every call ends in
+   exactly one of `PostGeneration` and `OnIncompleteTurn`.
 
 ## HookContext
 
@@ -70,6 +76,8 @@ All hooks receive `*HookContext`. Which fields are populated depends on the phas
 | AdditionalContext |        |         |     ✓      |      ✓      |         ✓          |      |         |
 | StopHookActive    |        |         |            |             |                    |  ✓   |         |
 | Iteration         |        |         |            |             |                    |      |    ✓    |
+
+`OnIncompleteTurn` hooks see the PostGeneration fields plus `Turn`.
 
 The `Values` map persists across all phases within one `CreateResponse` call, so
 hooks can pass data to each other.
@@ -138,9 +146,12 @@ Hooks: dive.Hooks{
 
 ### PostGeneration
 
-Runs after the generation loop completes (and after Stop hooks). Use it to
-log results or trigger side effects. Errors are logged but don't affect the
-returned `Response`.
+Runs after the generation loop completes (and after Stop hooks), on a completed
+or suspended turn. Use it to log results or trigger side effects. Errors are
+logged but don't affect the returned `Response`; `dive.AbortGeneration` makes
+the turn incomplete with `hook_abort`, and the model's output is saved with the
+outcome. An incomplete turn runs `OnIncompleteTurn` instead, so a metrics hook
+that wants every end registers both.
 
 Note: Session saving happens automatically after PostGeneration hooks run.
 
@@ -315,7 +326,8 @@ Hooks: dive.Hooks{
         func(ctx context.Context, hctx *dive.HookContext) error {
             for _, p := range hctx.Response.Suspension.PendingToolCalls {
                 if err := postWebhook(ctx, p); err != nil {
-                    return err // aborts persistence; caller sees the error
+                    // Abort the suspension; a plain error is only logged.
+                    return dive.AbortGenerationWithCause("webhook failed", err)
                 }
             }
             return nil
@@ -324,10 +336,14 @@ Hooks: dive.Hooks{
 },
 ```
 
-Returning an error (or `dive.AbortGeneration`) aborts the transition:
-the caller sees the error and the session stays in its previous state.
-Because the hook runs before persistence, aborting requires no
-compensating rollback.
+Returning `dive.AbortGeneration` aborts the suspension: the turn ends
+incomplete with `hook_abort`, the calls that completed keep their results,
+and the suspending calls are recorded as `unknown` (the tool, or an earlier
+OnSuspend hook, may already have dispatched the request), so
+`Outcome.Next` is `reconcile`. The closed turn is saved and the session is
+not suspended. Other errors are logged. OnSuspend hooks run on a context
+without the run's cancellation: a suspension is persisted even when the run
+was cancelled meanwhile, since its work may already be dispatched.
 
 `PostGeneration` still runs on suspended responses with
 `Response.Status == ResponseStatusSuspended`, so existing hook authors
@@ -340,6 +356,37 @@ the awaited results) do **not** re-fire `OnSuspend` — it announces new
 suspensions, not continuations.
 
 See the [Suspend & Resume Guide](suspend-resume.md) for the full flow.
+
+## OnIncompleteTurn Hook
+
+Runs when a turn stops before it finishes, for any reason, after the turn is
+closed (every tool call answered) and before it is saved. `hctx.Turn` is the
+turn as it will be returned and saved, and `hctx.Turn.Outcome` can be edited;
+`hctx.OutputMessages` is the closed output without the outcome reminder, and
+what it holds after the hooks is saved, followed by the reminder. The context
+is not cancelled, so the hook can do I/O. Return
+`&dive.IncompleteTurnDecision{Discard: true}` to save nothing.
+
+```go
+Hooks: dive.Hooks{
+    OnIncompleteTurn: []dive.IncompleteTurnHook{
+        func(ctx context.Context, hctx *dive.HookContext) (*dive.IncompleteTurnDecision, error) {
+            o := hctx.Turn.Outcome
+            // Keep request IDs out of the saved history.
+            o.Error = redactRequestIDs(o.Error)
+            // Drop turns a policy hook stopped.
+            if o.Reason == dive.TurnReasonHookAbort && hctx.Values["policy-abort"] == true {
+                return &dive.IncompleteTurnDecision{Discard: true}, nil
+            }
+            return nil, nil
+        },
+    },
+},
+```
+
+A recorded reminder the hook appends is saved before the outcome reminder,
+which stays the last message. Errors are logged. The hooks do not run for a
+turn that ends in an error when `IncompleteTurns.Discard` is set.
 
 ## Hook Helpers
 
