@@ -84,7 +84,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **A2A `Cancel` waits for the cancelled run's session write** before removing
   its suspension, and returns an error rather than `canceled` when it cannot.
 - **A2A reports incomplete turns**: a cancelled turn is `canceled`, any other
-  `failed` with the output it kept as the artifact.
+  `failed`, each with the output it kept as the artifact.
 - **The subagent tool returns a stopped subagent's answer so far** with the
   reason, where it returned only the error.
 - **The CLI no longer reports a cancelled turn as an error.**

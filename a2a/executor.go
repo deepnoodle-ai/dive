@@ -325,11 +325,12 @@ func (e *Executor) yieldResponseEvents(
 		if resp.Turn != nil {
 			outcome = resp.Turn.Outcome
 		}
-		if outcome != nil && outcome.Reason == dive.TurnReasonCanceled {
-			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), nil)
+		// The output the turn kept is the artifact, whatever stopped it.
+		if !yieldFinalArtifact(execCtx, resp, yield) {
 			return
 		}
-		if !yieldFinalArtifact(execCtx, resp, yield) {
+		if outcome != nil && outcome.Reason == dive.TurnReasonCanceled {
+			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), nil)
 			return
 		}
 		text := "turn incomplete"

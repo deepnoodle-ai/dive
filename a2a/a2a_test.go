@@ -972,3 +972,23 @@ func TestIncompleteTurnFailsWithPartialAnswer(t *testing.T) {
 	assert.Equal(t, "The answer is", taskText(task))
 	assert.Contains(t, task.Status.Message.Parts[0].Text(), "output_limit")
 }
+
+// A cancelled turn is canceled, and keeps the output it had as the artifact.
+func TestCanceledTurnKeepsPartialOutput(t *testing.T) {
+	calls := 0
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		calls++
+		if calls == 1 {
+			resp := toolCallResponse("lookup", "call_1")
+			resp.Content = append([]llm.Content{&llm.TextContent{Text: "Checking the records."}}, resp.Content...)
+			return resp, nil
+		}
+		return nil, fmt.Errorf("stopped: %w", context.Canceled)
+	}}
+	_, client := startServer(t, buildAgent(t, model, &lookupTool{}))
+
+	task := sendAndExpectTask(t, client, a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart("look it up")))
+	assert.Equal(t, a2asdk.TaskStateCanceled, task.Status.State)
+	assert.Len(t, task.Artifacts, 1)
+	assert.Equal(t, "Checking the records.", taskText(task))
+}
