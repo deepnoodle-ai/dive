@@ -385,10 +385,13 @@ Session types (`session` package):
 - `store.Put(ctx, sess)` - save session (e.g. after Fork)
 - `store.List(ctx, opts)` - list session summaries
 - `store.Delete(ctx, id)` - delete session
-- `sess.Fork(newID)` - deep-copy into new session
+- `sess.Fork(newID, opts...)` - deep-copy up to the last completed turn; `session.ForkWithOpenTurn()` includes an open turn (a suspended one closed)
+- `sess.Load(ctx)` / `sess.CheckpointTurn(ctx, rev, turn)` - `dive.TurnStore`: history, open turn and revision; record (or import) a turn, `dive.ErrRevisionConflict` when stale
+- `sess.Turns(ctx)` - every turn's record (`Turn.Superseded` for an abandoned incomplete turn)
+- `sess.RemoveLastTurn(ctx)` - delete the last turn, whatever its state (`CancelSuspension` is deprecated)
 - `sess.Compact(ctx, summarizer)` - replace events with summary
 - `sess.TotalUsage()` - sum token usage
-- `session.ForkSession(ctx, store, fromID, newID)` - fork + persist
+- `session.ForkSession(ctx, store, fromID, newID, opts...)` - fork + persist
 
 ## Suspend and resume
 
@@ -432,17 +435,21 @@ Key types and helpers:
 - `dive.SuspendResult{Prompt, Metadata}` — signal returned from a tool; construct with `NewSuspendResult`
 - `dive.ToolResult.Suspend` — tagged union; never set alongside `Content`/`Display`/`IsError`
 - `dive.Response.Status` — `ResponseStatusCompleted`, `ResponseStatusSuspended` or `ResponseStatusIncomplete`
-- `dive.Response.Turn` — the turn as the call left it: `Messages`, `Usage`, `Outcome` (incomplete), `Suspension`, `Persistence`
+- `dive.Response.Turn` — the turn as the call left it: `ID`, `Revision`, `Origin`, `Status`, `Messages`, `Usage`, `Outcome` (incomplete), `Suspension`, `ToolCalls` (every call: `completed`, `waiting`, `not_started`, `unknown`), `Persistence`
+- `dive.TurnID(ctx)` — the turn's ID in tools and hooks, stable across a resume and a continuation
 - `dive.TurnOutcome.ToolCalls` — each call of a stopped tool batch: `completed`, `not_started` (answered `ToolCallNotRunText`) or `unknown` (answered `ToolCallUnknownText`, late result on `Response.BackgroundTasks`)
 - `dive.WithSoftCancel(ctx) (ctx, cancel)` — stop before the next model or tool call; running calls finish; `dive.SoftCanceled(ctx)` reports the request
 - `dive.TurnOutcome.Reason` — error reasons (`canceled`, `deadline`, `provider_error`, `stream_interrupted`, `hook_abort`, `callback_error`, `error`) return `err != nil`; model stops (`output_limit`, `context_limit`, `iteration_limit`, `provider_stopped`, `pause`) return `err == nil`
 - Incomplete turns are closed (every call answered, a `turn-incomplete` reminder last) and saved; read outcomes back with `dive.FindTurnOutcome` / `dive.FindLatestTurnOutcome`; `dive.CloseTurn(turn, outcome)` closes messages you keep yourself
-- `dive.WithContinue()` — call the model on the history as it stands, no new input, no tool rerun (after a stopped, failed or cut-off turn)
+- `dive.WithContinue()` — call the model on the history as it stands, no new input, no tool rerun (after a stopped, failed or cut-off turn); on a `dive.TurnStore` it folds into the open incomplete turn
+- `dive.IncompleteTurnOptions.RequireReconcile` — refuse new input over a turn with unknown calls (`dive.ErrUnreconciledToolCalls`); on a `TurnStore` a compaction does not clear it (`SessionSnapshot.LatestOutcome`)
 - `dive.Hooks.OnIncompleteTurn` — runs before an incomplete turn is saved; edit `hctx.Turn.Outcome` / `hctx.OutputMessages`, or return `IncompleteTurnDecision{Discard: true}`
 - `dive.AgentOptions.IncompleteTurns{Discard, DropPartialText, SaveTimeout}` — `Discard` restores the pre-v1.34 error behaviour; `Persistence` is `saved`, `none`, `failed` (`dive.ErrSaveRejected`) or `unknown`
 - `dive.Response.Suspension *SuspensionState` — `PendingToolCalls`, `CompletedToolCalls`, `TurnMessages`
 - `dive.PendingToolCall.UnmarshalInput(&v)` / `dive.DecodePendingInput[T](p)` — decode original tool input
-- `dive.WithResume(state, results)` / `dive.WithToolResults(results)` — resume options
+- `dive.WithResume(state, results)` / `dive.WithToolResults(results)` — resume options; a result already accepted is skipped, a different one is `ErrConflictingToolResult`
+- `dive.WithResumeRequest(dive.ResumeRequest{TurnID, ExpectedRevision, ToolResults})` — resume only if the session's open turn and revision are still those (`ErrRevisionConflict`)
+- `agent.CancelSuspendedTurn(ctx, opts...)` — close a suspended turn without a model call: pending calls `unknown`, `canceled`, nil error
 - `dive.OnSuspendHook` — fires before persistence; an abort ends the turn incomplete with the suspending calls `unknown`
 - `dive.SuspendableSession` — optional `Session` extension for auto-persistence
 - `session.ListOptions{Suspended: dive.Ptr(true)}` — sweep for stale suspended sessions

@@ -56,6 +56,10 @@ type BackgroundTaskHandle struct {
 	// ToolUseID is the LLM tool_use block ID for the call that started this task.
 	ToolUseID string
 
+	// TurnID is the ID of the turn whose tool call started this task. A turn
+	// started by WithBackgroundResults links to it in Turn.Origin.
+	TurnID string
+
 	// Description is the human-readable description supplied to NewBackgroundResult.
 	Description string
 

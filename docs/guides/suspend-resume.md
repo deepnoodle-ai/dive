@@ -262,11 +262,41 @@ resp, _ := agent.CreateResponse(ctx,
 announce new suspensions, not continuations.
 
 A partial resume that fails returns `(nil, err)`: the turn stays suspended,
-and `err` wraps a `*dive.GenerationError` whose `Response` is nil. When the
-failure was the session write itself, the write may still have landed, so
-reload before resubmitting: `LoadSuspension()` on a `SuspendableSession`
-reports the calls still pending. A resubmitted result the session already
-accepted returns `ErrUnknownPendingToolCall`, which means it went through.
+and `err` wraps a `*dive.GenerationError` whose `Response` is nil. The
+results it accepted are saved before their `tool_call_result` items are
+emitted, so a callback error keeps them. When the failure was the session
+write itself, the write may still have landed.
+
+Sending a resume again is safe either way. A result the session already
+accepted for a call is skipped: its hooks do not run and no item is emitted
+again. A *different* result for that call fails with
+`dive.ErrConflictingToolResult` (which also matches
+`ErrUnknownPendingToolCall`). `Suspension.CompletedToolCalls` lists the
+accepted results as they were supplied.
+
+## Resuming against a revision
+
+On a session that implements `dive.TurnStore`, as `session.Session` does,
+every turn has an ID (`Response.Turn.ID`, `SuspensionState.TurnID`) and every
+write advances the session's revision (`Response.Turn.Revision`). A caller
+that read a suspension, say to render an approval form, can resume only if
+nothing changed since:
+
+```go
+resp, err := agent.CreateResponse(ctx, dive.WithResumeRequest(dive.ResumeRequest{
+    TurnID:           state.TurnID,
+    ExpectedRevision: revision, // Response.Turn.Revision, or SessionSnapshot.Revision
+    ToolResults:      results,
+}))
+if errors.Is(err, dive.ErrRevisionConflict) {
+    // The session moved on: reload it and decide again.
+}
+```
+
+The check runs before anything else, so a stale request runs no hook and
+calls no model. The turn ID is also on the context of every tool and hook,
+as `dive.TurnID(ctx)`: with `dive.ToolCallID(ctx)` it makes an idempotency
+key for a service that supports one.
 
 ## When a resume fails
 
@@ -274,7 +304,7 @@ A *full* resume (every pending call has a result) that fails after it began,
 before or after its model call, is closed like any incomplete turn: the
 results you supplied are kept, calls it had not run are answered "not run",
 calls still running in a parallel batch are "unknown", and the closed turn
-replaces the suspended one with `SaveResumedTurn`. The session is no longer
+replaces the suspended one in the session. The session is no longer
 suspended. Retrying the resume would run the tools and hooks again, so pick
 the turn up with `WithContinue` instead, which calls the model on the turn as
 it stands:
@@ -294,16 +324,8 @@ usually dispatched its request already, so when the run is cancelled while
 the agent is suspending, the suspension is still persisted and
 `CreateResponse` returns `Suspended` with a nil error; the `OnSuspend` hooks
 and the session write run on a context without the cancellation. To abandon
-a suspension you no longer want, cancel it explicitly under the session lock:
-
-```go
-lockedCtx, unlock, err := dive.LockSession(ctx, sess.ID())
-if err != nil {
-    return err
-}
-defer unlock()
-err = sess.CancelSuspension(lockedCtx)
-```
+a suspension you no longer want, close it explicitly (see [Closing or removing
+a suspended turn](#closing-or-removing-a-suspended-turn)).
 
 `SuspensionState.Usage` carries the suspended turn's usage so far, and a
 resumed turn's `Response.Turn.Usage` includes it.
@@ -375,8 +397,11 @@ logging) see one consistent end-of-turn signal.
 
 `SuspendableSession` is an optional extension implemented by the core
 `session.Session`. It adds `LoadSuspension`, `SaveSuspendedTurn`, and
-`SaveResumedTurn`. A plain `Session` — or no session at all — still
-supports suspend/resume; the caller just manages the state directly.
+`SaveResumedTurn`. `session.Session` is also a `dive.TurnStore`, which the
+agent uses in their place: it loads the open turn with `Load` and records
+every state of a turn with `CheckpointTurn`. A plain `Session` — or no
+session at all — still supports suspend/resume; the caller just manages the
+state directly.
 
 Stores report the flag on `SessionInfo.Suspended` and accept a filter
 so you can sweep for stale suspended sessions:
@@ -390,19 +415,30 @@ for _, info := range infos {
 }
 ```
 
-To cancel a stale suspension cleanly, use `CancelSuspension`:
+## Closing or removing a suspended turn
+
+`Agent.CancelSuspendedTurn` closes a suspended turn without calling the
+model and keeps it in the history. The calls that completed keep their
+results. The pending calls are answered as unknown, since their requests
+may be out in the world. The turn becomes incomplete with reason `canceled`,
+and `Outcome.Next` is `reconcile` when a pending call is not read-only. The
+session is no longer suspended, `OnIncompleteTurn` hooks run, and the call
+returns `ResponseStatusIncomplete` with a nil error:
 
 ```go
 sess, _ := store.Open(ctx, info.ID)
-err := sess.CancelSuspension(ctx)
+resp, err := agent.CancelSuspendedTurn(ctx, dive.WithSession(sess))
 ```
 
-This removes the partial turn from the session history and clears the
-suspension state. After cancellation, the session is ready for a fresh
-turn as if the suspended turn never happened.
+A stateless caller passes `dive.WithResume(state, nil)` and appends
+`resp.Turn.Messages` to its pre-turn history.
+
+`session.Session.RemoveLastTurn` deletes the last turn instead, whatever its
+state, as if it never happened. `CancelSuspension` is deprecated; it is
+`RemoveLastTurn` for a suspended session.
 
 Alternatively, you can resume with `IsError` results for every pending
-call if you want the agent to acknowledge the cancellation.
+call if you want the model to acknowledge the cancellation.
 
 ## Streaming
 

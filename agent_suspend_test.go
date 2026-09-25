@@ -2334,7 +2334,8 @@ func TestResumeEmitCallbackErrorWrapsGenerationError(t *testing.T) {
 	assert.True(t, errors.As(err, &genErr))
 	assert.Equal(t, 1, countToolResultItems(genErr.Items, "toolu_a"))
 
-	// The closed turn replaced the suspended one, supplied result included.
+	// The closed turn replaced the suspended one, supplied result included,
+	// and the continuation folded into it, dropping its outcome reminder.
 	assert.False(t, sessIsSuspended(sess))
 	resp, err = agent.CreateResponse(context.Background(), WithContinue())
 	assert.NoError(t, err)
@@ -2342,7 +2343,7 @@ func TestResumeEmitCallbackErrorWrapsGenerationError(t *testing.T) {
 	assert.Equal(t, resp.OutputText(), "done")
 	msgs, err := sess.Messages(context.Background())
 	assert.NoError(t, err)
-	assert.Len(t, msgs, 5)
+	assert.Len(t, msgs, 4)
 	resultJSON, err := json.Marshal(msgs[2].Content[0].(*llm.ToolResultContent).Content)
 	assert.NoError(t, err)
 	assert.Contains(t, string(resultJSON), "A done")

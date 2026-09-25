@@ -75,6 +75,83 @@ type SuspendableSession interface {
 	CancelSuspension(ctx context.Context) error
 }
 
+// TurnStore is an optional Session extension that stores turn records. The
+// agent loads the history and the open turn from it at the start of every
+// invocation (Load), and records the turn at the end (CheckpointTurn) in
+// place of SaveTurn, SaveSuspendedTurn and SaveResumedTurn. An incomplete
+// turn stays open, and a WithContinue invocation folds into it instead of
+// adding a turn of its own. session.Session implements it.
+//
+// Load takes a context and returns an error, unlike LoadSuspension, so a
+// remote store can implement it.
+type TurnStore interface {
+	Session
+
+	// Load returns the history needed to build context, the open turn if
+	// any (suspended or incomplete), and the session revision a later
+	// checkpoint must carry.
+	Load(ctx context.Context) (*SessionSnapshot, error)
+
+	// CheckpointTurn records the turn's state and returns the new session
+	// revision. A turn whose ID is the open turn's replaces it; any other
+	// turn is added after it. It fails with an error that wraps
+	// ErrRevisionConflict when the stored revision is not expectedRevision,
+	// and the caller reloads. The revision is the session's, advanced by
+	// every write (a checkpoint, a save, a compaction, a removal), so a
+	// checkpoint fails when anything changed since the load. The store
+	// keeps its own copy of turn.
+	//
+	// It is also how a caller imports a turn it holds, such as a
+	// Response.Turn from another process, with the same conflict check.
+	CheckpointTurn(ctx context.Context, expectedRevision uint64, turn *Turn) (uint64, error)
+}
+
+// SessionSnapshot is what TurnStore.Load returns.
+type SessionSnapshot struct {
+	// History is the conversation before the open turn: every completed
+	// turn, and any incomplete turn later turns superseded, as the model
+	// sees them.
+	History []*llm.Message
+
+	// OpenTurn is the last turn when it is suspended or incomplete, and nil
+	// when it completed. Its Messages are closed; an incomplete turn's end
+	// with the outcome reminder.
+	OpenTurn *Turn
+
+	// Revision is the session revision the snapshot was read at.
+	Revision uint64
+
+	// LatestOutcome is the outcome of the session's latest turn when that
+	// turn is incomplete, even when a compaction followed it and it is no
+	// longer open. Nil when the latest turn completed or is suspended.
+	LatestOutcome *TurnOutcome
+}
+
+// ErrRevisionConflict is wrapped by the error of a TurnStore checkpoint, or of
+// a ResumeRequest, whose expected revision or turn is no longer the stored
+// one: the session changed since the caller read it. Reload and retry. A
+// checkpoint refused with it wrote nothing: errors.Is(err, ErrSaveRejected)
+// holds.
+var ErrRevisionConflict error = &revisionConflictError{}
+
+type revisionConflictError struct{}
+
+func (*revisionConflictError) Error() string { return "dive: session revision conflict" }
+
+func (*revisionConflictError) Is(target error) bool { return target == ErrSaveRejected }
+
+// ErrConflictingToolResult is returned when a resume supplies a result for a
+// call that already has a different one. It also matches
+// ErrUnknownPendingToolCall, since the call is not pending.
+var ErrConflictingToolResult = errors.New("dive: a different result was already accepted for this tool call")
+
+// ErrUnreconciledToolCalls is returned when new input is given on a session
+// whose last turn stopped with a call whose result is unknown (TurnOutcome.Next
+// is TurnNextReconcile), and IncompleteTurnOptions.RequireReconcile is set.
+// Continue the turn (WithContinue) or remove it first. A compaction does not
+// clear it; a continuation does.
+var ErrUnreconciledToolCalls = errors.New("dive: the last turn has tool calls with unknown results; continue it before giving new input")
+
 // ErrNoSuspendedTurn is returned from CreateResponse when WithResume or
 // WithToolResults is supplied but there is no suspended turn to resume
 // (neither the session nor the options carry one).
@@ -162,6 +239,20 @@ type CreateResponseOptions struct {
 	// Continue asks for another invocation of the conversation as recorded,
 	// with no new input. Set via WithContinue.
 	Continue bool
+
+	// ResumeTurnID and ExpectedRevision, when set, are checked against the
+	// session's open turn and revision before a resume. Set via
+	// WithResumeRequest.
+	ResumeTurnID     string
+	ExpectedRevision uint64
+
+	// resumeRequest records that WithResumeRequest was given, whatever its
+	// fields: it is resume intent even with no guard and no results.
+	resumeRequest bool
+
+	// cancelSuspended closes the suspended turn without a model call. Set by
+	// Agent.CancelSuspendedTurn.
+	cancelSuspended bool
 }
 
 // EventCallback is a function called with each item produced while an agent
@@ -299,21 +390,58 @@ var ErrContinueWithInput = errors.New("dive: WithContinue takes no new input and
 // WithContinue asks for another invocation of the conversation as recorded,
 // with no new input: the model is called on the history as it stands. It is
 // how a stopped, failed or cut-off turn is picked up without rerunning any
-// tool, since every tool result is already in the record. When the history
-// ends in an incomplete turn or in an assistant message, the agent adds a
-// model-only reminder, "turn-continue", saying the user asked to continue
-// from where the turn stopped, so the request never ends in an assistant
-// turn, which some models reject as a prefill.
+// tool, since every tool result is already in the record. A "turn-continue"
+// reminder says the user asked to continue from where the turn stopped:
+// recorded before the new output when the history ends in an assistant
+// message, so the request never ends in an assistant turn, which some models
+// reject as a prefill, and model-only when it ends in an incomplete turn's
+// outcome reminder.
 //
-// On a session, pass it without input: the continuation is saved as its own
-// turn, holding only its output, and Response.Turn.Messages is that output.
-// A stateless caller passes its history with WithMessages; the messages are
-// history, not input, so Response.Turn.Messages is again the output alone and
-// is appended to that history. It returns ErrResumeRequired on a suspended
+// On a TurnStore session whose last turn is incomplete, the continuation
+// folds into that turn: the model sees it without its outcome reminder, the
+// turn keeps its ID, and it is saved again with the new output, so
+// Response.Turn.Messages is the whole turn. On any other session, pass it
+// without input: the continuation is saved as its own turn, and
+// Response.Turn.Messages is its reminder, if recorded, and its output. A
+// stateless caller passes its history with WithMessages; the messages are
+// history, not input, and Response.Turn.Messages is appended to them. It returns ErrResumeRequired on a suspended
 // session, which must be resumed first, ErrContinueWithInput with input on a
 // session or with a resume, and an error when there is no history at all.
 func WithContinue() CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
 		opts.Continue = true
+	}
+}
+
+// ResumeRequest resumes a suspended turn on a TurnStore session, naming the
+// turn and the session revision the caller read it at, with the results it
+// supplies. A stale turn or revision fails with ErrRevisionConflict before
+// anything runs; the caller reloads the session and decides again.
+type ResumeRequest struct {
+	// TurnID is the suspended turn's Turn.ID (SuspensionState.TurnID).
+	// Empty skips the check.
+	TurnID string
+
+	// ExpectedRevision is the session revision the caller read the
+	// suspension at (Turn.Revision, SessionSnapshot.Revision). Zero skips
+	// the check.
+	ExpectedRevision uint64
+
+	// ToolResults are the results for pending calls, as for
+	// WithToolResults.
+	ToolResults map[string]*ToolResult
+}
+
+// WithResumeRequest resumes the session's suspended turn with req's results,
+// after checking that it is still the turn and revision the caller read. It
+// needs a session that implements TurnStore. Supplying a result a previous
+// resume already accepted is not an error, so a resume whose outcome was
+// unknown can be sent again as it was.
+func WithResumeRequest(req ResumeRequest) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
+		opts.ToolResults = req.ToolResults
+		opts.ResumeTurnID = req.TurnID
+		opts.ExpectedRevision = req.ExpectedRevision
+		opts.resumeRequest = true
 	}
 }

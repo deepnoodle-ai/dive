@@ -37,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -99,6 +100,7 @@ func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 		}
 	}
 	out.BatchHalted = src.BatchHalted
+	out.TurnID = src.TurnID
 	out.Usage = copyUsage(src.Usage)
 	return out
 }
@@ -229,6 +231,51 @@ type event struct {
 	Messages  []*llm.Message `json:"messages"`
 	Usage     *llm.Usage     `json:"usage,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
+
+	// Revision is the session revision the write that recorded this event
+	// advanced the session to.
+	Revision uint64 `json:"revision,omitempty"`
+
+	// Turn is the record of the turn the event holds, written by
+	// CheckpointTurn. Events saved otherwise have none: their turn ID is the
+	// event ID and their state is read from the header and the metadata.
+	Turn *turnState `json:"turn,omitempty"`
+}
+
+// turnState is the part of a dive.Turn record an event stores besides its
+// messages and usage.
+type turnState struct {
+	Schema    int                   `json:"schema,omitempty"`
+	ID        string                `json:"id"`
+	Origin    *dive.TurnOrigin      `json:"origin,omitempty"`
+	Status    dive.ResponseStatus   `json:"status"`
+	Outcome   *dive.TurnOutcome     `json:"outcome,omitempty"`
+	ToolCalls []dive.ToolCallRecord `json:"tool_calls,omitempty"`
+}
+
+// copy returns a deep copy of the state.
+func (t *turnState) copy() *turnState {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	if t.Origin != nil {
+		origin := *t.Origin
+		cp.Origin = &origin
+	}
+	cp.Outcome = copyOutcome(t.Outcome)
+	cp.ToolCalls = slices.Clone(t.ToolCalls)
+	return &cp
+}
+
+// copyOutcome returns a deep copy of an outcome, or nil.
+func copyOutcome(o *dive.TurnOutcome) *dive.TurnOutcome {
+	if o == nil {
+		return nil
+	}
+	cp := *o
+	cp.ToolCalls = slices.Clone(o.ToolCalls)
+	return &cp
 }
 
 func (e *event) copy() *event {
@@ -236,6 +283,8 @@ func (e *event) copy() *event {
 		ID:        e.ID,
 		Type:      e.Type,
 		Timestamp: e.Timestamp,
+		Revision:  e.Revision,
+		Turn:      e.Turn.copy(),
 	}
 	if len(e.Messages) > 0 {
 		cp.Messages = copyMessages(e.Messages)
@@ -340,6 +389,10 @@ type sessionData struct {
 	// BatchHalted mirrors dive.SuspensionState.BatchHalted: a halting call
 	// in the suspended batch failed.
 	BatchHalted bool `json:"batch_halted,omitempty"`
+
+	// Revision is advanced by every write to the conversation or the
+	// suspension state (see dive.TurnStore).
+	Revision uint64 `json:"revision,omitempty"`
 }
 
 // Session implements dive.Session with event-based persistence.
@@ -448,16 +501,27 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 		Messages: copyMessages(messages),
 		Usage:    copyUsage(usage),
 		Metadata: outcomeMetadata(messages),
+		Revision: s.data.Revision + 1,
 	}
+	return s.appendLocked(ctx, evt)
+}
+
+// appendLocked adds evt to the end of the log and advances the revision to
+// evt.Revision, persisting it with the store's append. On a store error the
+// session resyncs from the store. Caller must hold s.mu.
+func (s *Session) appendLocked(ctx context.Context, evt *event) error {
 	prevLen := len(s.data.Events)
 	prevUpdatedAt := s.data.UpdatedAt
+	prevRevision := s.data.Revision
 	s.data.Events = append(s.data.Events, evt)
 	s.data.UpdatedAt = evt.Timestamp
+	s.data.Revision = evt.Revision
 	if s.appender != nil {
 		if err := s.appender.appendEvent(ctx, s.data.ID, evt); err != nil {
 			s.resyncAfterWriteError(ctx, func() {
 				s.data.Events = s.data.Events[:prevLen]
 				s.data.UpdatedAt = prevUpdatedAt
+				s.data.Revision = prevRevision
 			})
 			return err
 		}
@@ -487,6 +551,7 @@ func (s *Session) LoadSuspension() *dive.SuspensionState {
 		last := s.data.Events[len(s.data.Events)-1]
 		state.TurnMessages = last.Messages
 		state.Usage = last.Usage
+		state.TurnID = eventTurnID(last)
 	}
 	return cloneSuspensionState(state)
 }
@@ -502,6 +567,7 @@ type sessionSnapshot struct {
 	completed []*dive.CompletedToolCall
 	halted    bool
 	updatedAt time.Time
+	revision  uint64
 }
 
 // snapshotMutated returns a shallow snapshot of the fields that
@@ -518,6 +584,7 @@ func (s *Session) snapshotMutated() sessionSnapshot {
 		completed: s.data.CompletedToolCalls,
 		halted:    s.data.BatchHalted,
 		updatedAt: s.data.UpdatedAt,
+		revision:  s.data.Revision,
 	}
 }
 
@@ -529,10 +596,12 @@ func (s *Session) restoreSnapshot(snap sessionSnapshot) {
 	s.data.CompletedToolCalls = snap.completed
 	s.data.BatchHalted = snap.halted
 	s.data.UpdatedAt = snap.updatedAt
+	s.data.Revision = snap.revision
 }
 
-// withRollback runs mutate to apply state changes, then asks the store to
-// persist them. On store failure the session resyncs from the store (see
+// withRollback advances the revision, runs mutate to apply state changes,
+// then asks the store to persist them. mutate reads the new revision from
+// s.data.Revision. On store failure the session resyncs from the store (see
 // resyncAfterWriteError) so the in-memory session stays consistent with what
 // is actually durable.
 //
@@ -540,6 +609,7 @@ func (s *Session) restoreSnapshot(snap sessionSnapshot) {
 // no rollback is performed — there is nothing to recover from.
 func (s *Session) withRollback(ctx context.Context, mutate func()) error {
 	snap := s.snapshotMutated()
+	s.data.Revision++
 	mutate()
 	if s.appender == nil {
 		return nil
@@ -573,6 +643,7 @@ func (s *Session) resyncAfterWriteError(ctx context.Context, restore func()) {
 			s.data.CompletedToolCalls = stored.CompletedToolCalls
 			s.data.BatchHalted = stored.BatchHalted
 			s.data.UpdatedAt = stored.UpdatedAt
+			s.data.Revision = stored.Revision
 			return
 		}
 	}
@@ -598,9 +669,11 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 
 		var evtID string
 		var priorUsage *llm.Usage
+		var identity *turnState
 		if replaceLast {
 			prev := s.data.Events[len(s.data.Events)-1]
 			evtID = prev.ID
+			identity = turnIdentity(prev)
 			// The replaced suspended event's usage covers tokens already
 			// paid before this partial resume; carry it forward so
 			// TotalUsage does not undercount.
@@ -617,6 +690,8 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 			Metadata: map[string]any{
 				"suspended": true,
 			},
+			Revision: s.data.Revision,
+			Turn:     identity,
 		}
 		if replaceLast {
 			s.data.Events[len(s.data.Events)-1] = evt
@@ -668,6 +743,8 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 			// call's own usage. Sum so TotalUsage reflects both phases.
 			Usage:    sumUsage(prev.Usage, usage),
 			Metadata: outcomeMetadata(messages),
+			Revision: s.data.Revision,
+			Turn:     turnIdentity(prev),
 		}
 		s.data.Events[len(s.data.Events)-1] = evt
 		s.data.Suspended = false
@@ -683,6 +760,10 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 // After cancellation the session is ready for a fresh turn as if the
 // suspended turn never happened. Returns ErrNotSuspended if the session
 // is not currently suspended.
+//
+// Deprecated: Use RemoveLastTurn, which this is for a suspended session, or
+// Agent.CancelSuspendedTurn, which keeps the turn closed with its completed
+// calls' results.
 func (s *Session) CancelSuspension(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -766,22 +847,52 @@ func (s *Session) TotalUsage() *llm.Usage {
 	return total
 }
 
-// Fork creates a new in-memory session with a deep copy of all events.
-// The forked session records the original as its parent.
-// To persist the fork, save it to a store with store.Put.
+// ForkOption configures Fork.
+type ForkOption func(*forkOptions)
+
+type forkOptions struct {
+	openTurn bool
+}
+
+// ForkWithOpenTurn copies an open turn into the fork as well. An incomplete
+// turn is copied as it is. A suspended turn is copied closed, as
+// Agent.CancelSuspendedTurn closes one: its pending calls are answered as
+// unknown, since the original's owner may still run them, and the turn is
+// incomplete with TurnReasonCanceled and TurnNextReconcile.
+func ForkWithOpenTurn() ForkOption {
+	return func(o *forkOptions) { o.openTurn = true }
+}
+
+// Fork creates a new in-memory session with a deep copy of the events up to
+// the last completed turn. The forked session records the original as its
+// parent. To persist the fork, save it to a store with store.Put.
 //
-// A forked session is never suspended, even if the original was: pending
-// out-of-band tool calls are owned by whoever launched the original suspend
-// and cannot be resumed against a divergent branch. The fork's last event
-// still carries any unanswered assistant tool_use blocks, so callers of a
-// forked-from-suspended session should Compact or roll back the last event
-// before attempting a new turn.
-func (s *Session) Fork(newID string) *Session {
+// An open turn, a last turn that is suspended or incomplete, is left out
+// unless ForkWithOpenTurn is passed. A forked session is never suspended:
+// pending out-of-band tool calls are owned by whoever launched the original
+// suspend and cannot be resumed against a divergent branch.
+func (s *Session) Fork(newID string, opts ...ForkOption) *Session {
+	var o forkOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	events := make([]*event, len(s.data.Events))
+	open := s.openTurnIndexLocked()
+	var events []*event
 	for i, e := range s.data.Events {
-		events[i] = e.copy()
+		if i != open {
+			events = append(events, e.copy())
+			continue
+		}
+		if !o.openTurn {
+			continue
+		}
+		if s.data.Suspended {
+			events = append(events, s.closedSuspendedEventLocked(e))
+		} else {
+			events = append(events, e.copy())
+		}
 	}
 	now := time.Now()
 	forked := &Session{
@@ -792,6 +903,7 @@ func (s *Session) Fork(newID string) *Session {
 			UpdatedAt:  now,
 			Events:     events,
 			ForkedFrom: s.data.ID,
+			Revision:   s.data.Revision,
 			// Suspended / PendingToolCalls / CompletedToolCalls intentionally
 			// not copied: pending out-of-band tool calls are owned by whoever
 			// launched the original suspend and cannot be resumed against a
@@ -853,6 +965,7 @@ func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 				"original_event_count":   len(active),
 				"original_message_count": len(msgs),
 			},
+			Revision: s.data.Revision,
 		})
 		s.data.UpdatedAt = now
 	})
@@ -953,12 +1066,12 @@ type SessionInfo struct {
 }
 
 // ForkSession loads a session, forks it, and saves the fork to the store.
-func ForkSession(ctx context.Context, store Store, fromID, newID string) (*Session, error) {
+func ForkSession(ctx context.Context, store Store, fromID, newID string, opts ...ForkOption) (*Session, error) {
 	original, err := store.Open(ctx, fromID)
 	if err != nil {
 		return nil, err
 	}
-	forked := original.Fork(newID)
+	forked := original.Fork(newID, opts...)
 	if err := store.Put(ctx, forked); err != nil {
 		return nil, err
 	}

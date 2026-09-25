@@ -35,7 +35,12 @@ The core of the harness: `Agent.CreateResponse` runs the generate → tool-call
   `Response.Turn.Outcome` saying why and what can continue it. The turn is
   closed (every tool call answered, a `turn-incomplete` reminder last), passed
   to `OnIncompleteTurn` hooks and saved, and `WithContinue` picks it up without
-  running a tool again. `WithSoftCancel` stops at the next step boundary.
+  running a tool again, folding into the turn on a `TurnStore`.
+  `WithSoftCancel` stops at the next step boundary.
+- **Turn records** — every turn has an ID (`dive.TurnID(ctx)` in tools), a
+  status and the state of each tool call; `session.Session` stores them as a
+  `TurnStore` with a revision that resumes and imports are checked against,
+  and a resume can be sent again without running a result's hooks twice.
 - **Stop-reason handling** — the agent reads each response's stop reason: an
   output or context limit, a refusal and a provider stop run no tool call, a
   paused server tool loop is sent again, and a stream that ends before its end
@@ -185,11 +190,13 @@ Conversation state in the `session/` package.
 - **Stores** — `MemoryStore` and `FileStore` (atomic writes, torn-write
   detection, optional fsync) behind a pluggable `Store` interface with
   listing, metadata, and usage rollups.
-- **Forking and checkpoints** — `Fork` branches a conversation;
+- **Forking and checkpoints** — `Fork` branches a conversation up to its
+  last completed turn;
   compaction appends a non-destructive summary checkpoint while originals
   remain recoverable.
 - **Suspension persistence** — suspended turns persist and survive process
-  restarts; `CancelSuspension` abandons one.
+  restarts; `Agent.CancelSuspendedTurn` closes one and keeps it,
+  `RemoveLastTurn` deletes it.
 - **Concurrency safety** — per-session locking serializes concurrent
   `CreateResponse` calls, with reentrancy detection (`ErrReentrantSession`).
 

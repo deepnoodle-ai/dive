@@ -311,14 +311,15 @@ func TestPartialResumeFailureReturnsNoResponse(t *testing.T) {
 	var genErr *GenerationError
 	assert.True(t, errors.As(err, &genErr))
 	assert.Nil(t, genErr.Response)
-	assert.Len(t, genErr.Items, 1)
 	var abortErr *HookAbortError
 	assert.True(t, errors.As(err, &abortErr))
 
-	// No terminal item: the turn has not ended.
-	assert.Len(t, rec.items, 1)
-	assert.Equal(t, rec.items[0].Type, ResponseItemTypeToolCallResult)
+	// No item at all: the supplied result was not saved, so its item is not
+	// emitted, and the turn has not ended.
+	assert.Len(t, genErr.Items, 0)
+	assert.Len(t, rec.items, 0)
 	assert.True(t, sessIsSuspended(sess))
+	assert.Len(t, sess.LoadSuspension().PendingToolCalls, 2)
 }
 
 // A callback error on the terminal suspended item is logged: the suspended
@@ -591,26 +592,27 @@ func TestStopHookResponseEditsSurvive(t *testing.T) {
 	assert.Equal(t, saved[1].Text(), "redacted")
 }
 
-// commitThenFailSession saves a suspended turn and then reports an error, as
-// a store does when it fails after its write landed.
+// commitThenFailSession checkpoints a turn and then reports an error, as a
+// store does when it fails after its write landed.
 type commitThenFailSession struct {
 	*session.Session
 	fail bool
 }
 
-func (s *commitThenFailSession) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *SuspensionState) error {
-	if err := s.Session.SaveSuspendedTurn(ctx, messages, usage, state); err != nil {
-		return err
+func (s *commitThenFailSession) CheckpointTurn(ctx context.Context, expected uint64, turn *Turn) (uint64, error) {
+	revision, err := s.Session.CheckpointTurn(ctx, expected, turn)
+	if err != nil {
+		return 0, err
 	}
 	if s.fail {
-		return errors.New("sync failed after write")
+		return 0, errors.New("sync failed after write")
 	}
-	return nil
+	return revision, nil
 }
 
 // A partial resume whose save fails after it landed returns no response;
 // the reloaded suspension shows the result was taken, and resubmitting it
-// is refused with ErrUnknownPendingToolCall.
+// is a no-op that leaves the turn waiting for the other call.
 func TestPartialResumeSaveFailureAfterCommit(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
@@ -643,7 +645,7 @@ func TestPartialResumeSaveFailureAfterCommit(t *testing.T) {
 	var genErr *GenerationError
 	assert.True(t, errors.As(err, &genErr))
 	assert.Nil(t, genErr.Response)
-	assert.ErrorContains(t, err, "save suspended turn")
+	assert.ErrorContains(t, err, "checkpoint turn")
 
 	// The reloaded suspension holds only the call still pending.
 	sess.fail = false
@@ -652,8 +654,13 @@ func TestPartialResumeSaveFailureAfterCommit(t *testing.T) {
 	assert.Len(t, state.PendingToolCalls, 1)
 	assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_b")
 
-	_, err = agent.CreateResponse(context.Background(), WithToolResults(supplied))
-	assert.True(t, errors.Is(err, ErrUnknownPendingToolCall))
+	var rec itemRecorder
+	resp, err = agent.CreateResponse(context.Background(), WithToolResults(supplied), WithEventCallback(rec.callback))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_b")
+	assert.Equal(t, countToolResultItems(rec.items, "toolu_a"), 0)
 
 	resp, err = agent.CreateResponse(context.Background(),
 		WithToolResults(map[string]*ToolResult{"toolu_b": NewToolResultText("B done")}),

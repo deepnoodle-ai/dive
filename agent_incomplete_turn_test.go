@@ -105,8 +105,9 @@ func requestHasReminder(msgs []*llm.Message, name string) bool {
 }
 
 // A final answer cut at max_tokens is incomplete without an error, recorded
-// and saved; WithContinue continues it with the turn-continue reminder in
-// the request only.
+// and saved; WithContinue folds into it: the outcome reminder is dropped and
+// the turn-continue reminder recorded after the cut answer, so the history
+// keeps alternating roles.
 func TestOutputLimitIsIncompleteAndContinues(t *testing.T) {
 	mock := &responseLLM{responses: []*llm.Response{
 		textResponse("max_tokens", "The answer is"),
@@ -132,19 +133,27 @@ func TestOutputLimitIsIncompleteAndContinues(t *testing.T) {
 	assert.Len(t, saved, 3)
 	assertClosedBy(t, saved, TurnReasonOutputLimit)
 
+	firstID := resp.Turn.ID
 	resp, err = agent.CreateResponse(context.Background(), WithContinue())
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), " forty-two.")
-	assert.Len(t, resp.Turn.Messages, 1)
+	assert.Equal(t, resp.Turn.ID, firstID)
+	assert.Len(t, resp.Turn.Messages, 4)
 	assert.True(t, requestHasReminder(mock.request(1), ReminderNameTurnContinue))
+	_, ok := FindLatestTurnOutcome(mock.request(1))
+	assert.False(t, ok)
 
-	// The continuation is its own event, holding its output alone.
+	// The continuation replaced the open turn: question, cut answer,
+	// turn-continue, rest of the answer.
+	assert.Equal(t, sess.EventCount(), 1)
 	saved, err = sess.Messages(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, saved, 4)
-	assert.False(t, requestHasReminder(saved, ReminderNameTurnContinue))
-	assert.Equal(t, sess.EventCount(), 2)
+	_, ok = FindLatestTurnOutcome(saved)
+	assert.False(t, ok)
+	_, ok = FindReminder(saved[2], ReminderNameTurnContinue)
+	assert.True(t, ok)
 }
 
 // A response that filled the context window is incomplete with
@@ -491,7 +500,7 @@ func TestPreGenerationErrorSavesInputAndOutcome(t *testing.T) {
 
 // A provider error on the third model call: the first two iterations are
 // saved with the outcome, and WithContinue calls the model once, running no
-// tool again.
+// tool again, on the turn without its outcome reminder.
 func TestProviderErrorThenContinue(t *testing.T) {
 	var ran atomic.Int32
 	errProvider := errors.New("overloaded")
@@ -523,13 +532,18 @@ func TestProviderErrorThenContinue(t *testing.T) {
 	assert.Equal(t, mock.calls(), 4)
 	assert.Equal(t, ran.Load(), int32(2))
 
-	// The failed turn's outcome is in the request the model saw, followed by
-	// the turn-continue reminder.
+	// The continuation folds into the failed turn: the request ends in the
+	// tool results, with neither the outcome nor the turn-continue reminder,
+	// and the session holds one turn with no outcome.
 	req := mock.request(3)
-	outcome, ok := FindLatestTurnOutcome(req)
-	assert.True(t, ok)
-	assert.Equal(t, outcome.Reason, TurnReasonProviderError)
-	assert.True(t, requestHasReminder(req, ReminderNameTurnContinue))
+	_, ok := FindLatestTurnOutcome(req)
+	assert.False(t, ok)
+	assert.False(t, requestHasReminder(req, ReminderNameTurnContinue))
+	assert.Equal(t, sess.EventCount(), 1)
+	saved, err = sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, saved, 6)
+	assert.Equal(t, saved[5].Text(), "all done")
 }
 
 // A cancellation that arrives while the agent is suspending does not stop
@@ -742,9 +756,9 @@ func TestSessionRefusalIsFailed(t *testing.T) {
 	assert.True(t, errors.Is(session.ErrNotSuspended, ErrSaveRejected))
 }
 
-// Two continuations after a stopped turn: three events, nothing saved
-// twice, TotalUsage the sum, and each Turn.Usage its own.
-func TestContinuationsAreTheirOwnEvents(t *testing.T) {
+// Two continuations after a stopped turn fold into it: one event, nothing
+// saved twice, and Turn.Usage the sum over the three invocations.
+func TestContinuationsFoldIntoTheOpenTurn(t *testing.T) {
 	mock := &responseLLM{responses: []*llm.Response{
 		textResponse("max_tokens", "one"),
 		textResponse("max_tokens", " two"),
@@ -758,18 +772,20 @@ func TestContinuationsAreTheirOwnEvents(t *testing.T) {
 	assert.NoError(t, err)
 	resp, err := agent.CreateResponse(context.Background(), WithContinue())
 	assert.NoError(t, err)
-	assert.Equal(t, resp.Turn.Usage.InputTokens, 3)
+	assert.Equal(t, resp.Usage.InputTokens, 3)
+	assert.Equal(t, resp.Turn.Usage.InputTokens, 6)
 	resp, err = agent.CreateResponse(context.Background(), WithContinue())
 	assert.NoError(t, err)
-	assert.Equal(t, resp.Turn.Usage.InputTokens, 3)
+	assert.Equal(t, resp.Turn.Usage.InputTokens, 9)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 
-	assert.Equal(t, sess.EventCount(), 3)
+	assert.Equal(t, sess.EventCount(), 1)
 	assert.Equal(t, sess.TotalUsage().InputTokens, 9)
 	saved, err := sess.Messages(context.Background())
 	assert.NoError(t, err)
-	// input, one, outcome, two, outcome, three
+	// input, one, turn-continue, two, turn-continue, three
 	assert.Len(t, saved, 6)
+	assert.Equal(t, resp.Turn.Messages[5].Text(), " three")
 }
 
 // A resumed turn's usage includes what the suspension had accumulated.
@@ -799,6 +815,8 @@ func TestResumedTurnUsageIncludesSuspension(t *testing.T) {
 
 // A stateless caller appends Turn.Messages to the history it held and gets
 // what a session would hold, for an incomplete turn as for a completed one.
+// The session is not a TurnStore, whose continuation would fold into the
+// incomplete turn instead of adding a turn after it.
 func TestStatelessRecipeMatchesSession(t *testing.T) {
 	script := func() *responseLLM {
 		return &responseLLM{
@@ -811,7 +829,7 @@ func TestStatelessRecipeMatchesSession(t *testing.T) {
 		}
 	}
 	var ran atomic.Int32
-	sess := session.New("stateless-recipe")
+	sess := &plainSession{id: "stateless-recipe"}
 	sessAgent, err := NewAgent(AgentOptions{Model: script(), Session: sess, Tools: []Tool{countingTool("work", &ran)}})
 	assert.NoError(t, err)
 	_, err = sessAgent.CreateResponse(context.Background(), WithInput("go"))

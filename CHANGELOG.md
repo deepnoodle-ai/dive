@@ -33,6 +33,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   turn's `Response.Turn.Usage` includes.
 - **`llm.AnswerUnansweredToolCallsWith` and
   `llm.DropUnansweredServerToolCalls`.**
+- **Turn records.** `Turn` gains `ID`, `Revision`, `Origin`, `Status`,
+  `ToolCalls` (with `ToolCallStateWaiting`) and `Superseded`; `TurnID(ctx)`
+  gives tools and hooks the turn's ID, stable across a resume.
+- **`dive.TurnStore`** (`Load`, `CheckpointTurn`), implemented by
+  `session.Session` with a revision; `ErrRevisionConflict` for a stale write.
+- **`WithResumeRequest`** resumes only if the session's open turn and revision
+  are still the ones the caller read.
+- **`Agent.CancelSuspendedTurn`** closes a suspended turn without a model call,
+  its pending calls `unknown`, and keeps it in the history.
+- **`session.Session.Turns`, `RemoveLastTurn` and `ForkWithOpenTurn`.**
+- **`IncompleteTurnOptions.RequireReconcile`** refuses new input over a turn
+  with unknown calls (`ErrUnreconciledToolCalls`).
 
 ### Changed
 
@@ -66,6 +78,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (`ErrToolCallUnknown`), in the output and as `tool_call_result` items.
 - **A parallel call still running when its turn stops** is not waited for; its
   result arrives on a handle in `Response.BackgroundTasks`.
+- **The agent saves through `CheckpointTurn` on a `TurnStore`.** A wrapper that
+  embeds `*session.Session` and overrides `SaveTurn` or the suspension writes
+  must override `CheckpointTurn` too.
+- **`WithContinue` folds into an open incomplete turn on a `TurnStore`**, which
+  keeps its ID and loses its outcome reminder, instead of adding a turn.
+- **After an assistant message, `WithContinue` records its `turn-continue`
+  reminder** in the turn, so saved history keeps alternating roles.
+- **A resent resume result that was already accepted is skipped**; a different
+  one fails with `ErrConflictingToolResult`, matching `ErrUnknownPendingToolCall`.
+- **A partial resume saves its results before emitting their items.**
+  `Suspension.CompletedToolCalls` includes the results a resume supplied.
+- **`Fork` stops at the last completed turn**; pass `ForkWithOpenTurn` to copy
+  an open one. `CancelSuspension` is deprecated for `RemoveLastTurn`.
 
 ### Fixed
 

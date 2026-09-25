@@ -375,10 +375,17 @@ stopped short is saved either way.
 
 **Continuing.** `dive.WithContinue()` calls the model again on the history as
 it stands, with no new input, so a stopped, failed or cut-off turn is picked
-up without running any tool again. When the history ends in an incomplete
-turn or an assistant message, the request carries a model-only reminder
-saying the user asked to continue. On a session the continuation is saved as
-its own turn; a stateless caller passes its history with `WithMessages`.
+up without running any tool again. On a session that implements
+`dive.TurnStore`, as `session.Session` does, the continuation folds into the
+incomplete turn: the model sees the turn without its outcome reminder, and
+the turn is saved again, same ID, with the new output, so no note is left in
+the history. `Response.Turn.Messages` is then the whole turn. On any other
+session the continuation is saved as its own turn, and the request carries a
+model-only reminder saying the user asked to continue. A stateless caller
+passes its history with `WithMessages` and appends `Response.Turn.Messages`.
+When the history ends in an assistant message, as after an output limit, a
+`turn-continue` reminder is recorded before the new output, so the history
+keeps alternating roles.
 
 ```go
 resp, err = agent.CreateResponse(ctx, dive.WithContinue())
@@ -386,6 +393,13 @@ resp, err = agent.CreateResponse(ctx, dive.WithContinue())
 
 A `context_limit` turn cannot be sent again as it stands: shorten the history
 first (`session.Compact`, or a PreGeneration hook that trims it).
+
+New input after an incomplete turn starts a new turn, and the model sees the
+incomplete one with its outcome. Set `IncompleteTurns.RequireReconcile` to
+refuse new input with `dive.ErrUnreconciledToolCalls` while the last turn has
+a call whose result is unknown (`Outcome.Next == reconcile`), until it is
+continued or removed. On a `TurnStore` the latest turn record decides, so
+compacting the session does not clear it.
 
 A turn that stops during a tool batch answers every call of the batch. A call
 whose tool returned keeps its result. A call that never started is answered
@@ -509,12 +523,35 @@ resp, _ := agent.CreateResponse(ctx,
 )
 ```
 
+### Turn records
+
+`session.Session` implements `dive.TurnStore`: it stores each turn as a
+record with an ID, a status, its outcome and the state of every tool call,
+and advances a revision on every write. The agent loads from it and
+checkpoints the turn at the end of every call.
+
+```go
+snap, _ := sess.Load(ctx)      // History, OpenTurn (suspended or incomplete), Revision
+turns, _ := sess.Turns(ctx)    // every turn's record; superseded incomplete turns marked
+err := sess.RemoveLastTurn(ctx) // delete the last turn, whatever its state
+```
+
+`CheckpointTurn(ctx, expectedRevision, turn)` imports a turn you hold, such
+as a `Response.Turn` from another process; it fails with
+`dive.ErrRevisionConflict` when the session changed since you read it. A
+wrapper that embeds `*session.Session` to intercept `SaveTurn` or
+`SaveSuspendedTurn` must intercept `CheckpointTurn` too, which the agent
+calls instead.
+
 ### Fork and compact
 
 ```go
-// Fork a conversation
+// Fork a conversation up to its last completed turn
 forked := sess.Fork("new-branch")
 store.Put(ctx, forked)
+
+// Include an open turn: an incomplete one as it is, a suspended one closed
+forked = sess.Fork("with-open-turn", session.ForkWithOpenTurn())
 
 // Compact history with a summarizer
 sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
