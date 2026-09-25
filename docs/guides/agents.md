@@ -398,7 +398,8 @@ New input after an incomplete turn starts a new turn, and the model sees the
 incomplete one with its outcome. Set `IncompleteTurns.RequireReconcile` to
 refuse new input with `dive.ErrUnreconciledToolCalls` while the last turn has
 a call whose result is unknown (`Outcome.Next == reconcile`), until it is
-continued or removed.
+continued or removed. On a `TurnStore` the latest turn record decides, so
+compacting the session does not clear it.
 
 A turn that stops during a tool batch answers every call of the batch. A call
 whose tool returned keeps its result. A call that never started is answered

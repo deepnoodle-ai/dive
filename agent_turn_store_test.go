@@ -458,3 +458,46 @@ func TestBackgroundResultsTurnOrigin(t *testing.T) {
 	assert.Equal(t, next.Turn.Origin.Kind, TurnOriginBackground)
 	assert.Equal(t, next.Turn.Origin.TurnID, resp.Turn.ID)
 }
+
+// RequireReconcile reads the session's latest turn record, not the active
+// history: a compaction whose summary drops the outcome does not let new
+// input past a turn with an unknown call. Continuing clears it.
+func TestRequireReconcileSurvivesCompaction(t *testing.T) {
+	mock := &responseLLM{responses: []*llm.Response{
+		callResponse("tool_use", toolUse("toolu_1", "approve", `{}`)),
+		textResponse("end_turn", "checked"),
+		textResponse("end_turn", "next"),
+	}}
+	sess := session.New("reconcile-compaction")
+	agent, err := NewAgent(AgentOptions{
+		Model:           mock,
+		Session:         sess,
+		Tools:           []Tool{suspendingTool("approve", nil)},
+		IncompleteTurns: IncompleteTurnOptions{RequireReconcile: true},
+	})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), WithInput("go"))
+	assert.NoError(t, err)
+	resp, err := agent.CancelSuspendedTurn(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Turn.Outcome.Next, TurnNextReconcile)
+
+	assert.NoError(t, sess.Compact(context.Background(), func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+		return []*llm.Message{llm.NewUserTextMessage("summary without the outcome")}, nil
+	}))
+	history, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	_, ok := FindLatestTurnOutcome(history)
+	assert.False(t, ok)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("new topic"))
+	assert.True(t, errors.Is(err, ErrUnreconciledToolCalls))
+	assert.Equal(t, mock.calls(), 1)
+
+	resp, err = agent.CreateResponse(context.Background(), WithContinue())
+	assert.NoError(t, err)
+	assert.Equal(t, resp.OutputText(), "checked")
+	resp, err = agent.CreateResponse(context.Background(), WithInput("new topic"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.OutputText(), "next")
+}

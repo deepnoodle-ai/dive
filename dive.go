@@ -120,6 +120,11 @@ type SessionSnapshot struct {
 
 	// Revision is the session revision the snapshot was read at.
 	Revision uint64
+
+	// LatestOutcome is the outcome of the session's latest turn when that
+	// turn is incomplete, even when a compaction followed it and it is no
+	// longer open. Nil when the latest turn completed or is suspended.
+	LatestOutcome *TurnOutcome
 }
 
 // ErrRevisionConflict is wrapped by the error of a TurnStore checkpoint, or of
@@ -143,7 +148,8 @@ var ErrConflictingToolResult = errors.New("dive: a different result was already 
 // ErrUnreconciledToolCalls is returned when new input is given on a session
 // whose last turn stopped with a call whose result is unknown (TurnOutcome.Next
 // is TurnNextReconcile), and IncompleteTurnOptions.RequireReconcile is set.
-// Continue the turn (WithContinue) or remove it first.
+// Continue the turn (WithContinue) or remove it first. A compaction does not
+// clear it; a continuation does.
 var ErrUnreconciledToolCalls = errors.New("dive: the last turn has tool calls with unknown results; continue it before giving new input")
 
 // ErrNoSuspendedTurn is returned from CreateResponse when WithResume or

@@ -1765,6 +1765,12 @@ Phase 2a and 2b below are the seventh and eighth stages.
      `reconcile` only when a pending call is not read-only, the v1.34 rule.
      `Fork` with an open suspended turn closes it the same way, but always
      with `reconcile`, since a session does not know the tools.
+   - `RequireReconcile` reads the latest turn record on a `TurnStore`
+     (`SessionSnapshot.LatestOutcome`), not the active history, so a
+     compaction whose summary drops the outcome does not let new input past
+     an unknown call; a continuation, which adds a turn after the
+     compaction, clears it. On another session only the history's last
+     message is available.
    - `TurnID(ctx)` matches the existing `ToolCallID(ctx)` rather than the
      `TurnIDFromContext` name above.
    - A wrapper that embeds `*session.Session` and overrides the v1.34 writes

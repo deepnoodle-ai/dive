@@ -387,8 +387,11 @@ type IncompleteTurnOptions struct {
 	// stopped with a call whose result is unknown (TurnOutcome.Next is
 	// TurnNextReconcile), with ErrUnreconciledToolCalls, so that such a turn
 	// is continued (WithContinue) or removed before the conversation moves
-	// on. By default the new turn starts, and the model sees the unknown
-	// calls' results and the outcome reminder.
+	// on. On a TurnStore the latest turn record decides, so a compaction
+	// that summarized the turn does not clear it; on another session, the
+	// outcome reminder at the end of the history does. By default the new
+	// turn starts, and the model sees the unknown calls' results and the
+	// outcome reminder.
 	RequireReconcile bool
 }
 
@@ -770,10 +773,18 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 	// With RequireReconcile, new input waits until a last turn with unknown
-	// results is continued or removed.
-	if a.incompleteTurns.RequireReconcile && sess != nil && !hasResumeIntent && !options.Continue &&
-		len(inputMessages) > 0 && len(sessionMsgs) > 0 {
-		if outcome, ok := FindTurnOutcome(sessionMsgs[len(sessionMsgs)-1]); ok && outcome.Next == TurnNextReconcile {
+	// results is continued or removed. A TurnStore reports its latest turn's
+	// outcome even after a compaction summarized it; on another session the
+	// history's last message is all there is to go on.
+	if a.incompleteTurns.RequireReconcile && sess != nil && !hasResumeIntent && !options.Continue && len(inputMessages) > 0 {
+		var latest *TurnOutcome
+		switch {
+		case snap != nil:
+			latest = snap.LatestOutcome
+		case len(sessionMsgs) > 0:
+			latest, _ = FindTurnOutcome(sessionMsgs[len(sessionMsgs)-1])
+		}
+		if latest != nil && latest.Next == TurnNextReconcile {
 			return nil, ErrUnreconciledToolCalls
 		}
 	}

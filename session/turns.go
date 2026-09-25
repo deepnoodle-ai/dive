@@ -123,7 +123,28 @@ func (s *Session) Load(ctx context.Context) (*dive.SessionSnapshot, error) {
 	if open >= 0 {
 		snap.OpenTurn = s.turnLocked(open)
 	}
+	snap.LatestOutcome = s.latestOutcomeLocked()
 	return snap, nil
+}
+
+// latestOutcomeLocked returns the outcome of the latest turn event when it
+// is incomplete, whatever events follow it. Caller must hold s.mu.
+func (s *Session) latestOutcomeLocked() *dive.TurnOutcome {
+	for i := len(s.data.Events) - 1; i >= 0; i-- {
+		e := s.data.Events[i]
+		if e.Type != eventTypeTurn {
+			continue
+		}
+		if s.eventStatusLocked(i) != dive.ResponseStatusIncomplete {
+			return nil
+		}
+		if e.Turn != nil && e.Turn.Outcome != nil {
+			return copyOutcome(e.Turn.Outcome)
+		}
+		outcome, _ := dive.FindLatestTurnOutcome(e.Messages)
+		return outcome
+	}
+	return nil
 }
 
 // Revision returns the session revision, which every write to the

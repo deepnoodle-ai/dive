@@ -324,3 +324,29 @@ func TestForkOpenTurn(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, snap.OpenTurn.Outcome.Reason, dive.TurnReasonOutputLimit)
 }
+
+// The latest turn's outcome is reported after a compaction closed it, and
+// cleared once a later turn completes.
+func TestLoadLatestOutcome(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("latest-outcome")
+	rev, err := sess.CheckpointTurn(ctx, 0, incompleteTurn("turn_1", "count", "one"))
+	assert.NoError(t, err)
+	snap, err := sess.Load(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, snap.LatestOutcome.Reason, dive.TurnReasonOutputLimit)
+
+	assert.NoError(t, sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+		return []*llm.Message{llm.NewUserTextMessage("summary")}, nil
+	}))
+	snap, err = sess.Load(ctx)
+	assert.NoError(t, err)
+	assert.Nil(t, snap.OpenTurn)
+	assert.Equal(t, snap.LatestOutcome.Reason, dive.TurnReasonOutputLimit)
+
+	_, err = sess.CheckpointTurn(ctx, rev+1, completedTurn("turn_2", "next", "done"))
+	assert.NoError(t, err)
+	snap, err = sess.Load(ctx)
+	assert.NoError(t, err)
+	assert.Nil(t, snap.LatestOutcome)
+}
