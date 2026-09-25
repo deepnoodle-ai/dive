@@ -696,7 +696,8 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 	// A resume request names the turn and revision the caller read.
-	if options.ResumeTurnID != "" || options.ExpectedRevision != 0 {
+	hasResumeRequest := options.resumeRequest || options.ResumeTurnID != "" || options.ExpectedRevision != 0
+	if hasResumeRequest {
 		if store == nil {
 			return nil, errors.New("dive: WithResumeRequest needs a session that implements TurnStore")
 		}
@@ -735,7 +736,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	hasExplicitSuspension := options.Suspension != nil
 	// A resume request is resume intent even without results: with nothing
 	// suspended it fails rather than starting a turn.
-	hasResumeRequest := options.ResumeTurnID != "" || options.ExpectedRevision != 0
 	hasResumeIntent := hasToolResults || hasExplicitSuspension || options.cancelSuspended || hasResumeRequest
 
 	if hasResumeIntent && suspState == nil {

@@ -544,3 +544,36 @@ func TestResumeRequestWithoutResultsStaysSuspended(t *testing.T) {
 	assert.Equal(t, mock.calls(), 1)
 	assert.True(t, sess.IsSuspended())
 }
+
+// A zero-value resume request is still a resume: it fails with nothing
+// suspended, and re-saves a suspension unchanged.
+func TestZeroResumeRequest(t *testing.T) {
+	mock := &responseLLM{responses: []*llm.Response{
+		textResponse("end_turn", "hi"),
+		callResponse("tool_use", toolUse("toolu_1", "approve", `{}`)),
+	}}
+	sess := session.New("zero-request")
+	agent, err := NewAgent(AgentOptions{Model: mock, Session: sess, Tools: []Tool{suspendingTool("approve", nil)}})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithResumeRequest(ResumeRequest{}))
+	assert.True(t, errors.Is(err, ErrNoSuspendedTurn))
+	assert.Equal(t, mock.calls(), 1)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("go"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	resp, err = agent.CreateResponse(context.Background(), WithResumeRequest(ResumeRequest{}))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_1")
+	assert.Equal(t, mock.calls(), 2)
+
+	// A session that is not a TurnStore cannot take one.
+	plain, err := NewAgent(AgentOptions{Model: mock, Session: &plainSession{id: "plain"}})
+	assert.NoError(t, err)
+	_, err = plain.CreateResponse(context.Background(), WithResumeRequest(ResumeRequest{}))
+	assert.ErrorContains(t, err, "TurnStore")
+}

@@ -246,6 +246,10 @@ type CreateResponseOptions struct {
 	ResumeTurnID     string
 	ExpectedRevision uint64
 
+	// resumeRequest records that WithResumeRequest was given, whatever its
+	// fields: it is resume intent even with no guard and no results.
+	resumeRequest bool
+
 	// cancelSuspended closes the suspended turn without a model call. Set by
 	// Agent.CancelSuspendedTurn.
 	cancelSuspended bool
@@ -438,5 +442,6 @@ func WithResumeRequest(req ResumeRequest) CreateResponseOption {
 		opts.ToolResults = req.ToolResults
 		opts.ResumeTurnID = req.TurnID
 		opts.ExpectedRevision = req.ExpectedRevision
+		opts.resumeRequest = true
 	}
 }
