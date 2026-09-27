@@ -29,6 +29,9 @@ These cover packages in `experimental/` with unstable APIs:
 
 ## Design Documents
 
+- [Dive v2: Top Recommendations](design/2026-09-26-dive-v2-recommendations.md) - Priorities, reasoning, and the first execution prototypes
+- [Dive v2: Integrator Feedback](design/2026-09-26-dive-v2-integrator-feedback.md) - Consolidated Noodle, Nvoken, Mobius, and Swarm critiques, reasoning, implementation status, and open design decisions
+- [Dive v2: Architecture Review](design/2026-09-26-dive-v2-architecture-review.md) - Code-grounded findings, local probes, recommended boundaries, and migration direction
 - [Sandboxing](design/sandboxing.md) - Sandboxing design
 - [Runtime Context Injection](design/context-injection.md) - Implemented context authority, delivery, ordering, persistence, and provider-rendering contract
 - [CLI Direction: Phased Plan](design/cli-direction-plan.md) - Execution plan sequencing the managed-screen migration, the wonton additions, and the real-terminal harness
