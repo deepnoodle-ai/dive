@@ -28,6 +28,7 @@ separate. An item being included does not mean its proposed solution is accepted
 - [Application-owned findings](#application-owned-findings)
 - [Earlier Dive proposals](#earlier-dive-proposals)
 - [Decisions and sequencing](#decisions-and-sequencing)
+- [Addendum: downstream Nvoken integrations](#addendum-downstream-nvoken-integrations)
 
 ## Sources and evidence
 
@@ -684,3 +685,143 @@ stop inference, provider parsing, and fake-model machinery while preserving:
 
 These are evaluation criteria distilled from the feedback, not a commitment to
 implement every proposed API in one release.
+
+## Addendum: downstream Nvoken integrations
+
+**Added:** 2026-09-26, after the first execution/recovery prototypes and their
+independent reviews. This addendum records additional evidence and design
+implications; it does not supersede the dated findings above.
+
+### Sources and confidence
+
+The user supplied two assessments of applications integrating with Nvoken, one
+layer above Dive:
+
+- **JW — Jibblywibbly:** “Nvoken's core model fits Jibblywibbly well, but too much
+  integration code exists to bridge gaps between that model and the SDK.” The
+  assessment reports 48 passing focused integration tests and local reproduction
+  of a memory-policy serialization defect and an idempotency request mismatch.
+  It did not exercise production.
+- **NB — Nabaname:** “Nvoken's core model is sound, but the integration gets
+  substantially harder once you need production behavior.” The assessment is
+  based on application source, Nvoken SDK/service source, and documentation;
+  it did not run production experiments.
+
+The following is a portable synthesis of those supplied assessments. Their
+SDK versions, release status, and application defects were not independently
+reverified for this addendum. These are downstream symptoms and requests;
+their inclusion does not establish that each problem originates in Dive.
+
+### Requests directed at Nvoken
+
+| Source       | Critique and suggested improvement                                                                                                                                                                                              | Reasoning                                                                                                                                                                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JW-01        | Publish the memory-policy SDK serialization fix and test the actual release artifact, including a Workers smoke test.                                                                                                           | The assessment reports SDK 0.35.0 emitting both `default_scope` and invalid `defaultScope`, while the source fix remains unreleased. Jibblywibbly strips the setting as a workaround. A valid typed call must serialize into a valid API request.                                                                     |
+| JW-02, NB-01 | Expose trusted/recorded context through the normal Agent API; preserve reasoning controls, child-Turn lineage, authoritative usage, and supported authenticated streams with previews/cursors.                                  | Jibblywibbly built a roughly 120-line adapter to pass operator context while reconstructing admission, timeout, handle, and tool behavior. Nabaname falls back to exact/raw operations for ordinary production features. Moving beyond a convenience method should be incremental.                                    |
+| JW-02, NB-02 | Offer an immutable tenant-bound client for regular methods, exact operations, and streams; normalize errors and reject conflicting tenant coordinates.                                                                          | Both applications repeat tenant assertions. Nabaname additionally uses a functional headers override because a plain override replaces authentication headers. The reported gap is invoking existing enforcement consistently, not absence of enforcement.                                                            |
+| JW-03, NB-04 | Separate recovering accepted work from submitting its request again. Provide authorized lookup by tenant and submission/idempotency key, a serializable admission receipt, and safe conflict diagnostics.                       | Reconstructing a request from current context can conflict with the original fingerprint. Strict conflict detection should remain. A stable key alone does not make a changed request a valid retry.                                                                                                                  |
+| JW-04        | Provide memory reset/successor semantics with concurrency and retry behavior, plus exact namespace lookup/filtering.                                                                                                            | Jibblywibbly scans spaces, parses generation names, inspects tombstones, derives successors, and probes earlier generations. Applications should choose a memory identity without recreating lifecycle bookkeeping. Erased generations must remain erased.                                                            |
+| JW-05, NB-07 | Support declarative reconciliation of code-owned Agents: canonical comparison, created/updated/unchanged outcomes, concurrent deployment handling, dry-run diff, and a revision manifest to pin.                                | Both applications implement lookup/create/read/compare/publish loops. Immutable revisions remain useful; selecting `current` at runtime can couple older application code to newly published tool contracts.                                                                                                          |
+| JW-06, NB-03 | Package a durable host-tool integration independent of the viewing stream, with executable Workers/callback/queue examples, durable result caching, retry-safe submission, concurrency bounds, progress, and ownership fencing. | Bound handlers exist only while a caller follows the Turn. A durable Turn can outlive every available host executor. Nabaname compensates with database claims, takeover, dispatch, and progress queues; handle-local in-memory deduplication is insufficient across workers. Callback infrastructure already exists. |
+| NB-03        | Separate machine-tool deadlines from human waiting.                                                                                                                                                                             | Nabaname leaves the cumulative waiting timeout unset because a Turn may wait for a person, then implements a separate five-minute tool deadline. Different waiting reasons need different policies.                                                                                                                   |
+| JW-07        | Provide a content-free diagnostic projection: request/Turn identity, admission state, failure code, stop reason, and retry guidance. Normalize errors across supported access paths.                                            | Useful evidence exists but is awkward to preserve, especially when an execution cause is nested in a result. Admission failure, local timeout, tool waiting, terminal failure, and completion without text must be distinguishable without string guessing or logging content.                                        |
+| NB-05        | Ship an executable settlement integration composing signed terminal webhooks and the ordered ended-Turn feed. Cover standalone workers, unmatched admissions, local database outages, cursor commits, and erasure.              | Await-only worker accounting misses results when callers disappear. A reconciler restricted to local unsettled rows also misses admissions whose local insert failed. Retained usage evidence must remain usable after content erasure. Retail billing stays in the application.                                      |
+| NB-06        | Allow an explicit shared Budget across selected parent and child Turns, with concurrent reservations and a defined exhaustion policy.                                                                                           | Nabaname's reported $2 parent limit and separate $0.75 worker limits do not cap the whole naming operation. Tenant credits, per-Turn bounds, and operation budgets answer different questions. Lineage should identify relationships without silently granting spending authority.                                    |
+
+Source JW's proposed first delivery slice is the SDK patch, trusted context, and
+recovery by submission key. Source NB prioritizes SDK completeness, durable tools,
+and recovery. Both identify substantial integration-packaging work rather than
+arguing that Nvoken's underlying model should be replaced.
+
+### Application defects and existing capabilities to keep separate
+
+- **Jibblywibbly request mismatch:** agenda creation can include weather and
+  unfinished activity, while recall reuses the key without those fields. The
+  assessment reproduced different payloads. Fix the application and improve
+  recovery ergonomics; do not weaken request fingerprint conflict checking.
+- **Nabaname fresh-key fallback:** after an idempotency conflict, a worker wrapper
+  retries with a fresh UUID. That can admit another paid Turn for the same intended
+  work. This is an application defect, not a request to accept conflicting input.
+- **Transcript and presentation adoption:** bounded transcript reads already
+  exist. Jibblywibbly still fetches the whole transcript and calls a textless result
+  “thinking” without checking its outcome. Nabaname still walks messages forward
+  and maintains custom preview handling despite reported SDK improvements.
+- **Previously addressed behavior and version drift:** NB reports that SDK 0.34
+  addressed the Conversation creation-options conflict, while 0.35 added bounded
+  paging, reducer improvements, admission Conversation IDs, and facade
+  interruption. Its package pin, guide, and installed checkout reportedly say
+  0.35, 0.34, and 0.30 respectively. Verify the installed artifact before attributing
+  behavior to the current product.
+- **Settlement and diagnostics adoption:** existing webhooks, ended-Turn feeds,
+  typed errors, retained results, and callback delivery should be composed and
+  adopted before introducing competing mechanisms. Creature rules, moderation,
+  game-state validation, and retail billing remain application responsibilities.
+
+### What this changes for Dive v2
+
+**1. Preserve the complete execution contract through the convenient API.**
+Trusted context, lineage, usage, and custom recording are ordinary requirements.
+A session runner should expose the engine's supported capabilities without making
+the caller rebuild admission, execution, and recovery. Dive already has
+operator-tier reminders; preserve their authority and lifetime through start,
+continue, and resume. Passing trusted context or selecting an external recorder
+should not require replacing the runner. This reinforces DIVE-01 and the context
+and outcome findings in the architecture review.
+
+**2. Recover accepted work from its recorded configuration, not today's request.**
+Our prototype preserves input and call limits but does not yet pin effective model
+settings, trusted context, or tool-definition versions. The two downstream
+assessments make this omission more important. Distinguish submitting new work,
+recovering accepted work by identity, and explicitly changing/continuing that
+work. Preserve enough accepted configuration and version identity to explain
+what will execute after a deployment. Do not store credentials in the record.
+Nvoken owns authorized submission-key lookup and the admission receipt; Dive
+must supply the faithful execution state beneath them. If required historical
+configuration is unavailable, surface that limitation rather than silently using
+the current definition.
+
+**3. Separate observation, executor availability, and waiting policy.**
+A connected observer must not implicitly be the only owner of tool execution.
+The prototype's separate recorder, observer, identified invocation, and result
+acceptance contracts support this direction. A real integration must demonstrate
+that losing a UI connection does not strand machine work. Represent waiting
+reasons explicitly so human input, external tools, and host budget decisions can
+have different deadlines. A caller's local wait expiring is not proof that the
+durable work failed or was cancelled.
+
+**4. Expose admission and settlement boundaries around each billable attempt.**
+Prepare the effective request before the host reserves spending authority and
+before any network effect. Record identified attempts, authoritative usage,
+provenance, and uncertainty even if the caller disconnects. Hosts need usage and
+content-free diagnostics that can survive content erasure under their retention
+policy. Dive supplies those facts and control boundaries; Nvoken owns shared
+budget reservations and durable settlement; applications own retail billing.
+Do not infer spending authority from parent-child lineage.
+
+**5. Validate packaged integrations and measure removed adapter code.**
+The reported SDK serialization defect and version drift show why source tests
+alone are insufficient. Use representative consumer fixtures against the actual
+packaged API. The test should preserve context, recovery, tool execution, and
+accounting while deleting meaningful application glue. The current fake-provider
+and recovery tests establish narrower protocol behavior; they do not yet prove
+that a consumer can simplify its integration.
+
+Tenant administration, memory generations, Agent deployment reconciliation, and
+retail billing should not move into Dive. Their transferable lessons are stable
+identity, explicit lifecycle operations, preserved configuration, and consistent
+access to the underlying execution contract.
+
+### Proposed next consumer experiment
+
+Use a representative Nvoken integration to accept work with trusted context and
+pinned configuration, lose the admission response, change the application's
+current context/configuration, and recover the original work by identity without
+resubmitting it. Continue through an independently owned tool executor and retain
+the usage/outcome evidence.
+
+The experiment should demonstrate one admission for the intended work, faithful
+use of the accepted configuration, strict conflicts for changed submissions,
+recovery without reconstructing the original request, and no duplicate tool or
+accounting effects. Count the custom integration code it removes. This is a
+proposed next validation step, not a claim that the current prototypes or Nvoken
+already satisfy those criteria.
