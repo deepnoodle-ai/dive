@@ -26,6 +26,10 @@
         "/(?:models|resources/changelog|api/endpoint/models)",
         "/pricing"
       ]
+    },
+    {
+      "name": "inference-pricing",
+      "url": "https://docs.mistral.ai/inference/pricing"
     }
   ],
   "models": [
@@ -207,6 +211,27 @@
       "go_name": "ModelMixtral8x22B",
       "id": "open-mixtral-8x22b",
       "kind": "text"
+    },
+    {
+      "go_name": "ModelGLM53",
+      "id": "zai-glm-5-3",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "GLM 5.3"
+    },
+    {
+      "go_name": "ModelLeanstral15",
+      "id": "labs-leanstral-1-5",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Leanstral 1.5"
+    },
+    {
+      "go_name": "ModelLeanstral151",
+      "id": "labs-leanstral-1-5-1",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Leanstral 1.5.1"
     }
   ],
   "pricing": {
@@ -362,6 +387,30 @@
         "output_price_per_1m_tokens": "0.25",
         "currency": "USD",
         "updated_at": "2025-01-15"
+      },
+      {
+        "model": "zai-glm-5-3",
+        "input_price_per_1m_tokens": "1.40",
+        "output_price_per_1m_tokens": "4.40",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.14"
+      },
+      {
+        "model": "labs-leanstral-1-5",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Free public preview."
+      },
+      {
+        "model": "labs-leanstral-1-5-1",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Free public preview; fixed snapshot of labs-leanstral-1-5."
       }
     ],
     "fast_text": [],

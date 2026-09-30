@@ -2,6 +2,9 @@ package google
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -194,4 +197,34 @@ func TestGoogleTranscribe_Integration(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Contains(t, result.Text, "Dive")
+}
+
+func TestGoogle38TextToSpeech(t *testing.T) {
+	for _, model := range []string{"", ModelGemini38FlashTTS, ModelGemini38FlashLiteTTS} {
+		t.Run(model, func(t *testing.T) {
+			var path string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]}}]}`)
+			}))
+			defer server.Close()
+			client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+				APIKey: "test-key", Backend: genai.BackendGeminiAPI,
+				HTTPOptions: genai.HTTPOptions{BaseURL: server.URL},
+			})
+			assert.NoError(t, err)
+			p := &MediaProvider{client: client}
+			result, err := p.TextToSpeech(context.Background(), "Hello", &media.Config{Model: model})
+			assert.NoError(t, err)
+			wantModel := model
+			if wantModel == "" {
+				wantModel = ModelGemini38FlashLiteTTS
+			}
+			assert.Contains(t, path, wantModel+":generateContent")
+			assert.Equal(t, wantModel, result.Model)
+			assert.Equal(t, media.AudioFormatWAV, result.Format)
+			assert.Equal(t, "RIFF", string(result.Data[:4]))
+		})
+	}
 }

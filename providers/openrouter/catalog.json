@@ -16,6 +16,55 @@
   ],
   "models": [
     {
+      "go_name": "ModelClaudeSonnet55",
+      "id": "anthropic/claude-sonnet-5.5",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Sonnet 5.5"
+    },
+    {
+      "go_name": "ModelGPT61Sol",
+      "id": "openai/gpt-6.1-sol",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-6.1 Sol"
+    },
+    {
+      "go_name": "ModelGPT61SolPro",
+      "id": "openai/gpt-6.1-sol-pro",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-6.1 Sol Pro"
+    },
+    {
+      "go_name": "ModelGPT6Astra",
+      "id": "openai/gpt-6-astra",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-6 Astra"
+    },
+    {
+      "go_name": "ModelGPT6AstraPro",
+      "id": "openai/gpt-6-astra-pro",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-6 Astra Pro"
+    },
+    {
+      "go_name": "ModelGPT6SolPro",
+      "id": "openai/gpt-6-sol-pro",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-6 Sol Pro"
+    },
+    {
+      "go_name": "ModelGPT6LunaPro",
+      "id": "openai/gpt-6-luna-pro",
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-6 Luna Pro"
+    },
+    {
       "go_name": "ModelClaudeFable51",
       "id": "anthropic/claude-fable-5.1",
       "kind": "text",
@@ -32,10 +81,10 @@
     {
       "go_name": "ModelClaudeSonnet5",
       "id": "anthropic/claude-sonnet-5",
-      "default": true,
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Sonnet 5"
+      "display_name": "Sonnet 5",
+      "default": true
     },
     {
       "go_name": "ModelClaudeOpus55",
@@ -345,62 +394,169 @@
   "pricing": {
     "text": [
       {
+        "model": "anthropic/claude-sonnet-5.5",
+        "input_price_per_1m_tokens": "2",
+        "output_price_per_1m_tokens": "10",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.2",
+        "cache_write_price_per_1m_tokens": "2.5",
+        "note": "OpenRouter public model listing, standard route."
+      },
+      {
+        "model": "openai/gpt-6.1-sol",
+        "input_price_per_1m_tokens": "2",
+        "output_price_per_1m_tokens": "10",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.1",
+        "cache_write_price_per_1m_tokens": "2.5",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "4",
+        "long_context_output_price_per_1m_tokens": "15",
+        "long_context_cache_read_price_per_1m_tokens": "0.2",
+        "long_context_cache_write_price_per_1m_tokens": "5",
+        "note": "OpenRouter public model listing, standard route."
+      },
+      {
+        "model": "openai/gpt-6.1-sol-pro",
+        "input_price_per_1m_tokens": "2",
+        "output_price_per_1m_tokens": "10",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.1",
+        "cache_write_price_per_1m_tokens": "2.5",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "4",
+        "long_context_output_price_per_1m_tokens": "15",
+        "long_context_cache_read_price_per_1m_tokens": "0.2",
+        "long_context_cache_write_price_per_1m_tokens": "5",
+        "note": "OpenRouter public model listing, standard route. Pro routes spend more reasoning tokens at the same token rates."
+      },
+      {
+        "model": "openai/gpt-6-astra",
+        "input_price_per_1m_tokens": "10",
+        "output_price_per_1m_tokens": "50",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "1",
+        "cache_write_price_per_1m_tokens": "12.5",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "20",
+        "long_context_output_price_per_1m_tokens": "75",
+        "long_context_cache_read_price_per_1m_tokens": "2",
+        "long_context_cache_write_price_per_1m_tokens": "25",
+        "note": "OpenRouter public model listing, standard route."
+      },
+      {
+        "model": "openai/gpt-6-astra-pro",
+        "input_price_per_1m_tokens": "10",
+        "output_price_per_1m_tokens": "50",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "1",
+        "cache_write_price_per_1m_tokens": "12.5",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "20",
+        "long_context_output_price_per_1m_tokens": "75",
+        "long_context_cache_read_price_per_1m_tokens": "2",
+        "long_context_cache_write_price_per_1m_tokens": "25",
+        "note": "OpenRouter public model listing, standard route. Pro routes spend more reasoning tokens at the same token rates."
+      },
+      {
+        "model": "openai/gpt-6-sol-pro",
+        "input_price_per_1m_tokens": "2",
+        "output_price_per_1m_tokens": "10",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.2",
+        "cache_write_price_per_1m_tokens": "2.5",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "4",
+        "long_context_output_price_per_1m_tokens": "15",
+        "long_context_cache_read_price_per_1m_tokens": "0.4",
+        "long_context_cache_write_price_per_1m_tokens": "5",
+        "note": "OpenRouter public model listing, standard route. Pro routes spend more reasoning tokens at the same token rates."
+      },
+      {
+        "model": "openai/gpt-6-luna-pro",
+        "input_price_per_1m_tokens": "0.1",
+        "output_price_per_1m_tokens": "0.5",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.01",
+        "cache_write_price_per_1m_tokens": "0.125",
+        "long_context_threshold_tokens": 272001,
+        "long_context_input_price_per_1m_tokens": "0.2",
+        "long_context_output_price_per_1m_tokens": "0.75",
+        "long_context_cache_read_price_per_1m_tokens": "0.02",
+        "long_context_cache_write_price_per_1m_tokens": "0.25",
+        "note": "OpenRouter public model listing, standard route. Pro routes spend more reasoning tokens at the same token rates."
+      },
+      {
         "model": "anthropic/claude-sonnet-4",
         "input_price_per_1m_tokens": "3.00",
         "output_price_per_1m_tokens": "15.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.3"
       },
       {
         "model": "anthropic/claude-opus-4.1",
         "input_price_per_1m_tokens": "15.00",
         "output_price_per_1m_tokens": "75.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "1.5"
       },
       {
         "model": "openai/gpt-5",
-        "input_price_per_1m_tokens": "0.625",
-        "output_price_per_1m_tokens": "5.00",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "10",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.125"
       },
       {
         "model": "openai/gpt-4o",
         "input_price_per_1m_tokens": "2.50",
         "output_price_per_1m_tokens": "10.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "1.25"
       },
       {
         "model": "google/gemini-2.5-flash",
         "input_price_per_1m_tokens": "0.30",
         "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.03"
       },
       {
         "model": "google/gemini-2.5-pro",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "10.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.125"
       },
       {
         "model": "deepseek/deepseek-v4.1-flash",
-        "input_price_per_1m_tokens": "0.15",
-        "output_price_per_1m_tokens": "0.60",
-        "cache_read_price_per_1m_tokens": "0.003",
+        "input_price_per_1m_tokens": "0.0198",
+        "output_price_per_1m_tokens": "0.396",
+        "cache_read_price_per_1m_tokens": "0.00291",
         "currency": "USD",
-        "updated_at": "2026-09-17",
-        "note": "Off-peak list rate. DeepSeek doubles input, output, and cache reads during its UTC\npeak windows (Mon-Fri 01:00-04:00 and 06:00-10:00), which the schema has no\ntime-of-day tier for, so a peak request costs twice what this entry reports."
+        "updated_at": "2026-09-30",
+        "note": "OpenRouter public model listing. Routing and provider-specific pricing can change the billed cost."
       },
       {
         "model": "deepseek/deepseek-r1-0528",
         "input_price_per_1m_tokens": "0.50",
-        "output_price_per_1m_tokens": "2.18",
+        "output_price_per_1m_tokens": "2.15",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.35"
       }
     ],
     "fast_text": [],

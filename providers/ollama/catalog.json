@@ -13,6 +13,38 @@
     {
       "name": "default-model",
       "url": "https://ollama.com/library/gpt-oss"
+    },
+    {
+      "name": "muse-glimmer",
+      "url": "https://ollama.com/library/muse-glimmer"
+    },
+    {
+      "name": "nemotron-3-5-lightning",
+      "url": "https://ollama.com/library/nemotron-3.5-lightning"
+    },
+    {
+      "name": "qwen3.8",
+      "url": "https://ollama.com/library/qwen3.8"
+    },
+    {
+      "name": "qwen3.8-flash-next",
+      "url": "https://ollama.com/library/qwen3.8-flash-next"
+    },
+    {
+      "name": "glm-5.3-flash",
+      "url": "https://ollama.com/library/glm-5.3-flash"
+    },
+    {
+      "name": "glm-5.3",
+      "url": "https://ollama.com/library/glm-5.3"
+    },
+    {
+      "name": "deepseek-v4.1-flash",
+      "url": "https://ollama.com/library/deepseek-v4.1-flash"
+    },
+    {
+      "name": "kimi-k3",
+      "url": "https://ollama.com/library/kimi-k3"
     }
   ],
   "models": [
@@ -177,6 +209,76 @@
       "kind": "text",
       "display_name": "DeepSeek-R1 671B",
       "context_window": 163840
+    },
+    {
+      "go_name": "ModelMuseGlimmer",
+      "id": "muse-glimmer",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Muse Glimmer"
+    },
+    {
+      "go_name": "ModelMuseGlimmer30B",
+      "id": "muse-glimmer:30b",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Muse Glimmer 30B"
+    },
+    {
+      "go_name": "ModelNemotron35Lightning",
+      "id": "nemotron-3.5-lightning",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Nemotron 3.5 Lightning"
+    },
+    {
+      "go_name": "ModelQwen38",
+      "id": "qwen3.8",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Qwen3.8"
+    },
+    {
+      "go_name": "ModelQwen38_27B",
+      "id": "qwen3.8:27b",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Qwen3.8 27B"
+    },
+    {
+      "go_name": "ModelQwen38FlashNext125BMLX",
+      "id": "qwen3.8-flash-next:125b-mlx",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Qwen3.8 Flash Next 125B (MLX)"
+    },
+    {
+      "go_name": "ModelGLM53FlashCloud",
+      "id": "glm-5.3-flash:cloud",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "GLM 5.3 Flash (Cloud)"
+    },
+    {
+      "go_name": "ModelGLM53Cloud",
+      "id": "glm-5.3:cloud",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "GLM 5.3 (Cloud)"
+    },
+    {
+      "go_name": "ModelDeepSeekV41FlashCloud",
+      "id": "deepseek-v4.1-flash:cloud",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "DeepSeek V4.1 Flash (Cloud)"
+    },
+    {
+      "go_name": "ModelKimiK3Cloud",
+      "id": "kimi-k3:cloud",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Kimi K3 (Cloud)"
     }
   ],
   "pricing": {
@@ -244,6 +346,54 @@
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
         "updated_at": "2026-08-09"
+      },
+      {
+        "model": "muse-glimmer",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Runs locally; no per-token API charge. Hardware and electricity costs excluded."
+      },
+      {
+        "model": "muse-glimmer:30b",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Runs locally; no per-token API charge. Hardware and electricity costs excluded."
+      },
+      {
+        "model": "nemotron-3.5-lightning",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Runs locally; no per-token API charge. Hardware and electricity costs excluded."
+      },
+      {
+        "model": "qwen3.8",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Runs locally; no per-token API charge. Hardware and electricity costs excluded."
+      },
+      {
+        "model": "qwen3.8:27b",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Runs locally; no per-token API charge. Hardware and electricity costs excluded."
+      },
+      {
+        "model": "qwen3.8-flash-next:125b-mlx",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "note": "Runs locally; no per-token API charge. Hardware and electricity costs excluded."
       }
     ],
     "fast_text": [],

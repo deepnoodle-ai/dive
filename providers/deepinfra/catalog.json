@@ -92,6 +92,48 @@
       "context_window": 1048576,
       "recommended": true,
       "cli_order": 8
+    },
+    {
+      "go_name": "ModelMiMo26Pro",
+      "id": "XiaomiMiMo/MiMo-V2.6-Pro",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "MiMo V2.6 Pro"
+    },
+    {
+      "go_name": "ModelMiMo26Flash",
+      "id": "XiaomiMiMo/MiMo-V2.6-Flash",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "MiMo V2.6 Flash"
+    },
+    {
+      "go_name": "ModelInkling",
+      "id": "thinkingmachines/Inkling",
+      "kind": "text",
+      "context_window": 524288,
+      "display_name": "Inkling"
+    },
+    {
+      "go_name": "ModelInklingSmall",
+      "id": "thinkingmachines/Inkling-Small",
+      "kind": "text",
+      "context_window": 524288,
+      "display_name": "Inkling Small"
+    },
+    {
+      "go_name": "ModelMuseGlimmer30B",
+      "id": "meta-models/Muse-Glimmer-30B",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Muse Glimmer 30B"
+    },
+    {
+      "go_name": "ModelNemotron35Lightning",
+      "id": "nvidia/NVIDIA-Nemotron-3.5-Lightning",
+      "kind": "text",
+      "context_window": 262144,
+      "display_name": "Nemotron 3.5 Lightning"
     }
   ]
 }

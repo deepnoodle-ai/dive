@@ -259,3 +259,16 @@ func TestSupportsReasoning(t *testing.T) {
 		})
 	}
 }
+
+func TestGPT61SolReasoning(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol", "openai/gpt-6.1-sol-pro"} {
+		effort, send := ResolveEffort("openai", model, llm.ReasoningEffortNone, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortLow, effort)
+		effort, send = ResolveEffort("openai", model, llm.ReasoningEffortMax, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortMax, effort)
+		assert.True(t, SupportsReasoning("openai", model))
+		assert.False(t, AcceptsTemperature("openai", model))
+	}
+}

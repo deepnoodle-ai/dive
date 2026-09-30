@@ -481,3 +481,50 @@ func TestThinkingDisabledOpus5AtHighEffortOK(t *testing.T) {
 	assert.NotNil(t, req.OutputConfig)
 	assert.Equal(t, "high", req.OutputConfig.Effort)
 }
+
+func TestSonnet55BetweenToolsDisable(t *testing.T) {
+	for _, effort := range []llm.ReasoningEffort{llm.ReasoningEffortLow, llm.ReasoningEffortHigh, llm.ReasoningEffortXHigh, llm.ReasoningEffortMax} {
+		t.Run(string(effort), func(t *testing.T) {
+			req := buildReq(t, ModelClaudeSonnet55,
+				llm.WithThinking(llm.ThinkingTypeDisabled),
+				llm.WithReasoningEffort(effort),
+				llm.WithThinkingDisplay(llm.ThinkingDisplayUpdates),
+				llm.WithTemperature(0.2))
+			assert.Equal(t, "between_tools", req.Thinking.Type)
+			assert.Empty(t, req.Thinking.Display)
+			assert.Nil(t, req.Thinking.BlockBinding)
+			assert.Equal(t, 0, req.Thinking.BudgetTokens)
+			assert.Nil(t, req.Temperature)
+			want := string(effort)
+			if effort == llm.ReasoningEffortXHigh || effort == llm.ReasoningEffortMax {
+				want = "high"
+			}
+			assert.Equal(t, want, req.OutputConfig.Effort)
+		})
+	}
+}
+
+func TestSonnet55AdaptiveKeepsMax(t *testing.T) {
+	req := buildReq(t, ModelClaudeSonnet55,
+		llm.WithReasoningEffort(llm.ReasoningEffortMax),
+		llm.WithReasoningBudget(4096),
+		llm.WithThinkingDisplay(llm.ThinkingDisplayUpdates))
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.Equal(t, "max", req.OutputConfig.Effort)
+	assert.Equal(t, string(llm.ThinkingDisplayUpdates), req.Thinking.Display)
+	assert.Equal(t, 0, req.Thinking.BudgetTokens)
+}
+
+func TestSonnet55RejectsForcedToolChoice(t *testing.T) {
+	for _, thinking := range []llm.ThinkingType{llm.ThinkingTypeDisabled, llm.ThinkingTypeAdaptive} {
+		for _, choice := range []llm.ToolChoiceType{llm.ToolChoiceTypeAny, llm.ToolChoiceTypeTool} {
+			cfg := &llm.Config{}
+			cfg.Apply(llm.WithModel(ModelClaudeSonnet55), llm.WithThinking(thinking),
+				llm.WithTools(reasoningTestTool()), llm.WithToolChoice(&llm.ToolChoice{Type: choice, Name: "lookup"}))
+			var req Request
+			err := New().applyRequestConfig(&req, cfg)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "tool_choice")
+		}
+	}
+}

@@ -374,7 +374,8 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 
 // resolveEffortMessages keeps effort messages (llm.NewEffortMessage) only for
 // models that take per-message effort, clamping each level to what the model
-// accepts. An effort message is history, not a request parameter: a session
+// accepts. Between-tools mode drops effort messages because it cannot change
+// effort mid-conversation. An effort message is history, not a request parameter: a session
 // that moves to another model carries it along, so there it is dropped with a
 // warning rather than failing the request. That includes unknown models, which
 // Dive cannot tell apart from an Anthropic-compatible server without the beta.
@@ -388,7 +389,7 @@ func resolveEffortMessages(messages []*llm.Message, model string, config *llm.Co
 			out = append(out, message)
 			continue
 		}
-		if !known || !caps.perMessageEffort {
+		if !known || !caps.perMessageEffort || (caps.betweenToolsDisable && config.Thinking == llm.ThinkingTypeDisabled) {
 			warnf(config, "model does not support per-message effort; skipping the effort message",
 				"model", model, "effort", message.Effort)
 			// Without its effort, a message with no content has nothing to send.
@@ -845,7 +846,7 @@ func applyReasoningConfig(req *Request, config *llm.Config, binding PrefixMismat
 		thinking = &Thinking{Type: "adaptive"}
 	}
 	if thinking != nil {
-		if thinking.Type != "disabled" {
+		if thinking.Type != "disabled" && thinking.Type != "between_tools" {
 			if config.ThinkingDisplay != "" {
 				thinking.Display = string(config.ThinkingDisplay)
 			}
@@ -937,6 +938,9 @@ func resolveThinking(model string, caps modelCapabilities, known bool, config *l
 
 	switch config.Thinking {
 	case llm.ThinkingTypeDisabled:
+		if known && caps.betweenToolsDisable {
+			return &Thinking{Type: "between_tools"}
+		}
 		// Fable 5, Mythos 5, and Opus 5.5 reject an explicit disable; omitting
 		// the parameter is the accepted way to ask them for less.
 		if known && !caps.explicitDisable {

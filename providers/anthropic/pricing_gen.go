@@ -6,6 +6,16 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	// Standard tier, including the full 1M context window.
+	ModelClaudeSonnet55: {
+		Model:           ModelClaudeSonnet55,
+		InputPrice:      2.00,
+		OutputPrice:     10.00,
+		CacheReadPrice:  0.20,
+		CacheWritePrice: 2.50,
+		Currency:        "USD",
+		UpdatedAt:       "2026-09-30",
+	},
 	ModelClaude35Haiku20241022: {
 		Model:       ModelClaude35Haiku20241022,
 		InputPrice:  0.80,

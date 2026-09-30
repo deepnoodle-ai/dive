@@ -8,6 +8,7 @@ import (
 
 const (
 	ModelGPT6Astra          openaisdk.ChatModel = "gpt-6-astra"
+	ModelGPT61Sol           openaisdk.ChatModel = "gpt-6.1-sol"
 	ModelGPT6Sol            openaisdk.ChatModel = "gpt-6-sol"
 	ModelGPT6Luna           openaisdk.ChatModel = "gpt-6-luna"
 	ModelGPT56                                  = "gpt-5.6"

@@ -158,6 +158,30 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
+	ModelGLM53: {
+		Model:          ModelGLM53,
+		InputPrice:     1.40,
+		OutputPrice:    4.40,
+		CacheReadPrice: 0.14,
+		Currency:       "USD",
+		UpdatedAt:      "2026-09-30",
+	},
+	// Free public preview.
+	ModelLeanstral15: {
+		Model:       ModelLeanstral15,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
+	// Free public preview; fixed snapshot of labs-leanstral-1-5.
+	ModelLeanstral151: {
+		Model:       ModelLeanstral151,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
 }
 
 // ImageModelPricing is generated from catalog.json.

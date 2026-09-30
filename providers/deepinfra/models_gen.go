@@ -3,14 +3,20 @@
 package deepinfra
 
 const (
-	ModelGLM53Flash      = "zai-org/GLM-5.3-Flash"
-	ModelGLM53           = "zai-org/GLM-5.3"
-	ModelQwen38Flash     = "Qwen/Qwen3.8-Flash"
-	ModelQwen38Max       = "Qwen/Qwen3.8-Max"
-	ModelQwen38A95B      = "Qwen/Qwen3.8-2.4T-A95B"
-	ModelQwen3827B       = "Qwen/Qwen3.8-27B"
-	ModelKimiK3          = "moonshotai/Kimi-K3"
-	ModelDeepSeekV4Flash = "deepseek-ai/DeepSeek-V4-Flash-0731"
+	ModelGLM53Flash          = "zai-org/GLM-5.3-Flash"
+	ModelGLM53               = "zai-org/GLM-5.3"
+	ModelQwen38Flash         = "Qwen/Qwen3.8-Flash"
+	ModelQwen38Max           = "Qwen/Qwen3.8-Max"
+	ModelQwen38A95B          = "Qwen/Qwen3.8-2.4T-A95B"
+	ModelQwen3827B           = "Qwen/Qwen3.8-27B"
+	ModelKimiK3              = "moonshotai/Kimi-K3"
+	ModelDeepSeekV4Flash     = "deepseek-ai/DeepSeek-V4-Flash-0731"
+	ModelMiMo26Pro           = "XiaomiMiMo/MiMo-V2.6-Pro"
+	ModelMiMo26Flash         = "XiaomiMiMo/MiMo-V2.6-Flash"
+	ModelInkling             = "thinkingmachines/Inkling"
+	ModelInklingSmall        = "thinkingmachines/Inkling-Small"
+	ModelMuseGlimmer30B      = "meta-models/Muse-Glimmer-30B"
+	ModelNemotron35Lightning = "nvidia/NVIDIA-Nemotron-3.5-Lightning"
 )
 
 // DefaultModel is generated from the catalog's default model.

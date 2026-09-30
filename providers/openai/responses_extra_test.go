@@ -155,7 +155,7 @@ func TestBuildRequestParams_GPT56PromptCaching(t *testing.T) {
 }
 
 func TestBuildRequestParams_GPT6PromptCaching(t *testing.T) {
-	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			provider := New(WithAPIKey("test"))
 			config := &llm.Config{}

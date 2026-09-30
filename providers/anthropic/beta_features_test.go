@@ -260,3 +260,23 @@ func TestOnlyDroppedEffortMessagesIsAnError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no messages to send")
 }
+
+func TestSonnet55DisabledDropsEffortMessages(t *testing.T) {
+	_, captured := generateCaptured(t, okResponse, nil,
+		llm.WithModel(ModelClaudeSonnet55), llm.WithThinking(llm.ThinkingTypeDisabled),
+		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
+		llm.WithMessages(llm.NewEffortMessage(llm.ReasoningEffortMax), llm.NewUserTextMessage("hi")))
+	assert.Equal(t, "between_tools", captured.body["thinking"].(map[string]any)["type"])
+	messages := captured.body["messages"].([]any)
+	assert.Equal(t, 1, len(messages))
+	assert.Equal(t, "user", messages[0].(map[string]any)["role"])
+}
+
+func TestSonnet55AdaptiveKeepsEffortMessages(t *testing.T) {
+	_, captured := generateCaptured(t, okResponse, nil,
+		llm.WithModel(ModelClaudeSonnet55), llm.WithThinking(llm.ThinkingTypeAdaptive),
+		llm.WithMessages(llm.NewUserTextMessage("hi"), llm.NewEffortMessage(llm.ReasoningEffortMax)))
+	messages := captured.body["messages"].([]any)
+	assert.Equal(t, 2, len(messages))
+	assert.Equal(t, "max", messages[1].(map[string]any)["output_config"].(map[string]any)["effort"])
+}

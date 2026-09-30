@@ -3,6 +3,13 @@
 package openrouter
 
 const (
+	ModelClaudeSonnet55     = "anthropic/claude-sonnet-5.5"
+	ModelGPT61Sol           = "openai/gpt-6.1-sol"
+	ModelGPT61SolPro        = "openai/gpt-6.1-sol-pro"
+	ModelGPT6Astra          = "openai/gpt-6-astra"
+	ModelGPT6AstraPro       = "openai/gpt-6-astra-pro"
+	ModelGPT6SolPro         = "openai/gpt-6-sol-pro"
+	ModelGPT6LunaPro        = "openai/gpt-6-luna-pro"
 	ModelClaudeFable51      = "anthropic/claude-fable-5.1"
 	ModelClaudeFable5       = "anthropic/claude-fable-5"
 	ModelClaudeSonnet5      = "anthropic/claude-sonnet-5"

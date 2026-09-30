@@ -310,6 +310,8 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			params.ServiceTier = responses.ResponseNewParamsServiceTierDefault
 		case "flex":
 			params.ServiceTier = responses.ResponseNewParamsServiceTierFlex
+		case "priority", "fast", "ultrafast":
+			params.ServiceTier = responses.ResponseNewParamsServiceTier(config.ServiceTier)
 		default:
 			return responses.ResponseNewParams{},
 				fmt.Errorf("invalid service tier: %s", config.ServiceTier)
@@ -476,6 +478,7 @@ var explicitPromptCachingModels = []string{
 	"gpt-5.6",
 	"gpt-6-astra",
 	"gpt-6-sol",
+	"gpt-6.1-sol",
 	"gpt-6-luna",
 }
 

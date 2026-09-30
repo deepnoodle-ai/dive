@@ -18,6 +18,8 @@ const (
 	ModelGemini38Live                  = "gemini-3.8-live"
 	ModelGemini38LiveExtendedThinking  = "gemini-3.8-live-extended-thinking"
 	ModelGemini31FlashLivePreview      = "gemini-3.1-flash-live-preview"
+	ModelGemini38FlashTTS              = "gemini-3.8-flash-tts"
+	ModelGemini38FlashLiteTTS          = "gemini-3.8-flash-lite-tts"
 	ModelGemini31FlashTTSPreview       = "gemini-3.1-flash-tts-preview"
 	ModelGemini31FlashLiteImage        = "gemini-3.1-flash-lite-image"
 	ModelGemini31FlashImage            = "gemini-3.1-flash-image"

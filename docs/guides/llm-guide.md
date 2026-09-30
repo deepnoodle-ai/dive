@@ -9,12 +9,25 @@ Dive supports multiple LLM providers through a unified interface. Each provider 
 ```go
 import "github.com/deepnoodle-ai/dive/providers/anthropic"
 
-model := anthropic.New() // defaults to claude-opus-4-8
+model := anthropic.New() // defaults to claude-sonnet-5
 ```
 
 **Env:** `ANTHROPIC_API_KEY`
-**Models:** See `providers/anthropic/models.go` for available models.
+**Models:** See `providers/anthropic/models_gen.go` for available models.
 **Features:** Streaming, tool calling, prompt caching, reasoning control
+
+Select Claude Sonnet 5.5 with `anthropic.WithModel(anthropic.ModelClaudeSonnet55)`.
+The library default remains Sonnet 5; the CLI recommends Sonnet 5.5.
+On Sonnet 5.5, `llm.WithThinking(llm.ThinkingTypeDisabled)` sends `between_tools`:
+up-front thinking stops, but progress updates between tool calls remain.
+Dive caps effort at `high` in this mode, omits display/binding options, and drops
+per-message effort changes with a warning. Adaptive thinking accepts effort
+through `max` and per-message effort. Forced tool choices (`any` or a named tool)
+are rejected locally in either mode. Keep the model's thinking blocks unchanged
+and its conversation history append-only; switching models or editing earlier
+history can invalidate those blocks.
+
+See [Sonnet 5.5 migration guidance](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide).
 
 A streamed Anthropic response keeps its server tool blocks (web search calls
 and results, code execution results and the like) in the message, as `Generate`
@@ -30,8 +43,20 @@ model := openai.New() // defaults to gpt-6-luna
 ```
 
 **Env:** `OPENAI_API_KEY`
-**Models:** See `providers/openai/models.go` for available models.
+**Models:** See `providers/openai/models_gen.go` for available models.
 **Features:** Streaming, tool calling, vision input, reasoning effort
+
+Select GPT-6.1 Sol with `openai.WithModel(openai.ModelGPT61Sol)`.
+Use this Responses provider for tool calling. GPT-6.1 Sol accepts `low` through
+`max` effort; Dive adjusts `none` and `minimal` to `low` and omits temperature.
+Its standard price includes a 5% cached-input rate. Prompts above 272K input
+tokens use the catalog's long-context rates for the full request.
+
+`llm.WithServiceTier` also accepts `priority`, `fast`, and `ultrafast`.
+[Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
+is generally available for GPT-6 Astra; availability for other models depends
+on OpenAI. Dive's catalog cost estimates use standard-tier rates and do not
+include the service-tier premium.
 
 ### DeepInfra
 
@@ -71,12 +96,18 @@ DeepInfra's [retained cache windows](https://docs.deepinfra.com/chat/prompt-cach
 ```go
 import "github.com/deepnoodle-ai/dive/providers/google"
 
-model := google.New() // defaults to gemini-2.5-pro
+model := google.New() // defaults to gemini-3.8-flash
 ```
 
 **Env:** `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-**Models:** See `providers/google/models.go` for available models.
+**Models:** See `providers/google/models_gen.go` for available models.
 **Features:** Streaming, tool calling, multimodal
+
+Gemini 4 Argon has been announced with phased tester access, but Google has not
+published a public Gemini API model ID. Dive does not guess one. Check the
+[announcement](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)
+and [Gemini API model list](https://ai.google.dev/gemini-api/docs/models) before
+selecting it.
 
 ### Grok (X.AI)
 
@@ -87,7 +118,7 @@ model := grok.New()
 ```
 
 **Env:** `GROK_API_KEY`
-**Models:** See `providers/grok/models.go` for available models.
+**Models:** See `providers/grok/models_gen.go` for available models.
 
 ### Mistral
 
@@ -98,7 +129,9 @@ model := mistral.New()
 ```
 
 **Env:** `MISTRAL_API_KEY`
-**Models:** See `providers/mistral/models.go` for available models.
+**Models:** See `providers/mistral/models_gen.go` for available models.
+The catalog includes `zai-glm-5-3` and the free Leanstral 1.5 preview, including
+its `labs-leanstral-1-5-1` snapshot.
 
 ### Ollama (Local)
 
@@ -109,7 +142,10 @@ model := ollama.New()
 ```
 
 No API key needed. Requires Ollama running locally.
-Use any model available in your local Ollama installation.
+Use any model available in your local Ollama installation. The catalog includes
+Qwen3.8, Qwen3.8 Flash Next (MLX), Muse Glimmer, and Nemotron 3.5 Lightning.
+GLM 5.3, GLM 5.3 Flash, DeepSeek V4.1 Flash, and Kimi K3 entries use explicit
+`:cloud` IDs; their costs are not recorded as free local inference.
 
 ### OpenRouter
 

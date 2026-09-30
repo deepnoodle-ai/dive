@@ -365,7 +365,7 @@ func (p *MediaProvider) TextToSpeech(ctx context.Context, text string, config *m
 
 	model := config.Model
 	if model == "" {
-		model = "gemini-3.1-flash-tts-preview"
+		model = ModelGemini38FlashLiteTTS
 	}
 
 	format := config.AudioFormat

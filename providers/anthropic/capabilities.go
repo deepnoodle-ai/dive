@@ -34,6 +34,10 @@ type modelCapabilities struct {
 	// Fable 5 and Mythos 5 reject it; for them thinking is omitted instead.
 	explicitDisable bool
 
+	// betweenToolsDisable maps an explicit disable to Sonnet 5.5's lowest
+	// thinking mode. It still produces progress updates between tool calls.
+	betweenToolsDisable bool
+
 	// thinkingOnByDefault reports whether omitting the thinking parameter still
 	// leaves thinking active. These models need an explicit disable to turn it
 	// off, where omission suffices everywhere else.
@@ -179,6 +183,14 @@ var modelCapabilityTable = []capabilityEntry{
 	{prefix: "claude-sonnet-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
 		thinkingOnByDefault: true,
+	}},
+	// Verified against the Claude API on 2026-09-30. Sonnet 5.5 replaces
+	// disabled with between_tools, caps that mode at high effort, and rejects
+	// forced tool use even in that mode.
+	{prefix: "claude-sonnet-5-5", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, betweenToolsDisable: true,
+		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
+		perMessageEffort: true,
 	}},
 	// Fable 5 and Mythos 5 always think and reject an explicit disable, so
 	// Dive omits the thinking parameter for them instead. The 5.1 point
