@@ -21,9 +21,11 @@ The library default remains Sonnet 5; the CLI recommends Sonnet 5.5.
 On Sonnet 5.5, `llm.WithThinking(llm.ThinkingTypeDisabled)` sends `between_tools`:
 up-front thinking stops, but progress updates between tool calls remain.
 Dive caps effort at `high` in this mode and omits display/binding options.
-Historical per-message effort entries remain unchanged. If any entry differs
-from the resolved request effort, Dive rejects the mode change locally; keep
-adaptive thinking for that conversation. Adaptive thinking accepts effort
+Historical per-message effort entries retain their previously serialized values
+(for example, `minimal` is sent as `low`); the caller's transcript stays unchanged.
+If any serialized entry differs from the resolved request effort, Dive rejects
+the mode change locally; keep adaptive thinking for that conversation. Adaptive
+thinking accepts effort
 through `max` and per-message effort. Forced tool choices (`any` or a named tool)
 are rejected locally in either mode. Keep the model's thinking blocks unchanged
 and its conversation history append-only; switching models or editing earlier

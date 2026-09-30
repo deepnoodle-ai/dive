@@ -278,6 +278,9 @@ func TestSonnet55ThinkingModeChangePreservesEffortHistory(t *testing.T) {
 		{"default high", []llm.ReasoningEffort{llm.ReasoningEffortHigh}, "", false},
 		{"capped request", []llm.ReasoningEffort{llm.ReasoningEffortHigh}, llm.ReasoningEffortMax, false},
 		{"same low", []llm.ReasoningEffort{llm.ReasoningEffortLow}, llm.ReasoningEffortLow, false},
+		{"minimal history at low", []llm.ReasoningEffort{llm.ReasoningEffortMinimal}, llm.ReasoningEffortLow, false},
+		{"minimal history at minimal", []llm.ReasoningEffort{llm.ReasoningEffortMinimal}, llm.ReasoningEffortMinimal, false},
+		{"none history at low", []llm.ReasoningEffort{llm.ReasoningEffortNone}, llm.ReasoningEffortLow, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -298,6 +301,9 @@ func TestSonnet55ThinkingModeChangePreservesEffortHistory(t *testing.T) {
 				llm.WithThinking(llm.ThinkingTypeAdaptive), llm.WithMessages(messages...), llm.WithCaching(false))
 			assert.NoError(t, err)
 			originalPrefix := captured["messages"].([]any)
+			if tc.history[0] == llm.ReasoningEffortMinimal || tc.history[0] == llm.ReasoningEffortNone {
+				assert.Equal(t, "low", originalPrefix[1].(map[string]any)["output_config"].(map[string]any)["effort"])
+			}
 			messages = append(messages, response.Message(), llm.NewUserTextMessage("Next step?"))
 			original, err := json.Marshal(messages)
 			assert.NoError(t, err)
