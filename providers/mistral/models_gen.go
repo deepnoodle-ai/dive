@@ -32,6 +32,9 @@ const (
 	ModelMistral7B           = "open-mistral-7b"
 	ModelMixtral8x7B         = "open-mixtral-8x7b"
 	ModelMixtral8x22B        = "open-mixtral-8x22b"
+	ModelGLM53               = "zai-glm-5-3"
+	ModelLeanstral15         = "labs-leanstral-1-5"
+	ModelLeanstral151        = "labs-leanstral-1-5-1"
 )
 
 // DefaultModel is generated from the catalog's default model.

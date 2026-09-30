@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -259,4 +260,91 @@ func TestOnlyDroppedEffortMessagesIsAnError(t *testing.T) {
 	_, err = provider.Stream(context.Background(), opts...)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no messages to send")
+}
+
+// Signed thinking binds the effort messages from the preceding turn. A mode
+// change must preserve them or fail before HTTP, including on streaming calls.
+func TestSonnet55ThinkingModeChangePreservesEffortHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		history   []llm.ReasoningEffort
+		requested llm.ReasoningEffort
+		reject    bool
+	}{
+		{"max history", []llm.ReasoningEffort{llm.ReasoningEffortMax}, llm.ReasoningEffortHigh, true},
+		{"changed history", []llm.ReasoningEffort{llm.ReasoningEffortLow, llm.ReasoningEffortHigh}, llm.ReasoningEffortHigh, true},
+		{"request changes level", []llm.ReasoningEffort{llm.ReasoningEffortHigh}, llm.ReasoningEffortLow, true},
+		{"same high", []llm.ReasoningEffort{llm.ReasoningEffortHigh}, llm.ReasoningEffortHigh, false},
+		{"default high", []llm.ReasoningEffort{llm.ReasoningEffortHigh}, "", false},
+		{"capped request", []llm.ReasoningEffort{llm.ReasoningEffortHigh}, llm.ReasoningEffortMax, false},
+		{"same low", []llm.ReasoningEffort{llm.ReasoningEffortLow}, llm.ReasoningEffortLow, false},
+		{"minimal history at low", []llm.ReasoningEffort{llm.ReasoningEffortMinimal}, llm.ReasoningEffortLow, false},
+		{"minimal history at minimal", []llm.ReasoningEffort{llm.ReasoningEffortMinimal}, llm.ReasoningEffortMinimal, false},
+		{"none history at low", []llm.ReasoningEffort{llm.ReasoningEffortNone}, llm.ReasoningEffortLow, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			var captured map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&captured))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"thinking","thinking":"Plan","signature":"signed-prefix"},{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":1}}`)
+			}))
+			defer server.Close()
+			provider := New(WithEndpoint(server.URL), WithAPIKey("test-key"))
+			messages := []*llm.Message{llm.NewUserTextMessage("Plan the migration.")}
+			for _, effort := range tc.history {
+				messages = append(messages, llm.NewEffortMessage(effort), llm.NewUserTextMessage("Continue."))
+			}
+			response, err := provider.Generate(context.Background(), llm.WithModel(ModelClaudeSonnet55),
+				llm.WithThinking(llm.ThinkingTypeAdaptive), llm.WithMessages(messages...), llm.WithCaching(false))
+			assert.NoError(t, err)
+			originalPrefix := captured["messages"].([]any)
+			if tc.history[0] == llm.ReasoningEffortMinimal || tc.history[0] == llm.ReasoningEffortNone {
+				assert.Equal(t, "low", originalPrefix[1].(map[string]any)["output_config"].(map[string]any)["effort"])
+			}
+			messages = append(messages, response.Message(), llm.NewUserTextMessage("Next step?"))
+			original, err := json.Marshal(messages)
+			assert.NoError(t, err)
+			opts := []llm.Option{llm.WithModel(ModelClaudeSonnet55), llm.WithThinking(llm.ThinkingTypeDisabled),
+				llm.WithReasoningEffort(tc.requested), llm.WithMessages(messages...), llm.WithCaching(false)}
+			_, err = provider.Generate(context.Background(), opts...)
+			if tc.reject {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "Keep adaptive thinking to preserve conversation history")
+				_, err = provider.Stream(context.Background(), opts...)
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "Keep adaptive thinking to preserve conversation history")
+				assert.Equal(t, int32(1), calls.Load())
+				// Rejection leaves the conversation usable under adaptive thinking.
+				_, err = provider.Generate(context.Background(), llm.WithModel(ModelClaudeSonnet55),
+					llm.WithThinking(llm.ThinkingTypeAdaptive), llm.WithMessages(messages...), llm.WithCaching(false))
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, int32(2), calls.Load())
+			expectedMode := "between_tools"
+			if tc.reject {
+				expectedMode = "adaptive"
+			}
+			assert.Equal(t, expectedMode, captured["thinking"].(map[string]any)["type"])
+			replayed := captured["messages"].([]any)
+			assert.Equal(t, originalPrefix, replayed[:len(originalPrefix)])
+			thinking := replayed[len(originalPrefix)].(map[string]any)["content"].([]any)[0].(map[string]any)
+			assert.Equal(t, "signed-prefix", thinking["signature"])
+			assert.Equal(t, "Plan", thinking["thinking"])
+			unchanged, err := json.Marshal(messages)
+			assert.NoError(t, err)
+			assert.Equal(t, string(original), string(unchanged))
+		})
+	}
+}
+
+func TestSonnet55AdaptiveKeepsEffortMessages(t *testing.T) {
+	_, captured := generateCaptured(t, okResponse, nil,
+		llm.WithModel(ModelClaudeSonnet55), llm.WithThinking(llm.ThinkingTypeAdaptive),
+		llm.WithMessages(llm.NewUserTextMessage("hi"), llm.NewEffortMessage(llm.ReasoningEffortMax)))
+	messages := captured.body["messages"].([]any)
+	assert.Equal(t, 2, len(messages))
+	assert.Equal(t, "max", messages[1].(map[string]any)["output_config"].(map[string]any)["effort"])
 }

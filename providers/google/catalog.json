@@ -140,6 +140,20 @@
       "display_name": "Gemini 3.1 Flash"
     },
     {
+      "go_name": "ModelGemini38FlashTTS",
+      "id": "gemini-3.8-flash-tts",
+      "kind": "audio",
+      "context_window": 8192,
+      "display_name": "Gemini 3.8 Flash TTS"
+    },
+    {
+      "go_name": "ModelGemini38FlashLiteTTS",
+      "id": "gemini-3.8-flash-lite-tts",
+      "kind": "audio",
+      "context_window": 8192,
+      "display_name": "Gemini 3.8 Flash-Lite TTS"
+    },
+    {
       "go_name": "ModelGemini31FlashTTSPreview",
       "id": "gemini-3.1-flash-tts-preview",
       "kind": "audio",

@@ -147,6 +147,9 @@ var openAITable = Table{
 	// none. Temperature is rejected unless effort is none, the same as gpt-5.6,
 	// so it is recorded as refused.
 	{Prefix: "gpt-6-sol", Caps: Capabilities{Efforts: effortsNoneToMax}},
+	// GPT-6.1 Sol rejects none and minimal, unlike GPT-6 Sol. Verified
+	// against the Responses API on 2026-09-30; temperature is also rejected.
+	{Prefix: "gpt-6.1-sol", Caps: Capabilities{Efforts: effortsLowToMax}},
 	{Prefix: "gpt-6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
 
 	{Prefix: "o3", Caps: Capabilities{Efforts: effortsLowToHigh}},

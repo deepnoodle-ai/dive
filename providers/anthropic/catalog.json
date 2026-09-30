@@ -27,6 +27,10 @@
         "/api/(?:beta-headers|models)",
         "/release-notes/"
       ]
+    },
+    {
+      "name": "sonnet-5-5",
+      "url": "https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5"
     }
   ],
   "models": [
@@ -190,19 +194,37 @@
       "display_name": "Mythos 5"
     },
     {
-      "go_name": "ModelClaudeSonnet5",
-      "id": "claude-sonnet-5",
-      "default": true,
+      "go_name": "ModelClaudeSonnet55",
+      "id": "claude-sonnet-5-5",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Sonnet 5",
+      "display_name": "Sonnet 5.5",
       "recommended": true,
       "cli_order": 3,
       "description": "Best combination of speed and intelligence"
+    },
+    {
+      "go_name": "ModelClaudeSonnet5",
+      "id": "claude-sonnet-5",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Sonnet 5",
+      "description": "Best combination of speed and intelligence",
+      "default": true
     }
   ],
   "pricing": {
     "text": [
+      {
+        "model": "claude-sonnet-5-5",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "10.00",
+        "currency": "USD",
+        "updated_at": "2026-09-30",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "cache_write_price_per_1m_tokens": "2.50",
+        "note": "Standard tier, including the full 1M context window."
+      },
       {
         "model": "claude-3-5-haiku-20241022",
         "input_price_per_1m_tokens": "0.80",

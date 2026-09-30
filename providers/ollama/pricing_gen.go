@@ -70,6 +70,54 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-08-09",
 	},
+	// Runs locally; no per-token API charge. Hardware and electricity costs excluded.
+	ModelMuseGlimmer: {
+		Model:       ModelMuseGlimmer,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
+	// Runs locally; no per-token API charge. Hardware and electricity costs excluded.
+	ModelMuseGlimmer30B: {
+		Model:       ModelMuseGlimmer30B,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
+	// Runs locally; no per-token API charge. Hardware and electricity costs excluded.
+	ModelNemotron35Lightning: {
+		Model:       ModelNemotron35Lightning,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
+	// Runs locally; no per-token API charge. Hardware and electricity costs excluded.
+	ModelQwen38: {
+		Model:       ModelQwen38,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
+	// Runs locally; no per-token API charge. Hardware and electricity costs excluded.
+	ModelQwen38_27B: {
+		Model:       ModelQwen38_27B,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
+	// Runs locally; no per-token API charge. Hardware and electricity costs excluded.
+	ModelQwen38FlashNext125BMLX: {
+		Model:       ModelQwen38FlashNext125BMLX,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-09-30",
+	},
 }
 
 // ImageModelPricing is generated from catalog.json.

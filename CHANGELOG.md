@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Latest model catalogs.** GPT-6.1 Sol, Claude Sonnet 5.5, Gemini 3.8 TTS,
+  GLM 5.3 and Leanstral on Mistral, plus new DeepInfra, Ollama, and OpenRouter routes.
+- **OpenAI service tiers.** `WithServiceTier` accepts `priority`, `fast`, and
+  `ultrafast`; catalog cost estimates continue to use standard-tier rates.
+
+### Changed
+
+- **Model request compatibility.** Sonnet 5.5 uses `between_tools` for disabled
+  thinking and rejects incompatible effort history without rewriting it.
+  GPT-6.1 Sol uses `low` through `max` effort and explicit prompt caching.
+- **Google speech default.** Direct speech-provider calls use Gemini 3.8
+  Flash-Lite TTS. OpenRouter catalog rates reflect current public listings.
+
 ## [1.34.0] - 2026-09-25
 
 ### Added

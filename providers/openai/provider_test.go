@@ -659,3 +659,20 @@ func TestConvertResponseBasicFields(t *testing.T) {
 	assert.Equal(t, 12, result.Usage.OutputTokens)
 	assert.Equal(t, 3, result.Usage.CacheReadInputTokens)
 }
+
+func TestServiceTierSerialization(t *testing.T) {
+	for _, tier := range []string{"auto", "default", "flex", "priority", "fast", "ultrafast"} {
+		t.Run(tier, func(t *testing.T) {
+			cfg := &llm.Config{}
+			cfg.Apply(llm.WithServiceTier(tier), llm.WithMessages(llm.NewUserTextMessage("hi")))
+			params, err := New(WithAPIKey("test-key")).buildRequestParams(cfg)
+			assert.NoError(t, err)
+			body, err := json.Marshal(params)
+			assert.NoError(t, err)
+			assert.Contains(t, string(body), `"service_tier":"`+tier+`"`)
+		})
+	}
+	cfg := &llm.Config{ServiceTier: "typo"}
+	_, err := New(WithAPIKey("test-key")).buildRequestParams(cfg)
+	assert.Error(t, err)
+}

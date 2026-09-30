@@ -24,6 +24,22 @@ var TextModelPricing = map[string]llm.PricingInfo{
 	},
 	// Standard tier. Above 272K input tokens, input, cache read, and
 	// cache write rates double and output is 1.5x.
+	ModelGPT61Sol: {
+		Model:                      ModelGPT61Sol,
+		InputPrice:                 2.00,
+		OutputPrice:                10.00,
+		LongContextInputPrice:      4.00,
+		LongContextCacheReadPrice:  0.20,
+		LongContextOutputPrice:     15.00,
+		CacheReadPrice:             0.10,
+		CacheWritePrice:            2.50,
+		LongContextCacheWritePrice: 5.00,
+		LongContextThreshold:       272001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-09-30",
+	},
+	// Standard tier. Above 272K input tokens, input, cache read, and
+	// cache write rates double and output is 1.5x.
 	ModelGPT6Sol: {
 		Model:                      ModelGPT6Sol,
 		InputPrice:                 2.00,

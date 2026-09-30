@@ -140,12 +140,16 @@ path, err := result.WriteTo("welcome")
 fmt.Printf("Saved: %s (%s, %s)\n", path, result.Format, result.MimeType)
 ```
 
+Gemini TTS uses Gemini 3.8 Flash-Lite TTS when a provider call omits the model.
+The 3.8 Flash and Flash-Lite TTS models use the existing speech API schema.
+Their audio-output pricing is not included in Dive's text-price tables.
+
 Gemini TTS returns PCM audio from the API; Dive wraps it as WAV by default so
 `WriteTo("welcome")` produces a playable `.wav` file:
 
 ```go
 result, err := media.TextToSpeech(ctx, "Say cheerfully: Have a wonderful day!",
-    media.WithModel("gemini-3.1-flash-tts-preview"),
+    media.WithModel("gemini-3.8-flash-lite-tts"),
     media.WithVoice("Kore"),
     media.WithAudioFormat(media.AudioFormatWAV),
 )
@@ -202,10 +206,10 @@ result, err := media.Transcribe(ctx, audio,
 
 ### Text-to-Speech Models
 
-| Provider | Models                                                                                       |
-| -------- | -------------------------------------------------------------------------------------------- |
-| OpenAI   | `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`                                                       |
-| Google   | `gemini-3.1-flash-tts-preview`, `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts` |
+| Provider | Models                                              |
+| -------- | --------------------------------------------------- |
+| OpenAI   | `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`              |
+| Google   | `gemini-3.8-flash-tts`, `gemini-3.8-flash-lite-tts` |
 
 ### Transcription Models
 
