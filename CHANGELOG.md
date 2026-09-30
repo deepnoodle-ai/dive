@@ -16,7 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - **Model request compatibility.** Sonnet 5.5 uses `between_tools` for disabled
-  thinking; GPT-6.1 Sol uses `low` through `max` effort and explicit prompt caching.
+  thinking and rejects incompatible effort history without rewriting it.
+  GPT-6.1 Sol uses `low` through `max` effort and explicit prompt caching.
 - **Google speech default.** Direct speech-provider calls use Gemini 3.8
   Flash-Lite TTS. OpenRouter catalog rates reflect current public listings.
 

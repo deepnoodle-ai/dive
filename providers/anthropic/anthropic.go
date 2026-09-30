@@ -86,7 +86,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
-	msgs, err = resolveEffortMessages(msgs, request.Model, config)
+	msgs, err = resolveEffortMessages(msgs, &request, config)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-	msgs, err = resolveEffortMessages(msgs, request.Model, config)
+	msgs, err = resolveEffortMessages(msgs, &request, config)
 	if err != nil {
 		return nil, err
 	}
@@ -374,22 +374,38 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 
 // resolveEffortMessages keeps effort messages (llm.NewEffortMessage) only for
 // models that take per-message effort, clamping each level to what the model
-// accepts. Between-tools mode drops effort messages because it cannot change
-// effort mid-conversation. An effort message is history, not a request parameter: a session
+// accepts. Between-tools mode preserves effort messages and rejects levels that
+// differ from the request effort, because rewriting them can invalidate signed
+// thinking. An effort message is history, not a request parameter: a session
 // that moves to another model carries it along, so there it is dropped with a
 // warning rather than failing the request. That includes unknown models, which
 // Dive cannot tell apart from an Anthropic-compatible server without the beta.
 // The messages are convertMessages' copies, so they are edited in place. It
 // fails when only dropped effort messages were given, leaving nothing to send.
-func resolveEffortMessages(messages []*llm.Message, model string, config *llm.Config) ([]*llm.Message, error) {
+func resolveEffortMessages(messages []*llm.Message, req *Request, config *llm.Config) ([]*llm.Message, error) {
+	model := req.Model
 	caps, known := lookupCapabilities(model)
+	if known && caps.betweenToolsDisable && req.Thinking != nil && req.Thinking.Type == "between_tools" {
+		// Sonnet 5.5 defaults to high effort. Use the resolved request effort,
+		// including its disabled-mode cap, instead of the caller's raw setting.
+		effort := string(llm.ReasoningEffortHigh)
+		if req.OutputConfig != nil {
+			effort = req.OutputConfig.Effort
+		}
+		for _, message := range messages {
+			if message.Effort != "" && string(message.Effort) != effort {
+				return nil, fmt.Errorf("model %q cannot use between_tools with per-message effort %q differing from request effort %q. Keep adaptive thinking to preserve conversation history", model, message.Effort, effort)
+			}
+		}
+		return messages, nil
+	}
 	out := messages[:0]
 	for _, message := range messages {
 		if message.Effort == "" {
 			out = append(out, message)
 			continue
 		}
-		if !known || !caps.perMessageEffort || (caps.betweenToolsDisable && config.Thinking == llm.ThinkingTypeDisabled) {
+		if !known || !caps.perMessageEffort {
 			warnf(config, "model does not support per-message effort; skipping the effort message",
 				"model", model, "effort", message.Effort)
 			// Without its effort, a message with no content has nothing to send.
