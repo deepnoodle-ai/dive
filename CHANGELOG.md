@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.35.0] - 2026-09-30
+
 ### Added
 
 - **Latest model catalogs.** GPT-6.1 Sol, Claude Sonnet 5.5, Gemini 3.8 TTS,
