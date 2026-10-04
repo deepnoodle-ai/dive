@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 
@@ -16,6 +17,9 @@ const (
 	monitorDefaultTimeoutMs = 300_000
 	monitorMaxTimeoutMs     = 3_600_000
 	monitorBatchWindow      = 200 * time.Millisecond
+	// monitorMaxLineBytes caps one notification line. The rest of a longer
+	// line is dropped, and the stream goes on.
+	monitorMaxLineBytes = 64 * 1024
 )
 
 // MonitorToolInput is the input for the Monitor tool.
@@ -151,14 +155,7 @@ func (t *monitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 		go func() {
 			defer close(scanDone)
 			defer close(linesCh)
-			scanner := bufio.NewScanner(stdout)
-			for scanner.Scan() {
-				select {
-				case linesCh <- scanner.Text():
-				case <-cancelCtx.Done():
-					return
-				}
-			}
+			readMonitorLines(cancelCtx, stdout, monitorMaxLineBytes, linesCh)
 		}()
 
 		var totalLines int
@@ -183,6 +180,58 @@ func (t *monitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 		"Monitor started\nTask ID: %s\nDescription: %s\nTimeout: %s\n\nNotifications will arrive automatically. Use TaskStop(%s) to cancel early.",
 		taskID, input.Description, timeout, taskID,
 	)).WithDisplay(fmt.Sprintf("Monitor started: %s", input.Description)), nil
+}
+
+// readMonitorLines sends each line of r to linesCh until r ends or ctx is
+// cancelled. A line longer than limit bytes is cut short and marked, so one
+// long line neither ends the stream nor stalls the command on a full pipe.
+// A read error is sent as a final line.
+func readMonitorLines(ctx context.Context, r io.Reader, limit int, linesCh chan<- string) {
+	br := bufio.NewReader(r)
+	var line []byte
+	truncated := false
+	send := func(s string) bool {
+		select {
+		case linesCh <- s:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for {
+		chunk, isPrefix, err := br.ReadLine()
+		if len(chunk) > 0 {
+			if room := limit - len(line); room >= len(chunk) {
+				line = append(line, chunk...)
+			} else {
+				line = append(line, chunk[:max(room, 0)]...)
+				truncated = true
+			}
+		}
+		if err != nil {
+			if len(line) > 0 && !send(monitorLine(line, truncated)) {
+				return
+			}
+			if err != io.EOF {
+				send(fmt.Sprintf("[Monitor error: reading output: %s]", err))
+			}
+			return
+		}
+		if isPrefix {
+			continue
+		}
+		if !send(monitorLine(line, truncated)) {
+			return
+		}
+		line, truncated = line[:0], false
+	}
+}
+
+func monitorLine(line []byte, truncated bool) string {
+	if truncated {
+		return string(line) + " [line truncated]"
+	}
+	return string(line)
 }
 
 // monitorBatchLines reads from linesCh, batches lines that arrive within window,

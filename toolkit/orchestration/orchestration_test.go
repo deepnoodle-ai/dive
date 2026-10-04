@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -397,4 +398,46 @@ func TestMonitorTool(t *testing.T) {
 		sres, _ := stop.Call(ctx, &TaskStopToolInput{TaskID: id})
 		assert.Contains(t, sres.Content[0].Text, "cancelled")
 	})
+
+	t.Run("a long line does not end the stream", func(t *testing.T) {
+		var mu sync.Mutex
+		var lines []string
+		done := make(chan struct{})
+		tool := NewMonitorTool(MonitorToolOptions{NotifyCallback: func(_ string, batch []string) {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, l := range batch {
+				if strings.HasPrefix(l, "[Monitor done") {
+					close(done)
+				}
+				lines = append(lines, l)
+			}
+		}})
+		// A 200 KB line, then more output than a pipe buffer holds.
+		cmd := `head -c 200000 /dev/zero | tr '\0' x; echo; seq 1 20000`
+		_, err := tool.Call(ctx, &MonitorToolInput{Command: cmd, Description: "long", TimeoutMs: 20_000})
+		assert.NoError(t, err)
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Fatal("monitor did not finish")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		assert.True(t, strings.HasSuffix(lines[0], " [line truncated]"))
+		assert.Equal(t, len(lines[0]), monitorMaxLineBytes+len(" [line truncated]"))
+		assert.Equal(t, lines[len(lines)-2], "20000")
+		assert.Contains(t, lines[len(lines)-1], "20001 lines delivered")
+	})
+}
+
+func TestReadMonitorLines(t *testing.T) {
+	ch := make(chan string, 10)
+	readMonitorLines(context.Background(), strings.NewReader("short\n"+strings.Repeat("y", 50)+"\nlast"), 10, ch)
+	close(ch)
+	var got []string
+	for l := range ch {
+		got = append(got, l)
+	}
+	assert.Equal(t, got, []string{"short", "yyyyyyyyyy [line truncated]", "last"})
 }
