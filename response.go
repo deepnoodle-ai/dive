@@ -257,6 +257,11 @@ type ResponseItem struct {
 	// ToolCall is set if the response item is a tool call
 	ToolCall *llm.ToolUseContent `json:"tool_call,omitempty"`
 
+	// ToolCallPreview is set on a tool call item when the tool implements
+	// ToolPreviewer, so a UI can show what the call is doing before it
+	// finishes. It is the same preview later set on ToolCallResult.Preview.
+	ToolCallPreview *ToolCallPreview `json:"tool_call_preview,omitempty"`
+
 	// ToolCallResult is set if the response item is a tool call result
 	ToolCallResult *ToolCallResult `json:"tool_call_result,omitempty"`
 

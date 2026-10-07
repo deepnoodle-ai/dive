@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   the CLI's fast-model slot from Haiku 4.5.
 - **Mistral Large 4 and Medium 3.5.** `mistral.ModelMistralLarge4` (preview),
   `mistral.ModelMistralMedium35`, and `openrouter.ModelMistralLarge4`.
+- **Tool previews on tool call events.** `ResponseItem.ToolCallPreview` carries
+  the `ToolPreviewer` summary when a call starts, not only on its result.
 
 ### Changed
 
