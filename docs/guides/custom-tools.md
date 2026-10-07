@@ -301,6 +301,10 @@ func (t *MyTool) PreviewCall(ctx context.Context, input MyInput) *dive.ToolCallP
 }
 ```
 
+The preview is set on the `ResponseItemTypeToolCall` event as
+`item.ToolCallPreview`, so a UI can show "Process foo" while the call runs. The
+same preview is also set on `ToolCallResult.Preview`.
+
 ## Best Practices
 
 1. **Use `FuncTool` for simple tools** — Less boilerplate, auto-generated schema

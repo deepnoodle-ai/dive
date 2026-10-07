@@ -231,6 +231,68 @@ func TestResponseItemsContainToolCalls(t *testing.T) {
 	assert.Equal(t, resp.OutputText(), "Done")
 }
 
+// previewTool is a mockTool that also implements ToolPreviewer.
+type previewTool struct{ mockTool }
+
+func (t *previewTool) PreviewCall(ctx context.Context, input any) *ToolCallPreview {
+	return &ToolCallPreview{Summary: "Doing the thing"}
+}
+
+func TestToolCallEventCarriesPreview(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
+			callCount := 0
+			mock := &mockLLM{
+				generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+					callCount++
+					if callCount == 1 {
+						return &llm.Response{
+							Role: llm.Assistant,
+							Content: []llm.Content{
+								&llm.ToolUseContent{ID: "tool_1", Name: "preview_tool", Input: []byte(`{}`)},
+								&llm.ToolUseContent{ID: "tool_2", Name: "plain_tool", Input: []byte(`{}`)},
+							},
+							StopReason: "tool_use",
+						}, nil
+					}
+					return &llm.Response{
+						Role:       llm.Assistant,
+						Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+						StopReason: "stop",
+					}, nil
+				},
+				nameFunc: func() string { return "test-model" },
+			}
+			ok := func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("ok"), nil
+			}
+			agent, err := NewAgent(AgentOptions{
+				Model: mock,
+				Tools: []Tool{
+					&previewTool{mockTool{name: "preview_tool", callFunc: ok}},
+					&mockTool{name: "plain_tool", callFunc: ok},
+				},
+				ParallelToolExecution: parallel,
+			})
+			assert.NoError(t, err)
+
+			resp, err := agent.CreateResponse(context.Background(), WithInput("go"))
+			assert.NoError(t, err)
+
+			previews := map[string]*ToolCallPreview{}
+			for _, item := range resp.Items {
+				if item.Type == ResponseItemTypeToolCall {
+					previews[item.ToolCall.Name] = item.ToolCallPreview
+				}
+			}
+			assert.Len(t, previews, 2)
+			assert.NotNil(t, previews["preview_tool"])
+			assert.Equal(t, previews["preview_tool"].Summary, "Doing the thing")
+			assert.Nil(t, previews["plain_tool"])
+		})
+	}
+}
+
 func TestPromptCacheKeyForSession(t *testing.T) {
 	key := promptCacheKeyForSession("session-123")
 	assert.Equal(t, key, promptCacheKeyForSession("session-123"))

@@ -2906,8 +2906,9 @@ func (a *Agent) executeToolCallsParallel(
 		}
 
 		delivered, err := emit(childCtx, &ResponseItem{
-			Type:     ResponseItemTypeToolCall,
-			ToolCall: toolCall,
+			Type:            ResponseItemTypeToolCall,
+			ToolCall:        toolCall,
+			ToolCallPreview: preview,
 		})
 		outcome.announced = delivered
 		if err != nil {
@@ -3228,8 +3229,9 @@ func (a *Agent) executeOneToolCall(
 	// Emit tool call event
 	outcome.announced = true
 	if err := callback(ctx, &ResponseItem{
-		Type:     ResponseItemTypeToolCall,
-		ToolCall: toolCall,
+		Type:            ResponseItemTypeToolCall,
+		ToolCall:        toolCall,
+		ToolCallPreview: preview,
 	}); err != nil {
 		return err
 	}
