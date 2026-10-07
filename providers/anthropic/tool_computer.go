@@ -20,8 +20,8 @@ var (
 
 const (
 	// ComputerToolsetType is the computer use toolset. It needs no beta
-	// header, and it is the only form of computer use Opus 5.5 accepts on the
-	// Claude API and Google Cloud.
+	// header, and it is the only form of computer use Opus 5.5 and Haiku 5.5
+	// accept on the Claude API and Google Cloud.
 	ComputerToolsetType = "computer_toolset_20260801"
 	// ComputerToolsetName is the toolset_name on each of the toolset's calls
 	// (llm.ToolUseContent.ToolsetName) and results.
@@ -142,6 +142,7 @@ func (t *ComputerToolset) Call(ctx context.Context, input any) (*dive.ToolResult
 //   - computer_20251124 - Claude Opus 4.5 through 4.8, Opus 5, Sonnet 4.6 and 5,
 //     Fable 5 and 5.1, Mythos 5 and 5.1 (adds zoom action). Opus 5.5 rejects
 //     it with a 400 on the Claude API and Google Cloud; use ComputerToolset.
+//     Haiku 5.5 rejects it and computer_20250124 the same way.
 //
 // Beta headers required (use llm.WithFeatures):
 //   - FeatureComputerUse ("computer-use-2025-01-24") for computer_20250124

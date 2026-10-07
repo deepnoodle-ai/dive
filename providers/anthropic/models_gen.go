@@ -27,6 +27,7 @@ const (
 	ModelClaudeMythos5          = "claude-mythos-5"
 	ModelClaudeSonnet55         = "claude-sonnet-5-5"
 	ModelClaudeSonnet5          = "claude-sonnet-5"
+	ModelClaudeHaiku55          = "claude-haiku-5-5"
 )
 
 // DefaultModel is generated from the catalog's default model.

@@ -16,6 +16,21 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:        "USD",
 		UpdatedAt:       "2026-09-30",
 	},
+	// Priced by prompt length: prompts over 100,000 tokens pay the higher rates. Cache writes are the 5-minute rate.
+	ModelClaudeHaiku55: {
+		Model:                      ModelClaudeHaiku55,
+		InputPrice:                 0.10,
+		OutputPrice:                0.50,
+		LongContextInputPrice:      0.50,
+		LongContextCacheReadPrice:  0.05,
+		LongContextOutputPrice:     2.50,
+		CacheReadPrice:             0.01,
+		CacheWritePrice:            0.125,
+		LongContextCacheWritePrice: 0.625,
+		LongContextThreshold:       100001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-10-07",
+	},
 	ModelClaude35Haiku20241022: {
 		Model:       ModelClaude35Haiku20241022,
 		InputPrice:  0.80,

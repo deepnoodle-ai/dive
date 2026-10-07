@@ -31,6 +31,10 @@
     {
       "name": "sonnet-5-5",
       "url": "https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5"
+    },
+    {
+      "name": "haiku-5-5",
+      "url": "https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide.md"
     }
   ],
   "models": [
@@ -98,10 +102,7 @@
       "id": "claude-haiku-4-5",
       "kind": "text",
       "context_window": 200000,
-      "display_name": "Haiku 4.5",
-      "recommended": true,
-      "cli_order": 4,
-      "description": "Fastest for quick answers"
+      "display_name": "Haiku 4.5"
     },
     {
       "go_name": "ModelClaudeSonnet45",
@@ -211,6 +212,16 @@
       "display_name": "Sonnet 5",
       "description": "Best combination of speed and intelligence",
       "default": true
+    },
+    {
+      "go_name": "ModelClaudeHaiku55",
+      "id": "claude-haiku-5-5",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Haiku 5.5",
+      "recommended": true,
+      "cli_order": 4,
+      "description": "Fastest for quick answers"
     }
   ],
   "pricing": {
@@ -224,6 +235,21 @@
         "cache_read_price_per_1m_tokens": "0.20",
         "cache_write_price_per_1m_tokens": "2.50",
         "note": "Standard tier, including the full 1M context window."
+      },
+      {
+        "model": "claude-haiku-5-5",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.50",
+        "currency": "USD",
+        "updated_at": "2026-10-07",
+        "cache_read_price_per_1m_tokens": "0.01",
+        "cache_write_price_per_1m_tokens": "0.125",
+        "long_context_threshold_tokens": 100001,
+        "long_context_input_price_per_1m_tokens": "0.50",
+        "long_context_output_price_per_1m_tokens": "2.50",
+        "long_context_cache_read_price_per_1m_tokens": "0.05",
+        "long_context_cache_write_price_per_1m_tokens": "0.625",
+        "note": "Priced by prompt length: prompts over 100,000 tokens pay the higher rates. Cache writes are the 5-minute rate."
       },
       {
         "model": "claude-3-5-haiku-20241022",

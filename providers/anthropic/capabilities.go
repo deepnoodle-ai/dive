@@ -192,6 +192,15 @@ var modelCapabilityTable = []capabilityEntry{
 		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
 		perMessageEffort: true,
 	}},
+	// Verified against the Claude API on 2026-10-07. Haiku 5.5 matches Opus 5:
+	// it takes an explicit disable but caps effort at high while disabled,
+	// rejects manual budgets and temperature, and accepts per-message effort
+	// and a forced tool_choice.
+	{prefix: "claude-haiku-5-5", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, explicitDisable: true,
+		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
+		perMessageEffort: true,
+	}},
 	// Fable 5 and Mythos 5 always think and reject an explicit disable, so
 	// Dive omits the thinking parameter for them instead. The 5.1 point
 	// releases behave the same way and add two things: per-message effort, and

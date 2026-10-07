@@ -7,11 +7,20 @@ import "github.com/deepnoodle-ai/dive/llm"
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
 	ModelMistralMedium: {
-		Model:       ModelMistralMedium,
-		InputPrice:  1.5,
-		OutputPrice: 7.5,
-		Currency:    "USD",
-		UpdatedAt:   "2026-08-15",
+		Model:          ModelMistralMedium,
+		InputPrice:     1.5,
+		OutputPrice:    7.5,
+		CacheReadPrice: 0.15,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-07",
+	},
+	ModelMistralMedium35: {
+		Model:          ModelMistralMedium35,
+		InputPrice:     1.5,
+		OutputPrice:    7.5,
+		CacheReadPrice: 0.15,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-07",
 	},
 	ModelMistralLarge2411: {
 		Model:       ModelMistralLarge2411,
@@ -181,6 +190,15 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		OutputPrice: 0.00,
 		Currency:    "USD",
 		UpdatedAt:   "2026-09-30",
+	},
+	// List price. Mistral is selling it at 50% off for two weeks from launch, so estimates overstate cost until the sale ends.
+	ModelMistralLarge4: {
+		Model:          ModelMistralLarge4,
+		InputPrice:     1.36,
+		OutputPrice:    4.18,
+		CacheReadPrice: 0.14,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-07",
 	},
 }
 

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Haiku 5.5.** `anthropic.ModelClaudeHaiku55` and
+  `openrouter.ModelClaudeHaiku55`, with prompt-length tiered pricing. It takes
+  the CLI's fast-model slot from Haiku 4.5.
+- **Mistral Large 4 and Medium 3.5.** `mistral.ModelMistralLarge4` (preview),
+  `mistral.ModelMistralMedium35`, and `openrouter.ModelMistralLarge4`.
+
+### Changed
+
+- **`openrouter.ModelMistralLarge3` is no longer deprecated.** OpenRouter
+  serves `mistralai/mistral-large-2512` again.
+
+### Deprecated
+
+- **`mistral.ModelLeanstral15` and `grok.ModelVoiceTranscribe10`.** Both are
+  retired upstream; use `ModelLeanstral151` and `ModelVoiceTranscribe20`.
+
 ## [1.35.0] - 2026-09-30
 
 ### Added
