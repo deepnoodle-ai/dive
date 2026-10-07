@@ -17,6 +17,21 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		UpdatedAt:       "2026-09-30",
 	},
 	// OpenRouter public model listing, standard route.
+	ModelClaudeHaiku55: {
+		Model:                      ModelClaudeHaiku55,
+		InputPrice:                 0.1,
+		OutputPrice:                0.5,
+		LongContextInputPrice:      0.5,
+		LongContextCacheReadPrice:  0.05,
+		LongContextOutputPrice:     2.5,
+		CacheReadPrice:             0.01,
+		CacheWritePrice:            0.125,
+		LongContextCacheWritePrice: 0.625,
+		LongContextThreshold:       100001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-10-07",
+	},
+	// OpenRouter public model listing, standard route.
 	ModelGPT61Sol: {
 		Model:                      ModelGPT61Sol,
 		InputPrice:                 2,
@@ -170,6 +185,24 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		CacheReadPrice: 0.35,
 		Currency:       "USD",
 		UpdatedAt:      "2026-09-30",
+	},
+	// OpenRouter public model listing, which carries Mistral's 50% launch discount.
+	ModelMistralLarge4: {
+		Model:          ModelMistralLarge4,
+		InputPrice:     0.68,
+		OutputPrice:    2.09,
+		CacheReadPrice: 0.07,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-07",
+	},
+	// OpenRouter public model listing, standard route.
+	ModelMistralLarge3: {
+		Model:          ModelMistralLarge3,
+		InputPrice:     0.5,
+		OutputPrice:    1.5,
+		CacheReadPrice: 0.05,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-07",
 	},
 }
 

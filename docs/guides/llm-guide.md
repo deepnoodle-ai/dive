@@ -33,6 +33,13 @@ history can invalidate those blocks.
 
 See [Sonnet 5.5 migration guidance](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide).
 
+Claude Haiku 5.5 (`anthropic.ModelClaudeHaiku55`) thinks adaptively by default.
+`llm.ThinkingTypeDisabled` sends an explicit disable and caps effort at `high`;
+a reasoning budget falls back to adaptive thinking, and temperature is dropped.
+The API rejects assistant prefill, and computer use needs `ComputerToolset`.
+Prompts over 100,000 tokens bill at higher rates, which cost estimates apply.
+See [Haiku 5.5 migration guidance](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
+
 A streamed Anthropic response keeps its server tool blocks (web search calls
 and results, code execution results and the like) in the message, as `Generate`
 does, so they replay to Anthropic on the next turn; providers that cannot
@@ -134,8 +141,9 @@ model := mistral.New()
 
 **Env:** `MISTRAL_API_KEY`
 **Models:** See `providers/mistral/models_gen.go` for available models.
-The catalog includes `zai-glm-5-3` and the free Leanstral 1.5 preview, including
-its `labs-leanstral-1-5-1` snapshot.
+The catalog includes Mistral Large 4 (`ModelMistralLarge4`, public preview),
+the pinned Mistral Medium 3.5 (`ModelMistralMedium35`), `zai-glm-5-3`, and the
+free Leanstral `labs-leanstral-1-5-1` snapshot.
 
 ### Ollama (Local)
 

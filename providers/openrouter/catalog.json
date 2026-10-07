@@ -143,6 +143,13 @@
       "display_name": "Sonnet 4.5"
     },
     {
+      "go_name": "ModelClaudeHaiku55",
+      "id": "anthropic/claude-haiku-5.5",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Haiku 5.5"
+    },
+    {
       "go_name": "ModelClaudeHaiku45",
       "id": "anthropic/claude-haiku-4.5",
       "kind": "text",
@@ -371,12 +378,17 @@
       "display_name": "Grok Build 0.1"
     },
     {
+      "go_name": "ModelMistralLarge4",
+      "id": "mistralai/mistral-large-4-0",
+      "kind": "text",
+      "context_window": 524288,
+      "display_name": "Mistral Large 4"
+    },
+    {
       "go_name": "ModelMistralLarge3",
       "id": "mistralai/mistral-large-2512",
       "kind": "text",
-      "context_window": 128000,
-      "deprecated": "OpenRouter no longer serves this model. Use mistral.ModelMistralLarge3 on Mistral's API.",
-      "lifecycle": "retired"
+      "context_window": 262144
     },
     {
       "go_name": "ModelDeepSeekV41Flash",
@@ -401,6 +413,21 @@
         "updated_at": "2026-09-30",
         "cache_read_price_per_1m_tokens": "0.2",
         "cache_write_price_per_1m_tokens": "2.5",
+        "note": "OpenRouter public model listing, standard route."
+      },
+      {
+        "model": "anthropic/claude-haiku-5.5",
+        "input_price_per_1m_tokens": "0.1",
+        "output_price_per_1m_tokens": "0.5",
+        "currency": "USD",
+        "updated_at": "2026-10-07",
+        "cache_read_price_per_1m_tokens": "0.01",
+        "cache_write_price_per_1m_tokens": "0.125",
+        "long_context_threshold_tokens": 100001,
+        "long_context_input_price_per_1m_tokens": "0.5",
+        "long_context_output_price_per_1m_tokens": "2.5",
+        "long_context_cache_read_price_per_1m_tokens": "0.05",
+        "long_context_cache_write_price_per_1m_tokens": "0.625",
         "note": "OpenRouter public model listing, standard route."
       },
       {
@@ -557,6 +584,24 @@
         "currency": "USD",
         "updated_at": "2026-09-30",
         "cache_read_price_per_1m_tokens": "0.35"
+      },
+      {
+        "model": "mistralai/mistral-large-4-0",
+        "input_price_per_1m_tokens": "0.68",
+        "output_price_per_1m_tokens": "2.09",
+        "currency": "USD",
+        "updated_at": "2026-10-07",
+        "cache_read_price_per_1m_tokens": "0.07",
+        "note": "OpenRouter public model listing, which carries Mistral's 50% launch discount."
+      },
+      {
+        "model": "mistralai/mistral-large-2512",
+        "input_price_per_1m_tokens": "0.5",
+        "output_price_per_1m_tokens": "1.5",
+        "currency": "USD",
+        "updated_at": "2026-10-07",
+        "cache_read_price_per_1m_tokens": "0.05",
+        "note": "OpenRouter public model listing, standard route."
       }
     ],
     "fast_text": [],

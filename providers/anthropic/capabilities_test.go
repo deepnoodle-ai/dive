@@ -203,3 +203,37 @@ func TestForcedToolChoiceRejectedOnOpus55(t *testing.T) {
 	assert.True(t, requestThinkingBlocksForcedToolChoice(ModelClaudeOpus55, nil))
 	assert.False(t, requestThinkingBlocksForcedToolChoice(ModelClaudeOpus5, nil))
 }
+
+// Haiku 5.5 takes the Opus 5 profile: an explicit disable capped at high
+// effort, per-message effort, no manual budget, and no temperature.
+func TestHaiku55Capabilities(t *testing.T) {
+	caps, known := lookupCapabilities(ModelClaudeHaiku55)
+	assert.True(t, known)
+	assert.Equal(t, effortsFull, caps.efforts)
+	assert.True(t, caps.adaptive)
+	assert.True(t, caps.explicitDisable)
+	assert.True(t, caps.thinkingOnByDefault)
+	assert.Equal(t, llm.ReasoningEffortHigh, caps.disabledEffortCap)
+	assert.True(t, caps.perMessageEffort)
+	assert.False(t, caps.manualBudget, "5.5 rejects budget_tokens")
+	assert.False(t, caps.temperature, "5.5 rejects temperature")
+}
+
+func TestThinkingDisabledHaiku55ClampsEffortToHigh(t *testing.T) {
+	req := buildReq(t, ModelClaudeHaiku55,
+		llm.WithReasoningEffort(llm.ReasoningEffortMax),
+		llm.WithThinking(llm.ThinkingTypeDisabled),
+		llm.WithTemperature(0.7))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "disabled", req.Thinking.Type)
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "high", req.OutputConfig.Effort)
+	assert.Nil(t, req.Temperature)
+}
+
+func TestReasoningBudgetHaiku55FallsBackToAdaptive(t *testing.T) {
+	req := buildReq(t, ModelClaudeHaiku55, llm.WithReasoningBudget(4096))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.Equal(t, 0, req.Thinking.BudgetTokens)
+}

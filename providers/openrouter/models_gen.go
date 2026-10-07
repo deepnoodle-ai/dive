@@ -21,6 +21,7 @@ const (
 	ModelClaudeSonnet46     = "anthropic/claude-sonnet-4.6"
 	ModelClaudeOpus45       = "anthropic/claude-opus-4.5"
 	ModelClaudeSonnet45     = "anthropic/claude-sonnet-4.5"
+	ModelClaudeHaiku55      = "anthropic/claude-haiku-5.5"
 	ModelClaudeHaiku45      = "anthropic/claude-haiku-4.5"
 	ModelClaudeOpus41       = "anthropic/claude-opus-4.1"
 	ModelClaudeSonnet4      = "anthropic/claude-sonnet-4"
@@ -55,10 +56,10 @@ const (
 	ModelGrok45              = "x-ai/grok-4.5"
 	ModelGrok43              = "x-ai/grok-4.3"
 	ModelGrokBuild01         = "x-ai/grok-build-0.1"
-	// Deprecated: OpenRouter no longer serves this model. Use mistral.ModelMistralLarge3 on Mistral's API.
-	ModelMistralLarge3    = "mistralai/mistral-large-2512"
-	ModelDeepSeekV41Flash = "deepseek/deepseek-v4.1-flash"
-	ModelDeepSeekR1       = "deepseek/deepseek-r1-0528"
+	ModelMistralLarge4       = "mistralai/mistral-large-4-0"
+	ModelMistralLarge3       = "mistralai/mistral-large-2512"
+	ModelDeepSeekV41Flash    = "deepseek/deepseek-v4.1-flash"
+	ModelDeepSeekR1          = "deepseek/deepseek-r1-0528"
 )
 
 // DefaultModel is generated from the catalog's default model.

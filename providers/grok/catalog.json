@@ -240,7 +240,9 @@
       "id": "grok-voice-transcribe-1.0",
       "kind": "audio",
       "display_name": "Grok Voice Transcribe 1.0",
-      "description": "The original speech-to-text model. $0.10 per hour of audio (batch), $0.20 (streaming)"
+      "description": "The original speech-to-text model. $0.10 per hour of audio (batch), $0.20 (streaming)",
+      "lifecycle": "deprecated",
+      "deprecated": "Reached end of life on October 2, 2026. Use ModelVoiceTranscribe20."
     }
   ],
   "pricing": {

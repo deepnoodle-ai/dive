@@ -4,10 +4,12 @@ package mistral
 
 const (
 	ModelMistralMedium        = "mistral-medium-latest"
+	ModelMistralMedium35      = "mistral-medium-3-5"
 	ModelMagistralMedium      = "magistral-medium-latest"
 	ModelMistralSmall         = "mistral-small-latest"
 	ModelMagistralSmall       = "magistral-small-latest"
 	ModelMistralSmall2603     = "mistral-small-2603"
+	ModelMistralLarge4        = "mistral-large-4"
 	ModelMistralLarge3        = "mistral-large-2512"
 	ModelMistralLarge         = "mistral-large-latest"
 	ModelMistralLarge2411     = "mistral-large-2411"
@@ -33,8 +35,9 @@ const (
 	ModelMixtral8x7B         = "open-mixtral-8x7b"
 	ModelMixtral8x22B        = "open-mixtral-8x22b"
 	ModelGLM53               = "zai-glm-5-3"
-	ModelLeanstral15         = "labs-leanstral-1-5"
-	ModelLeanstral151        = "labs-leanstral-1-5-1"
+	// Deprecated: Retired by Mistral on September 30, 2026. Use ModelLeanstral151.
+	ModelLeanstral15  = "labs-leanstral-1-5"
+	ModelLeanstral151 = "labs-leanstral-1-5-1"
 )
 
 // DefaultModel is generated from the catalog's default model.
