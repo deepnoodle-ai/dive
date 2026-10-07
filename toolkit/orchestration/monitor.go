@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/internal/procgroup"
 	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/google/uuid"
 )
@@ -135,6 +136,7 @@ func (t *monitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 		}
 
 		cmd := exec.CommandContext(cancelCtx, "sh", "-c", input.Command)
+		procgroup.ConfigureCancellation(cmd)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			if notifyCallback != nil {
@@ -156,6 +158,10 @@ func (t *monitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 		go func() {
 			defer close(scanDone)
 			defer close(linesCh)
+			// Closing the pipe unblocks a read that cancellation alone would
+			// not, such as from a process that left the group.
+			stopClose := context.AfterFunc(cancelCtx, func() { stdout.Close() })
+			defer stopClose()
 			readMonitorLines(cancelCtx, stdout, monitorMaxLineBytes, linesCh)
 		}()
 
@@ -186,7 +192,8 @@ func (t *monitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 // readMonitorLines sends each line of r to linesCh until r ends or ctx is
 // cancelled. A line longer than limit bytes is cut short and marked, so one
 // long line neither ends the stream nor stalls the command on a full pipe.
-// A read error is sent as a final line.
+// A read error is sent as a final line, unless ctx was cancelled, since the
+// caller closes r on cancellation.
 func readMonitorLines(ctx context.Context, r io.Reader, limit int, linesCh chan<- string) {
 	br := bufio.NewReader(r)
 	var line []byte
@@ -213,12 +220,15 @@ func readMonitorLines(ctx context.Context, r io.Reader, limit int, linesCh chan<
 			if len(line) > 0 && !send(monitorLine(line, truncated)) {
 				return
 			}
-			if err != io.EOF {
+			if err != io.EOF && ctx.Err() == nil {
 				send(fmt.Sprintf("[Monitor error: reading output: %s]", err))
 			}
 			return
 		}
 		if isPrefix {
+			if ctx.Err() != nil {
+				return
+			}
 			continue
 		}
 		if !send(monitorLine(line, truncated)) {

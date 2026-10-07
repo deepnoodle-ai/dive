@@ -430,6 +430,45 @@ func TestMonitorTool(t *testing.T) {
 		assert.Equal(t, lines[len(lines)-2], "20000")
 		assert.Contains(t, lines[len(lines)-1], "20001 lines delivered")
 	})
+
+	// A pipeline child holds stdout open after the shell is killed, and its
+	// output never ends a line. Cancellation must still end the monitor.
+	for _, stop := range []string{"timeout", "TaskStop"} {
+		t.Run("cancellation ends an unterminated pipeline/"+stop, func(t *testing.T) {
+			runs := NewRuns()
+			done := make(chan struct{})
+			tool := NewMonitorTool(MonitorToolOptions{Runs: runs, NotifyCallback: func(_ string, batch []string) {
+				for _, l := range batch {
+					if strings.HasPrefix(l, "[Monitor done") {
+						close(done)
+					}
+				}
+			}})
+			timeoutMs := 500
+			if stop == "TaskStop" {
+				timeoutMs = 60_000
+			}
+			_, err := tool.Call(ctx, &MonitorToolInput{Command: `yes | tr -d '\n'`, Description: "stream", TimeoutMs: timeoutMs})
+			assert.NoError(t, err)
+			if stop == "TaskStop" {
+				id := onlyRunID(runs)
+				time.Sleep(200 * time.Millisecond)
+				NewTaskStopTool(TaskStopToolOptions{Runs: runs}).Call(ctx, &TaskStopToolInput{TaskID: id})
+			}
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("monitor did not finish after cancellation")
+			}
+			// The run is removed as the monitor goroutine exits, just after
+			// the done notification.
+			deadline := time.Now().Add(time.Second)
+			for runCount(runs) > 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			assert.Equal(t, runCount(runs), 0)
+		})
+	}
 }
 
 func TestReadMonitorLines(t *testing.T) {
