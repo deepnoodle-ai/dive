@@ -1,6 +1,6 @@
 //go:build unix
 
-package toolkit
+package procgroup
 
 import (
 	"errors"
@@ -9,10 +9,10 @@ import (
 	"syscall"
 )
 
-// configureBashCommandCancellation puts the shell in its own process group so
+// ConfigureCancellation puts the shell in its own process group so
 // CommandContext cancellation terminates descendants that inherited its output
 // descriptors, not only the shell process itself.
-func configureBashCommandCancellation(cmd *exec.Cmd) {
+func ConfigureCancellation(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

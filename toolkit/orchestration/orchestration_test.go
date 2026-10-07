@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -396,5 +398,106 @@ func TestMonitorTool(t *testing.T) {
 		stop := NewTaskStopTool(TaskStopToolOptions{Runs: runs})
 		sres, _ := stop.Call(ctx, &TaskStopToolInput{TaskID: id})
 		assert.Contains(t, sres.Content[0].Text, "cancelled")
+	})
+
+	t.Run("a long line does not end the stream", func(t *testing.T) {
+		var mu sync.Mutex
+		var lines []string
+		done := make(chan struct{})
+		tool := NewMonitorTool(MonitorToolOptions{NotifyCallback: func(_ string, batch []string) {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, l := range batch {
+				if strings.HasPrefix(l, "[Monitor done") {
+					close(done)
+				}
+				lines = append(lines, l)
+			}
+		}})
+		// A 200 KB line, then more output than a pipe buffer holds.
+		cmd := `head -c 200000 /dev/zero | tr '\0' x; echo; seq 1 20000`
+		_, err := tool.Call(ctx, &MonitorToolInput{Command: cmd, Description: "long", TimeoutMs: 20_000})
+		assert.NoError(t, err)
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Fatal("monitor did not finish")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		assert.True(t, strings.HasSuffix(lines[0], " [line truncated]"))
+		assert.Equal(t, len(lines[0]), monitorMaxLineBytes+len(" [line truncated]"))
+		assert.Equal(t, lines[len(lines)-2], "20000")
+		assert.Contains(t, lines[len(lines)-1], "20001 lines delivered")
+	})
+
+	// A pipeline child holds stdout open after the shell is killed, and its
+	// output never ends a line. Cancellation must still end the monitor.
+	for _, stop := range []string{"timeout", "TaskStop"} {
+		t.Run("cancellation ends an unterminated pipeline/"+stop, func(t *testing.T) {
+			runs := NewRuns()
+			done := make(chan struct{})
+			tool := NewMonitorTool(MonitorToolOptions{Runs: runs, NotifyCallback: func(_ string, batch []string) {
+				for _, l := range batch {
+					if strings.HasPrefix(l, "[Monitor done") {
+						close(done)
+					}
+				}
+			}})
+			timeoutMs := 500
+			if stop == "TaskStop" {
+				timeoutMs = 60_000
+			}
+			_, err := tool.Call(ctx, &MonitorToolInput{Command: `yes | tr -d '\n'`, Description: "stream", TimeoutMs: timeoutMs})
+			assert.NoError(t, err)
+			if stop == "TaskStop" {
+				id := onlyRunID(runs)
+				time.Sleep(200 * time.Millisecond)
+				NewTaskStopTool(TaskStopToolOptions{Runs: runs}).Call(ctx, &TaskStopToolInput{TaskID: id})
+			}
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("monitor did not finish after cancellation")
+			}
+			// The run is removed as the monitor goroutine exits, just after
+			// the done notification.
+			deadline := time.Now().Add(time.Second)
+			for runCount(runs) > 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			assert.Equal(t, runCount(runs), 0)
+		})
+	}
+}
+
+func TestReadMonitorLines(t *testing.T) {
+	ch := make(chan string, 10)
+	readMonitorLines(context.Background(), strings.NewReader("short\n"+strings.Repeat("y", 50)+"\nlast"), 10, ch)
+	close(ch)
+	var got []string
+	for l := range ch {
+		got = append(got, l)
+	}
+	assert.Equal(t, got, []string{"short", "yyyyyyyyyy [line truncated]", "last"})
+}
+
+// A truncation limit that falls inside a multibyte rune drops the partial
+// rune instead of emitting invalid UTF-8. ASCII keeps the full byte limit.
+func TestReadMonitorLinesKeepsUTF8AtLimit(t *testing.T) {
+	ch := make(chan string, 10)
+	// "é" is 2 bytes and "€" is 3, so a limit of 10 cuts each line mid-rune.
+	input := strings.Repeat("a", 9) + "é\n" + strings.Repeat("b", 8) + "€x\n" + strings.Repeat("c", 12) + "\n"
+	readMonitorLines(context.Background(), strings.NewReader(input), 10, ch)
+	close(ch)
+	var got []string
+	for l := range ch {
+		assert.True(t, utf8.ValidString(l), "line %q", l)
+		got = append(got, l)
+	}
+	assert.Equal(t, got, []string{
+		"aaaaaaaaa [line truncated]",
+		"bbbbbbbb [line truncated]",
+		"cccccccccc [line truncated]",
 	})
 }

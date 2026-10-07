@@ -24,6 +24,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`mistral.ModelLeanstral15` and `grok.ModelVoiceTranscribe10`.** Both are
   retired upstream; use `ModelLeanstral151` and `ModelVoiceTranscribe20`.
 
+### Fixed
+
+- **Monitor and long lines.** A stdout line over 64 KB no longer stops the
+  Monitor tool's stream or stalls the command. The line is cut short and
+  marked `[line truncated]`.
+- **Monitor cancellation.** A timeout or `TaskStop` now ends the command's
+  whole process tree, so a pipeline that never ends a line no longer leaves
+  the monitor running.
+
 ## [1.35.0] - 2026-09-30
 
 ### Added

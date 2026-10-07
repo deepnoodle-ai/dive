@@ -1,6 +1,6 @@
 //go:build windows
 
-package toolkit
+package procgroup
 
 import (
 	"errors"
@@ -9,9 +9,9 @@ import (
 	"strconv"
 )
 
-// configureBashCommandCancellation replaces CommandContext's single-process
+// ConfigureCancellation replaces CommandContext's single-process
 // kill with taskkill's process-tree termination on Windows.
-func configureBashCommandCancellation(cmd *exec.Cmd) {
+func ConfigureCancellation(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return os.ErrProcessDone

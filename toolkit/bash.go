@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/internal/procgroup"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
@@ -309,7 +310,7 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 	shellArgs = append(shellArgs, command)
 
 	cmd := exec.CommandContext(ctx, shell, shellArgs...)
-	configureBashCommandCancellation(cmd)
+	procgroup.ConfigureCancellation(cmd)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
