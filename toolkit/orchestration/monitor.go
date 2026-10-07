@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"time"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/schema"
@@ -229,9 +230,23 @@ func readMonitorLines(ctx context.Context, r io.Reader, limit int, linesCh chan<
 
 func monitorLine(line []byte, truncated bool) string {
 	if truncated {
-		return string(line) + " [line truncated]"
+		return string(trimPartialRune(line)) + " [line truncated]"
 	}
 	return string(line)
+}
+
+// trimPartialRune drops a multibyte rune that the truncation limit cut in
+// half, so the marked line stays valid UTF-8. Other bytes are left as they are.
+func trimPartialRune(b []byte) []byte {
+	for i := len(b) - 1; i >= 0 && i >= len(b)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(b[i]) {
+			if !utf8.FullRune(b[i:]) {
+				return b[:i]
+			}
+			break
+		}
+	}
+	return b
 }
 
 // monitorBatchLines reads from linesCh, batches lines that arrive within window,

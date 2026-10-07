@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -440,4 +441,24 @@ func TestReadMonitorLines(t *testing.T) {
 		got = append(got, l)
 	}
 	assert.Equal(t, got, []string{"short", "yyyyyyyyyy [line truncated]", "last"})
+}
+
+// A truncation limit that falls inside a multibyte rune drops the partial
+// rune instead of emitting invalid UTF-8. ASCII keeps the full byte limit.
+func TestReadMonitorLinesKeepsUTF8AtLimit(t *testing.T) {
+	ch := make(chan string, 10)
+	// "é" is 2 bytes and "€" is 3, so a limit of 10 cuts each line mid-rune.
+	input := strings.Repeat("a", 9) + "é\n" + strings.Repeat("b", 8) + "€x\n" + strings.Repeat("c", 12) + "\n"
+	readMonitorLines(context.Background(), strings.NewReader(input), 10, ch)
+	close(ch)
+	var got []string
+	for l := range ch {
+		assert.True(t, utf8.ValidString(l), "line %q", l)
+		got = append(got, l)
+	}
+	assert.Equal(t, got, []string{
+		"aaaaaaaaa [line truncated]",
+		"bbbbbbbb [line truncated]",
+		"cccccccccc [line truncated]",
+	})
 }
