@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-10-07
+
 ### Added
 
 - **Claude Haiku 5.5.** `anthropic.ModelClaudeHaiku55` and
