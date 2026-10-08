@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Parallel Search MCP example.** Search and fetch page excerpts through Dive's
+  HTTP MCP client and tool adapters without a Parallel API key or model request.
+
 ## [1.36.0] - 2026-10-07
 
 ### Added

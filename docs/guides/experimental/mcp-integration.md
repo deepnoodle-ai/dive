@@ -127,6 +127,14 @@ servers, err := mcp.LoadServersFile(".mcp.json") // map[string]*mcp.ServerConfig
 
 `ParseServersJSON` does the same for bytes. It returns the valid servers even when some entries are invalid; the error describes the invalid ones.
 
+## Keyless search and fetch example
+
+The [Parallel Search example](../../../examples/parallel_search_example) uses
+streamable HTTP to search the web and fetch page excerpts without a Parallel API
+key or a local server process. It loads an MCP configuration and calls tools
+through Dive's adapters directly, without an LLM request. Anonymous access has
+rate limits; see the example README for installation and usage.
+
 ## Manager
 
 The `Manager` connects to several servers and tracks their tools. It keys tools by their bare MCP names and rejects duplicates across servers:
