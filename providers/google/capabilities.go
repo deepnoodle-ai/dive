@@ -88,6 +88,17 @@ type capabilityEntry struct {
 // generation — gemini-3.5-flash can turn thinking off and gemini-3.5-flash-lite
 // cannot, and the 2.5 generation has no thinking level at all.
 var modelCapabilityTable = []capabilityEntry{
+	// --- 4.x ---
+	// Gemini 4 Argon rejects MINIMAL ("Thinking level MINIMAL is not supported
+	// for this model"), takes budgets in [1, 65535], and accepts
+	// thinkingBudget: 0. Probed live against the public Gemini API on
+	// 2026-10-13, including an image inside a function response.
+	{prefix: "gemini-4-argon", caps: modelCapabilities{
+		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
+	}},
+
 	// --- 3.x: thinking levels, budgets in [1, 65535] unless noted. ---
 	// 3.8 Flash rejects MINIMAL ("Thinking level MINIMAL is not supported for
 	// this model") like the Pro models and 3.7 Flash, but keeps the family's

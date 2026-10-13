@@ -72,6 +72,15 @@ var (
 		llm.ReasoningEffortHigh,
 		llm.ReasoningEffortXHigh,
 	}
+	// Muse Wonder: Muse Spark's ladder plus max; none is still a 400.
+	museMinimalToMax = []llm.ReasoningEffort{
+		llm.ReasoningEffortMinimal,
+		llm.ReasoningEffortLow,
+		llm.ReasoningEffortMedium,
+		llm.ReasoningEffortHigh,
+		llm.ReasoningEffortXHigh,
+		llm.ReasoningEffortMax,
+	}
 )
 
 // openAITable maps OpenAI model-id prefixes to capabilities. It is declared in
@@ -241,6 +250,9 @@ var museTable = Table{
 	{Prefix: "muse-spark-1.2-contributor", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
 	{Prefix: "muse-spark-1.3", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
 	{Prefix: "muse-spark-1.3-contributor", Caps: Capabilities{Efforts: museMinimalToXHigh, Temperature: true}},
+	// Verified against the Meta Model API on 2026-10-13: minimal through max
+	// and temperature accepted, none rejected with HTTP 400.
+	{Prefix: "muse-wonder-1.0", Caps: Capabilities{Efforts: museMinimalToMax, Temperature: true}},
 }
 
 var (

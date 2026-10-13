@@ -1,5 +1,7 @@
-// Package meta implements the Meta Model API provider for Dive, serving the
-// Muse Spark family (muse-spark-1.3 and its siblings).
+// Package meta implements the Meta Model API provider for Dive, serving Muse
+// Wonder (muse-wonder-1.0) and the Muse Spark family (muse-spark-1.3 and its
+// siblings). Muse Wonder accepts only an automatic tool_choice; see the LLM
+// guide.
 //
 // Meta exposes the same models over three wire formats — Responses, Chat
 // Completions, and Messages. Dive targets the Responses API because it is the

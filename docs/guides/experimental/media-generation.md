@@ -180,7 +180,7 @@ For Gemini, use a general audio-capable Gemini model and an optional prompt:
 
 ```go
 result, err := media.Transcribe(ctx, audio,
-    media.WithModel("gemini-3.5-flash"),
+    media.WithModel("gemini-3.6-flash"),
     media.WithAudioMIMEType("audio/wav"),
     media.WithTranscriptionPrompt("Generate a concise transcript of the speech."),
 )

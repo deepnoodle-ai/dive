@@ -10,6 +10,7 @@ import (
 
 func TestGoogleCacheReadPricingCoverage(t *testing.T) {
 	expected := map[string]float64{
+		ModelGemini4Argon:                  0.10,
 		ModelGemini38Flash:                 0.075,
 		ModelGemini37Flash:                 0.075,
 		ModelGemini36Flash:                 0.075,
@@ -55,6 +56,15 @@ func TestGoogleCacheReadPricingCoverage(t *testing.T) {
 			cost := pricing.CostOf(&llm.Usage{CacheReadInputTokens: 1_000_000})
 			assert.True(t, cost.CacheRead > 0)
 		})
+	}
+	// A priced model that is missing from verifiedGoogleTextPricing gets no
+	// estimate at all. The table above does not catch that.
+	for model := range expected {
+		if model == ModelGemini20Flash {
+			continue // retired; priced for history but no longer estimated
+		}
+		_, verified := verifiedGoogleTextPricing[model]
+		assert.True(t, verified, "priced Google model must be estimated: "+model)
 	}
 }
 
@@ -132,6 +142,18 @@ func TestPopulateGoogleCostFailsClosed(t *testing.T) {
 		assert.Equal(t, 0.0125, usage.Cost.CacheRead)
 		assert.Equal(t, 10.00, usage.Cost.Output)
 		assert.Equal(t, "", usage.ServiceTier)
+	})
+
+	t.Run("Gemini 4 Argon", func(t *testing.T) {
+		usage := &llm.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadInputTokens: 1_000_000}
+		populateGoogleCost(ModelGemini4Argon, nil, usage, googlePricingContext{})
+		assert.NotNil(t, usage.Cost)
+		assert.False(t, usage.CostEstimateUnavailable)
+		want := TextModelPricing[ModelGemini4Argon].CostOf(&llm.Usage{
+			InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadInputTokens: 1_000_000,
+		})
+		assert.Equal(t, want, *usage.Cost)
+		assert.Equal(t, 10.00, usage.Cost.Output)
 	})
 
 	t.Run("Vertex regional multiplier", func(t *testing.T) {

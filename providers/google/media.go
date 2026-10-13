@@ -449,7 +449,7 @@ func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *me
 
 	model := config.Model
 	if model == "" {
-		model = "gemini-3.5-flash"
+		model = ModelGemini36Flash
 	}
 
 	mimeType := config.AudioMIMEType
