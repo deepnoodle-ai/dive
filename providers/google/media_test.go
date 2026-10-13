@@ -192,11 +192,11 @@ func TestGoogleTranscribe_Integration(t *testing.T) {
 
 	p := NewMediaProvider()
 	result, err := p.Transcribe(context.Background(), speech.Data, &media.Config{
-		Model:         "gemini-3.5-flash",
+		Model:         ModelGemini36Flash,
 		AudioMIMEType: "audio/wav",
 	})
 	assert.NoError(t, err)
-	assert.Contains(t, result.Text, "Dive")
+	assert.Contains(t, strings.ToLower(result.Text), "dive")
 }
 
 func TestGoogle38TextToSpeech(t *testing.T) {

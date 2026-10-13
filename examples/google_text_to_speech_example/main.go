@@ -29,7 +29,7 @@ func main() {
 	flag.StringVar(&voice, "voice", "Kore", "Gemini prebuilt voice name")
 	flag.StringVar(&format, "format", "wav", "audio format: wav or pcm")
 	flag.StringVar(&ttsModel, "tts-model", google.ModelGemini31FlashTTSPreview, "Gemini text-to-speech model")
-	flag.StringVar(&transcriptionModel, "transcription-model", google.ModelGemini35Flash, "Gemini transcription model")
+	flag.StringVar(&transcriptionModel, "transcription-model", google.ModelGemini36Flash, "Gemini transcription model")
 	flag.BoolVar(&transcribe, "transcribe", true, "transcribe the generated audio")
 	flag.Parse()
 

@@ -67,7 +67,7 @@ func defaultTranscriptionModel() string {
 		return "gpt-4o-mini-transcribe"
 	}
 	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
-		return "gemini-3.5-flash"
+		return "gemini-3.6-flash"
 	}
 	return ""
 }

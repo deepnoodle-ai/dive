@@ -52,7 +52,7 @@
       "context_window": 1000000,
       "display_name": "Gemini 3.7 Flash",
       "lifecycle": "deprecated",
-      "deprecated": "Deprecated by Google; requests are routed to gemini-3.8-flash. Use ModelGemini38Flash."
+      "deprecated": "Google routes requests to gemini-3.8-flash. Use ModelGemini38Flash."
     },
     {
       "go_name": "ModelGemini36Flash",
@@ -68,7 +68,7 @@
       "context_window": 1000000,
       "display_name": "Gemini 3.5 Flash",
       "lifecycle": "deprecated",
-      "deprecated": "Deprecated by Google; requests are routed to gemini-3.6-flash. Use ModelGemini36Flash."
+      "deprecated": "Google routes requests to gemini-3.6-flash. Use ModelGemini36Flash."
     },
     {
       "go_name": "ModelGemini35FlashLite",

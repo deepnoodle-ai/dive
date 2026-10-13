@@ -5,10 +5,10 @@ package google
 const (
 	ModelGemini4Argon  = "gemini-4-argon"
 	ModelGemini38Flash = "gemini-3.8-flash"
-	// Deprecated: Deprecated by Google; requests are routed to gemini-3.8-flash. Use ModelGemini38Flash.
+	// Deprecated: Google routes requests to gemini-3.8-flash. Use ModelGemini38Flash.
 	ModelGemini37Flash = "gemini-3.7-flash"
 	ModelGemini36Flash = "gemini-3.6-flash"
-	// Deprecated: Deprecated by Google; requests are routed to gemini-3.6-flash. Use ModelGemini36Flash.
+	// Deprecated: Google routes requests to gemini-3.6-flash. Use ModelGemini36Flash.
 	ModelGemini35Flash                 = "gemini-3.5-flash"
 	ModelGemini35FlashLite             = "gemini-3.5-flash-lite"
 	ModelGemini35Transcribe            = "gemini-3.5-transcribe"

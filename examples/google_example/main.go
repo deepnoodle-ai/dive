@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// Create the Google provider
-	provider := google.New(google.WithModel(google.ModelGemini37Flash))
+	provider := google.New(google.WithModel(google.ModelGemini38Flash))
 
 	ctx := context.Background()
 

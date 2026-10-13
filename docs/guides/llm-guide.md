@@ -115,9 +115,9 @@ model := google.New() // defaults to gemini-3.8-flash
 **Features:** Streaming, tool calling, multimodal
 
 Gemini 4 Argon (`google.ModelGemini4Argon`) is Google's flagship reasoning
-model. Its thinking parameters have not been probed against the live API, so
-Dive forwards them as given rather than clamping them. Gemini 3.5 Flash and 3.7
-Flash are deprecated; Google routes them to 3.6 Flash and 3.8 Flash.
+model. Like Gemini 3.8 Flash, it rejects the `minimal` thinking level, so Dive
+sends `low`. Gemini 3.5 Flash and 3.7 Flash are deprecated; Google routes them
+to 3.6 Flash and 3.8 Flash.
 
 ### Grok (X.AI)
 
@@ -143,6 +143,21 @@ model := mistral.New()
 The catalog includes Mistral Large 4 (`ModelMistralLarge4`, public preview),
 the pinned Mistral Medium 3.5 (`ModelMistralMedium35`), `zai-glm-5-3`, and the
 free Leanstral `labs-leanstral-1-5-1` snapshot.
+
+### Meta
+
+```go
+import "github.com/deepnoodle-ai/dive/providers/meta"
+
+model := meta.New() // defaults to muse-spark-1.3
+```
+
+**Env:** `MODEL_API_KEY` or `META_API_KEY`
+**Models:** See `providers/meta/models_gen.go` for available models.
+
+Muse Wonder (`meta.ModelMuseWonder10`) accepts only an automatic tool choice. A
+forced or named choice returns HTTP 400. `dive.PromptStopHook` and
+`dive.PromptToolGate` force a tool choice, so give them a different model.
 
 ### Ollama (Local)
 

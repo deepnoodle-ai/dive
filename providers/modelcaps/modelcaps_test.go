@@ -251,6 +251,7 @@ func TestSupportsReasoning(t *testing.T) {
 		{"grok", "grok-4.7", true},
 		{"meta", "muse-spark-1.3", true},
 		{"meta", "muse-spark-1.3-contributor", true},
+		{"meta", "muse-wonder-1.0", true},
 		{"openai", "some-unknown-finetune", false}, // unknown stays untouched
 	}
 	for _, tt := range tests {
@@ -258,6 +259,20 @@ func TestSupportsReasoning(t *testing.T) {
 			assert.Equal(t, SupportsReasoning(tt.provider, tt.model), tt.want)
 		})
 	}
+}
+
+func TestMuseWonderReasoning(t *testing.T) {
+	// Verified live: Muse Wonder adds max to Muse Spark's ladder and still
+	// rejects none with HTTP 400.
+	for _, effort := range []llm.ReasoningEffort{llm.ReasoningEffortMinimal, llm.ReasoningEffortMax} {
+		got, send := ResolveEffort("meta", "muse-wonder-1.0", effort, nil)
+		assert.True(t, send)
+		assert.Equal(t, effort, got)
+	}
+	got, send := ResolveEffort("meta", "muse-wonder-1.0", llm.ReasoningEffortNone, nil)
+	assert.True(t, send)
+	assert.Equal(t, llm.ReasoningEffortMinimal, got)
+	assert.True(t, AcceptsTemperature("meta", "muse-wonder-1.0"))
 }
 
 func TestGPT61SolReasoning(t *testing.T) {

@@ -11,8 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Gemini 4 Argon.** `google.ModelGemini4Argon` and
   `openrouter.ModelGemini4Argon`, at launch pricing. It takes the CLI's Gemini
   pro slot from Gemini 3.1 Pro.
+
 - **Muse Wonder 1.0.** `meta.ModelMuseWonder10` (preview), with efforts
-  `minimal` through `max`. It accepts only an automatic tool choice.
+  `minimal` through `max`. It accepts only an automatic tool choice, so
+  `dive.PromptStopHook` and `dive.PromptToolGate` need another model.
+
+### Changed
+
+- **Gemini defaults move off deprecated models.** The CLI defaults to
+  `gemini-3.8-flash`, and Google transcription to `gemini-3.6-flash`.
 
 ### Deprecated
 
