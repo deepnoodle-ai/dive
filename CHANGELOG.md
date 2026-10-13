@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.37.0] - 2026-10-13
+
 ### Added
 
 - **Gemini 4 Argon.** `google.ModelGemini4Argon` and
