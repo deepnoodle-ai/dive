@@ -6,6 +6,15 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	// Standard tier only; Meta offers no Contributor variant and no long-context premium.
+	ModelMuseWonder10: {
+		Model:          ModelMuseWonder10,
+		InputPrice:     4.00,
+		OutputPrice:    20.00,
+		CacheReadPrice: 0.20,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-13",
+	},
 	// Standard tier. Meta publishes no long-context premium: one rate at any context length.
 	ModelMuseSpark13: {
 		Model:          ModelMuseSpark13,

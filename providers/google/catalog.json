@@ -25,6 +25,16 @@
   ],
   "models": [
     {
+      "go_name": "ModelGemini4Argon",
+      "id": "gemini-4-argon",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Gemini 4 Argon",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Flagship reasoning model for complex coding, agents, math, and science"
+    },
+    {
       "go_name": "ModelGemini38Flash",
       "id": "gemini-3.8-flash",
       "kind": "text",
@@ -40,7 +50,9 @@
       "id": "gemini-3.7-flash",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 3.7 Flash"
+      "display_name": "Gemini 3.7 Flash",
+      "lifecycle": "deprecated",
+      "deprecated": "Deprecated by Google; requests are routed to gemini-3.8-flash. Use ModelGemini38Flash."
     },
     {
       "go_name": "ModelGemini36Flash",
@@ -54,7 +66,9 @@
       "id": "gemini-3.5-flash",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 3.5 Flash"
+      "display_name": "Gemini 3.5 Flash",
+      "lifecycle": "deprecated",
+      "deprecated": "Deprecated by Google; requests are routed to gemini-3.6-flash. Use ModelGemini36Flash."
     },
     {
       "go_name": "ModelGemini35FlashLite",
@@ -92,10 +106,7 @@
       "id": "gemini-3.1-pro-preview",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 3.1 Pro",
-      "recommended": true,
-      "cli_order": 2,
-      "description": "Flagship Pro model for complex reasoning (preview)"
+      "display_name": "Gemini 3.1 Pro"
     },
     {
       "go_name": "ModelGemini31ProPreviewCustomTools",
@@ -284,6 +295,15 @@
   ],
   "pricing": {
     "text": [
+      {
+        "model": "gemini-4-argon",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "10.00",
+        "cache_read_price_per_1m_tokens": "0.10",
+        "currency": "USD",
+        "updated_at": "2026-10-13",
+        "note": "Launch rates through 2026-11-30. Google lists $4.00/$20.00 ($0.20 cache read) from 2026-12-01; revisit then."
+      },
       {
         "model": "gemini-3.8-flash",
         "input_price_per_1m_tokens": "0.75",

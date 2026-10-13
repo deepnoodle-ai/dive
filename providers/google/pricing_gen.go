@@ -6,6 +6,15 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	// Launch rates through 2026-11-30. Google lists $4.00/$20.00 ($0.20 cache read) from 2026-12-01; revisit then.
+	ModelGemini4Argon: {
+		Model:          ModelGemini4Argon,
+		InputPrice:     2.00,
+		OutputPrice:    10.00,
+		CacheReadPrice: 0.10,
+		Currency:       "USD",
+		UpdatedAt:      "2026-10-13",
+	},
 	// Rates billed today. Google lists a scheduled increase to $1.50/$7.50 ($0.15 cache read) on 2027-01-01; revisit then.
 	ModelGemini38Flash: {
 		Model:          ModelGemini38Flash,

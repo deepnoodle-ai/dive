@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Gemini 4 Argon.** `google.ModelGemini4Argon` and
+  `openrouter.ModelGemini4Argon`, at launch pricing. It takes the CLI's Gemini
+  pro slot from Gemini 3.1 Pro.
+- **Muse Wonder 1.0.** `meta.ModelMuseWonder10` (preview), with efforts
+  `minimal` through `max`. It accepts only an automatic tool choice.
+
+### Deprecated
+
+- **`google.ModelGemini35Flash` and `google.ModelGemini37Flash`.** Google routes
+  them to `ModelGemini36Flash` and `ModelGemini38Flash`.
+
 ## [1.36.0] - 2026-10-07
 
 ### Added

@@ -3,6 +3,7 @@
 package meta
 
 const (
+	ModelMuseWonder10           = "muse-wonder-1.0"
 	ModelMuseSpark13            = "muse-spark-1.3"
 	ModelMuseSpark13Contributor = "muse-spark-1.3-contributor"
 	ModelMuseSpark12            = "muse-spark-1.2"

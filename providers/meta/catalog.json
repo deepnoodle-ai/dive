@@ -31,6 +31,17 @@
   ],
   "models": [
     {
+      "go_name": "ModelMuseWonder10",
+      "id": "muse-wonder-1.0",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Wonder 1.0",
+      "lifecycle": "preview",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Meta's most capable model, for long-horizon coding and agent work; 1M context, standard tier only"
+    },
+    {
       "go_name": "ModelMuseSpark13",
       "id": "muse-spark-1.3",
       "default": true,
@@ -90,6 +101,15 @@
   ],
   "pricing": {
     "text": [
+      {
+        "model": "muse-wonder-1.0",
+        "input_price_per_1m_tokens": "4.00",
+        "output_price_per_1m_tokens": "20.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "currency": "USD",
+        "updated_at": "2026-10-13",
+        "note": "Standard tier only; Meta offers no Contributor variant and no long-context premium."
+      },
       {
         "model": "muse-spark-1.3",
         "input_price_per_1m_tokens": "1.25",
