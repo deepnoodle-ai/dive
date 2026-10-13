@@ -89,9 +89,15 @@ type capabilityEntry struct {
 // cannot, and the 2.5 generation has no thinking level at all.
 var modelCapabilityTable = []capabilityEntry{
 	// --- 4.x ---
-	// Gemini 4 Argon documents thinking levels low, medium and high but has
-	// not been probed against the live API, so its parameters pass through.
-	{prefix: "gemini-4-argon", caps: modelCapabilities{unverified: true}},
+	// Gemini 4 Argon rejects MINIMAL ("Thinking level MINIMAL is not supported
+	// for this model"), takes budgets in [1, 65535], and accepts
+	// thinkingBudget: 0. Probed live against the public Gemini API on
+	// 2026-10-13, including an image inside a function response.
+	{prefix: "gemini-4-argon", caps: modelCapabilities{
+		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
+	}},
 
 	// --- 3.x: thinking levels, budgets in [1, 65535] unless noted. ---
 	// 3.8 Flash rejects MINIMAL ("Thinking level MINIMAL is not supported for

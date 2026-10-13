@@ -109,6 +109,24 @@ func TestGemini38FlashResolvesToItsOwnCapabilities(t *testing.T) {
 	assert.Equal(t, int32(65535), *budget.ThinkingBudget)
 }
 
+func TestGemini4ArgonCapabilities(t *testing.T) {
+	// Probed live: Argon rejects MINIMAL, takes budgets up to 65535, and
+	// accepts thinkingBudget: 0.
+	clamped := buildThinking(t, ModelGemini4Argon,
+		llm.WithReasoningEffort(llm.ReasoningEffortMinimal))
+	assert.NotNil(t, clamped)
+	assert.Equal(t, genai.ThinkingLevelLow, clamped.ThinkingLevel)
+
+	budget := buildThinking(t, ModelGemini4Argon, llm.WithReasoningBudget(1_000_000))
+	assert.NotNil(t, budget)
+	assert.Equal(t, int32(65535), *budget.ThinkingBudget)
+
+	disabled := buildThinking(t, ModelGemini4Argon,
+		llm.WithReasoningEffort(llm.ReasoningEffortNone))
+	assert.NotNil(t, disabled)
+	assert.Equal(t, int32(0), *disabled.ThinkingBudget)
+}
+
 func TestReasoningBudgetMapsToThinkingBudget(t *testing.T) {
 	thinking := buildThinking(t, ModelGemini36Flash, llm.WithReasoningBudget(4096))
 	assert.NotNil(t, thinking)
