@@ -627,6 +627,49 @@ func TestApplyCachingAnchorsStayStableAcrossTurns(t *testing.T) {
 	assert.Equal(t, []int{29, 44}, anchoredIndices(req46.Messages))
 }
 
+func TestApplyCachingAnchorSkipsNonCacheableRun(t *testing.T) {
+	// Blocks 0-9 are user text, 10-14 an assistant run of thinking blocks
+	// (which cannot carry cache_control) ending on the block-14 target, then
+	// text again. The anchor moves down to block 9 and stays there as the
+	// conversation grows.
+	build := func(total int) []*llm.Message {
+		var msgs []*llm.Message
+		for range 10 {
+			msgs = append(msgs, llm.NewUserTextMessage("u"))
+		}
+		thinking := &llm.Message{Role: llm.Assistant}
+		for range 5 {
+			thinking.Content = append(thinking.Content, &llm.ThinkingContent{Thinking: "t", Signature: "s"})
+		}
+		thinking.Content = append(thinking.Content, &llm.TextContent{Text: "a"})
+		msgs = append(msgs, thinking)
+		for i := 16; i < total; i++ {
+			msgs = append(msgs, llm.NewUserTextMessage("u"))
+		}
+		return msgs
+	}
+	anchored := func(msgs []*llm.Message) []int {
+		var indices []int
+		idx := 0
+		for _, m := range msgs {
+			for _, c := range m.Content {
+				if blockCacheControl(c) != nil {
+					indices = append(indices, idx)
+				}
+				idx++
+			}
+		}
+		return indices
+	}
+
+	config := &llm.Config{}
+	config.Apply(llm.WithFeatures(FeatureExtendedCache))
+	for total := 16; total <= 30; total++ {
+		req := applyTestCaching(t, New(), config, "sys", build(total))
+		assert.Equal(t, []int{9}, anchored(req.Messages), "total=%d", total)
+	}
+}
+
 func TestApplyCachingWireFormat(t *testing.T) {
 	// The serialized request must render system as an array of text blocks (so a
 	// breakpoint can attach) and carry a top-level cache_control for automatic

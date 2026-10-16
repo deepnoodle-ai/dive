@@ -508,9 +508,9 @@ const (
 //     explicit tail breakpoint on endpoints that don't (Bedrock / Vertex /
 //     custom).
 //   - Explicit anchor breakpoints are placed at the latest fixed multiples of
-//     cacheAnchorGap blocks before the tail so consecutive breakpoints stay at
-//     most cacheAnchorGap blocks apart (inside the 20-block lookback window)
-//     while each anchor remains on the same content block across turns.
+//     cacheAnchorGap blocks before the tail, so each anchor stays on the same
+//     content block across turns and consecutive breakpoints stay about
+//     cacheAnchorGap blocks apart (see placeCacheAnchors for the bound).
 //
 // Stable-prefix breakpoints (system + anchors) use the 1-hour TTL when the
 // extended-cache feature is enabled; the tail stays at the default 5-minute
@@ -705,8 +705,14 @@ func setLastMessageTailBreakpoint(messages []*llm.Message) bool {
 // (1-based block positions cacheAnchorGap, 2*cacheAnchorGap, ...). Because
 // those positions depend only on a block's index from the start of the
 // conversation, each anchor stays on the same content block as the tail grows
-// turn by turn while keeping consecutive breakpoints at most cacheAnchorGap
-// blocks apart (inside Anthropic's 20-block lookback window).
+// turn by turn.
+//
+// Some blocks cannot carry a breakpoint (thinking, server-tool and MCP
+// blocks). When the target position is one, the anchor moves down to the
+// nearest block that can, which is still deterministic across turns. The gap
+// above that anchor is then cacheAnchorGap plus the length of the skipped run,
+// so it stays inside Anthropic's 20-block lookback only while such runs are
+// shorter than cacheLookbackWindow - cacheAnchorGap blocks.
 //
 // The tail block (whether owned by automatic caching or an explicit fallback
 // breakpoint) is never itself anchored.
