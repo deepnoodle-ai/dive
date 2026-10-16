@@ -363,18 +363,18 @@ func validateTextPrices(name string, prices []TextPrice) error {
 // by image models their provider bills per token.
 func validateTokenPrice(name, model string, price TokenPrice) error {
 	for field, value := range map[string]string{
-		"input_price_per_1m_tokens":                         price.InputPrice,
-		"output_price_per_1m_tokens":                        price.OutputPrice,
-		"long_context_input_price_per_1m_tokens":            price.LongContextInputPrice,
-		"long_context_cache_read_price_per_1m_tokens":       price.LongContextCacheReadPrice,
-		"long_context_output_price_per_1m_tokens":           price.LongContextOutputPrice,
-		"long_context_cache_write_price_per_1m_tokens":      price.LongContextCacheWritePrice,
-		"long_context_cache_write_1h_price_per_1m_tokens":   price.LongContextCacheWrite1hPrice,
-		"cache_read_price_per_1m_tokens":                    price.CacheReadPrice,
-		"cache_read_price_above_threshold_per_1m_tokens":    price.CacheReadPriceAboveThreshold,
-		"cache_write_price_per_1m_tokens":                   price.CacheWritePrice,
-		"cache_write_1h_price_per_1m_tokens":                price.CacheWrite1hPrice,
-		"non_global_price_multiplier":                       price.NonGlobalPriceMultiplier,
+		"input_price_per_1m_tokens":                       price.InputPrice,
+		"output_price_per_1m_tokens":                      price.OutputPrice,
+		"long_context_input_price_per_1m_tokens":          price.LongContextInputPrice,
+		"long_context_cache_read_price_per_1m_tokens":     price.LongContextCacheReadPrice,
+		"long_context_output_price_per_1m_tokens":         price.LongContextOutputPrice,
+		"long_context_cache_write_price_per_1m_tokens":    price.LongContextCacheWritePrice,
+		"long_context_cache_write_1h_price_per_1m_tokens": price.LongContextCacheWrite1hPrice,
+		"cache_read_price_per_1m_tokens":                  price.CacheReadPrice,
+		"cache_read_price_above_threshold_per_1m_tokens":  price.CacheReadPriceAboveThreshold,
+		"cache_write_price_per_1m_tokens":                 price.CacheWritePrice,
+		"cache_write_1h_price_per_1m_tokens":              price.CacheWrite1hPrice,
+		"non_global_price_multiplier":                     price.NonGlobalPriceMultiplier,
 	} {
 		if err := validateDecimal(name, model, field, value, field == "input_price_per_1m_tokens" || field == "output_price_per_1m_tokens"); err != nil {
 			return err

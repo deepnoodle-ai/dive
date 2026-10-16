@@ -507,9 +507,10 @@ const (
 //     (a top-level cache_control) when the endpoint supports it, or via an
 //     explicit tail breakpoint on endpoints that don't (Bedrock / Vertex /
 //     custom).
-//   - Explicit anchor breakpoints are placed walking backward from the tail so
-//     no two breakpoints are more than cacheAnchorGap blocks apart, keeping the
-//     chain inside the 20-block lookback window during high tool-call fan-out.
+//   - Explicit anchor breakpoints are placed at the latest fixed multiples of
+//     cacheAnchorGap blocks before the tail so consecutive breakpoints stay at
+//     most cacheAnchorGap blocks apart (inside the 20-block lookback window)
+//     while each anchor remains on the same content block across turns.
 //
 // Stable-prefix breakpoints (system + anchors) use the 1-hour TTL when the
 // extended-cache feature is enabled; the tail stays at the default 5-minute
@@ -699,34 +700,43 @@ func setLastMessageTailBreakpoint(messages []*llm.Message) bool {
 	return false
 }
 
-// placeCacheAnchors walks backward over the message content blocks and drops up
-// to maxAnchors explicit breakpoints so that consecutive breakpoints are never
-// more than cacheAnchorGap blocks apart. This keeps every breakpoint within the
-// API's lookback window even when one turn appends a large fan-out of blocks,
-// bounding a cache miss to a single gap instead of the whole message prefix.
+// placeCacheAnchors places up to maxAnchors explicit breakpoints at the latest
+// fixed multiples of cacheAnchorGap content blocks before the message tail
+// (1-based block positions cacheAnchorGap, 2*cacheAnchorGap, ...). Because
+// those positions depend only on a block's index from the start of the
+// conversation, each anchor stays on the same content block as the tail grows
+// turn by turn while keeping consecutive breakpoints at most cacheAnchorGap
+// blocks apart (inside Anthropic's 20-block lookback window).
 //
 // The tail block (whether owned by automatic caching or an explicit fallback
-// breakpoint) is counted toward the first gap but is never itself anchored.
+// breakpoint) is never itself anchored.
 func placeCacheAnchors(messages []*llm.Message, maxAnchors int, ttl string) {
 	if maxAnchors <= 0 {
 		return
 	}
+	total := 0
+	for _, msg := range messages {
+		total += len(msg.Content)
+	}
+	if total <= cacheAnchorGap {
+		return
+	}
 	placed := 0
-	blocks := 0
-	first := true
+	idx := total - 1
+	needAnchor := false
 	for mi := len(messages) - 1; mi >= 0 && placed < maxAnchors; mi-- {
 		contents := messages[mi].Content
 		for bi := len(contents) - 1; bi >= 0 && placed < maxAnchors; bi-- {
-			// The tail block is already the tail breakpoint (automatic owns the
-			// real tail; the explicit fallback marked the last block). Count it
-			// toward the first gap but never anchor on it.
-			if first {
-				first = false
-				blocks++
+			pos := idx // 0-based index from the start of messages
+			idx--
+			// Never anchor the tail block itself.
+			if pos == total-1 {
 				continue
 			}
-			blocks++
-			if blocks < cacheAnchorGap {
+			if (pos+1)%cacheAnchorGap == 0 {
+				needAnchor = true
+			}
+			if !needAnchor {
 				continue
 			}
 			if setter, ok := contents[bi].(llm.CacheControlSetter); ok {
@@ -735,7 +745,7 @@ func placeCacheAnchors(messages []*llm.Message, maxAnchors int, ttl string) {
 					TTL:  ttl,
 				})
 				placed++
-				blocks = 0
+				needAnchor = false
 			}
 		}
 	}

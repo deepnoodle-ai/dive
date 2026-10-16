@@ -143,6 +143,7 @@ func TestParseRejectsLongContextCacheWriteWithoutStandardRate(t *testing.T) {
 	)
 	_, err := Parse("test", []byte(invalid))
 	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "cache-write price without a standard one"), "unexpected error: %v", err)
 
 	invalid1h := strings.Replace(
 		validCatalog,
@@ -152,6 +153,7 @@ func TestParseRejectsLongContextCacheWriteWithoutStandardRate(t *testing.T) {
 	)
 	_, err = Parse("test", []byte(invalid1h))
 	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "1h cache-write price without a standard one"), "unexpected error: %v", err)
 }
 
 func TestParseRejectsNonFinitePrices(t *testing.T) {
