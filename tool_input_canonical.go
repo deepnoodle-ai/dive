@@ -8,7 +8,8 @@ import (
 )
 
 // canonicalizeToolInputs rewrites each tool call's JSON input in a canonical
-// form: object keys sorted, no insignificant whitespace. It runs before the
+// form: object keys sorted at every depth, no insignificant whitespace, and
+// strings escaped the way json.Marshal escapes them. It runs before an
 // assistant message is recorded, so the request that next carries the call,
 // and every later replay of it, send identical bytes.
 //
@@ -19,8 +20,11 @@ import (
 // first tool call with more than one key, and everything after it is
 // rewritten in the provider's cache instead of read.
 //
-// Values are preserved exactly: numbers keep their literal text, and an input
-// that is not valid JSON is left untouched.
+// Number literals keep their exact text, so a tool receives the same values
+// the model wrote, large integers included. A store that decodes numbers to
+// float64 replays some literals differently (0.10 as 0.1); a store that keeps
+// number text (Go's json.Decoder.UseNumber) matches exactly. Input that is
+// empty or not valid JSON is left untouched.
 func canonicalizeToolInputs(contents []llm.Content) {
 	for _, content := range contents {
 		switch c := content.(type) {
@@ -33,15 +37,15 @@ func canonicalizeToolInputs(contents []llm.Content) {
 }
 
 // canonicalJSON returns raw re-encoded with sorted object keys and compact
-// spacing, or raw itself when it is empty or not valid JSON.
+// spacing, or raw itself when it is not a single valid JSON value.
 func canonicalJSON(raw json.RawMessage) json.RawMessage {
-	if len(bytes.TrimSpace(raw)) == 0 {
+	if !json.Valid(raw) {
 		return raw
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	var value any
-	if err := decoder.Decode(&value); err != nil || decoder.More() {
+	if err := decoder.Decode(&value); err != nil {
 		return raw
 	}
 	canonical, err := json.Marshal(value)

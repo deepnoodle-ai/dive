@@ -2535,6 +2535,7 @@ func (a *Agent) partialMessage(partial *llm.Response, unfinished []llm.Content) 
 	if len(content) == 0 {
 		return nil
 	}
+	canonicalizeToolInputs(content)
 	return &llm.Message{ID: partial.ID, Role: llm.Assistant, Content: content}
 }
 
