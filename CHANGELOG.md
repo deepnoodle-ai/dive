@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Tool-call inputs are recorded in canonical JSON.** The agent sorts object
+  keys and removes spacing in each `tool_use` and `mcp_tool_use` input before
+  it records the assistant message. Tools, hooks, event callbacks and
+  `OutputMessages` see the canonical bytes; the values are unchanged, number
+  text included. A transcript replayed from a store that sorts keys, such as
+  Postgres `jsonb` read into Go maps, now sends the same bytes as the live
+  turn, so the provider's prompt cache reads it instead of rewriting it.
+
 ## [1.37.0] - 2026-10-13
 
 ### Added
