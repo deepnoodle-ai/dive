@@ -2268,6 +2268,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		// reason before the callback, which can fail. A response left with
 		// nothing once cleaned up is not recorded.
 		assistantMsg := response.Message()
+		canonicalizeToolInputs(assistantMsg.Content)
 		record.addModelResponse(response)
 		if len(assistantMsg.Content) > 0 {
 			newMessage(assistantMsg)
