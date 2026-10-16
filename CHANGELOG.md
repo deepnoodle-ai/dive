@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.37.1] - 2026-10-16
+
 ### Changed
 
 - **Tool-call inputs are recorded in canonical JSON.** The agent sorts object
