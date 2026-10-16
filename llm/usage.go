@@ -26,7 +26,13 @@ type Usage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	// CacheCreation5mInputTokens and CacheCreation1hInputTokens break
+	// CacheCreationInputTokens down by TTL when the provider reports per-TTL
+	// cache writes (Anthropic's usage.cache_creation). They are subsets of
+	// CacheCreationInputTokens, not additive with it.
+	CacheCreation5mInputTokens int `json:"cache_creation_5m_input_tokens,omitempty"`
+	CacheCreation1hInputTokens int `json:"cache_creation_1h_input_tokens,omitempty"`
+	CacheReadInputTokens       int `json:"cache_read_input_tokens,omitempty"`
 	// ToolUseInputTokens is the subset of InputTokens attributable to results
 	// from provider-managed tool executions that were supplied back to the
 	// model. It is not additive, just as ReasoningTokens is not additive.
@@ -63,10 +69,17 @@ type Usage struct {
 	Cost *Cost `json:"cost,omitempty"`
 }
 
+func (u Usage) cacheCreationTokens() int {
+	if breakdown := max(0, u.CacheCreation5mInputTokens) + max(0, u.CacheCreation1hInputTokens); breakdown > u.CacheCreationInputTokens {
+		return breakdown
+	}
+	return u.CacheCreationInputTokens
+}
+
 // TotalInputTokens returns the full input size across the disjoint input-side
 // token buckets.
 func (u Usage) TotalInputTokens() int {
-	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return u.InputTokens + u.cacheCreationTokens() + u.CacheReadInputTokens
 }
 
 // UnmarshalJSON accepts provider-native usage shapes and maps their cache and
@@ -79,6 +92,10 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	}
 	var raw struct {
 		usageAlias
+		CacheCreation *struct {
+			Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+			Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+		} `json:"cache_creation,omitempty"`
 		InputTokensDetails  *inputTokensDetails `json:"input_tokens_details,omitempty"`
 		PromptTokens        *int                `json:"prompt_tokens,omitempty"`
 		PromptTokensDetails *inputTokensDetails `json:"prompt_tokens_details,omitempty"`
@@ -101,7 +118,20 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	// reinterpret that data.
 	_, hasCanonicalCacheRead := fields["cache_read_input_tokens"]
 	_, hasCanonicalCacheCreation := fields["cache_creation_input_tokens"]
-	if !hasCanonicalCacheRead && !hasCanonicalCacheCreation {
+	_, hasCanonicalCacheCreation5m := fields["cache_creation_5m_input_tokens"]
+	_, hasCanonicalCacheCreation1h := fields["cache_creation_1h_input_tokens"]
+	if raw.CacheCreation != nil {
+		if !hasCanonicalCacheCreation5m && u.CacheCreation5mInputTokens == 0 {
+			u.CacheCreation5mInputTokens = max(0, raw.CacheCreation.Ephemeral5mInputTokens)
+		}
+		if !hasCanonicalCacheCreation1h && u.CacheCreation1hInputTokens == 0 {
+			u.CacheCreation1hInputTokens = max(0, raw.CacheCreation.Ephemeral1hInputTokens)
+		}
+	}
+	if !hasCanonicalCacheCreation && u.CacheCreationInputTokens == 0 {
+		u.CacheCreationInputTokens = max(0, u.CacheCreation5mInputTokens) + max(0, u.CacheCreation1hInputTokens)
+	}
+	if !hasCanonicalCacheRead && !hasCanonicalCacheCreation && !hasCanonicalCacheCreation5m && !hasCanonicalCacheCreation1h && raw.CacheCreation == nil {
 		normalize := func(prompt, cached, written int) {
 			prompt = max(0, prompt)
 			cached = min(max(0, cached), prompt)
@@ -144,6 +174,8 @@ func (u *Usage) Copy() *Usage {
 		InputTokens:                             u.InputTokens,
 		OutputTokens:                            u.OutputTokens,
 		CacheCreationInputTokens:                u.CacheCreationInputTokens,
+		CacheCreation5mInputTokens:              u.CacheCreation5mInputTokens,
+		CacheCreation1hInputTokens:              u.CacheCreation1hInputTokens,
 		CacheReadInputTokens:                    u.CacheReadInputTokens,
 		ToolUseInputTokens:                      u.ToolUseInputTokens,
 		ReasoningTokens:                         u.ReasoningTokens,
@@ -183,6 +215,8 @@ func (u *Usage) Absorb(other *Usage) {
 	u.InputTokens = max(u.InputTokens, other.InputTokens)
 	u.OutputTokens = max(u.OutputTokens, other.OutputTokens)
 	u.CacheCreationInputTokens = max(u.CacheCreationInputTokens, other.CacheCreationInputTokens)
+	u.CacheCreation5mInputTokens = max(u.CacheCreation5mInputTokens, other.CacheCreation5mInputTokens)
+	u.CacheCreation1hInputTokens = max(u.CacheCreation1hInputTokens, other.CacheCreation1hInputTokens)
 	u.CacheReadInputTokens = max(u.CacheReadInputTokens, other.CacheReadInputTokens)
 	u.ToolUseInputTokens = max(u.ToolUseInputTokens, other.ToolUseInputTokens)
 	u.ReasoningTokens = max(u.ReasoningTokens, other.ReasoningTokens)
@@ -228,6 +262,8 @@ func (u *Usage) Add(other *Usage) {
 	u.InputTokens += other.InputTokens
 	u.OutputTokens += other.OutputTokens
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheCreation5mInputTokens += other.CacheCreation5mInputTokens
+	u.CacheCreation1hInputTokens += other.CacheCreation1hInputTokens
 	u.CacheReadInputTokens += other.CacheReadInputTokens
 	u.ToolUseInputTokens += other.ToolUseInputTokens
 	u.ReasoningTokens += other.ReasoningTokens

@@ -32,6 +32,10 @@ type PricingInfo struct {
 	// Zero leaves cache writes at the standard rate, which is correct for a
 	// model that surcharges writes without varying them by request size.
 	LongContextCacheWritePrice float64 `json:"long_context_cache_write_price_per_1m_tokens,omitempty"`
+	// LongContextCacheWrite1hPrice replaces CacheWrite1hPrice past the
+	// threshold. Zero leaves 1-hour cache writes at their standard rate (or at
+	// the active 5-minute write rate when CacheWrite1hPrice is unset).
+	LongContextCacheWrite1hPrice float64 `json:"long_context_cache_write_1h_price_per_1m_tokens,omitempty"`
 	// CacheReadPrice is the price per 1M tokens read from the prompt cache (a
 	// cache hit). Zero means the provider does not bill cache reads separately.
 	CacheReadPrice float64 `json:"cache_read_price_per_1m_tokens,omitempty"`
@@ -44,6 +48,10 @@ type PricingInfo struct {
 	// cache miss). For providers with multiple cache TTLs this is the default
 	// (shortest) TTL rate. Zero means the provider does not surcharge writes.
 	CacheWritePrice float64 `json:"cache_write_price_per_1m_tokens,omitempty"`
+	// CacheWrite1hPrice is the price per 1M tokens written to the 1-hour prompt
+	// cache. When zero, 1-hour cache writes fall back to the active
+	// CacheWritePrice.
+	CacheWrite1hPrice float64 `json:"cache_write_1h_price_per_1m_tokens,omitempty"`
 	// NonGlobalPriceMultiplier is applied by providers whose list price differs
 	// between global and regional endpoints. CostOf itself remains location-free.
 	NonGlobalPriceMultiplier float64 `json:"non_global_price_multiplier,omitempty"`
@@ -106,6 +114,10 @@ func (p PricingInfo) CostOf(u *Usage) Cost {
 	outputPrice := p.OutputPrice
 	cacheReadPrice := p.CacheReadPrice
 	cacheWritePrice := p.CacheWritePrice
+	cacheWrite1hPrice := p.CacheWrite1hPrice
+	if cacheWrite1hPrice == 0 {
+		cacheWrite1hPrice = cacheWritePrice
+	}
 	totalInput := u.TotalInputTokens()
 	if p.LongContextThreshold > 0 && totalInput >= p.LongContextThreshold {
 		inputPrice = p.LongContextInputPrice
@@ -114,14 +126,26 @@ func (p PricingInfo) CostOf(u *Usage) Cost {
 		if p.LongContextCacheWritePrice > 0 {
 			cacheWritePrice = p.LongContextCacheWritePrice
 		}
+		if p.LongContextCacheWrite1hPrice > 0 {
+			cacheWrite1hPrice = p.LongContextCacheWrite1hPrice
+		} else if p.CacheWrite1hPrice == 0 {
+			cacheWrite1hPrice = cacheWritePrice
+		}
 	} else if p.CacheReadPriceThreshold > 0 && totalInput > p.CacheReadPriceThreshold {
 		cacheReadPrice = p.CacheReadPriceAboveThreshold
+	}
+	totalCacheWrite := u.cacheCreationTokens()
+	write1h := min(max(0, u.CacheCreation1hInputTokens), max(0, totalCacheWrite))
+	write5m := totalCacheWrite - write1h
+	cacheWriteCost := float64(write5m) * cacheWritePrice / perMillion
+	if write1h > 0 {
+		cacheWriteCost += float64(write1h) * cacheWrite1hPrice / perMillion
 	}
 	c := Cost{
 		Input:      float64(u.InputTokens) * inputPrice / perMillion,
 		Output:     float64(u.OutputTokens) * outputPrice / perMillion,
 		CacheRead:  float64(u.CacheReadInputTokens) * cacheReadPrice / perMillion,
-		CacheWrite: float64(u.CacheCreationInputTokens) * cacheWritePrice / perMillion,
+		CacheWrite: cacheWriteCost,
 		Currency:   p.Currency,
 		Model:      p.Model,
 		Source:     CostSourceListPriceEstimate,
@@ -151,9 +175,11 @@ func (p PricingInfo) Scaled(factor float64) PricingInfo {
 	p.LongContextCacheReadPrice *= factor
 	p.LongContextOutputPrice *= factor
 	p.LongContextCacheWritePrice *= factor
+	p.LongContextCacheWrite1hPrice *= factor
 	p.CacheReadPrice *= factor
 	p.CacheReadPriceAboveThreshold *= factor
 	p.CacheWritePrice *= factor
+	p.CacheWrite1hPrice *= factor
 	p.InputPriceByModality = scalePriceMap(p.InputPriceByModality, factor)
 	p.OutputPriceByModality = scalePriceMap(p.OutputPriceByModality, factor)
 	p.CacheReadPriceByModality = scalePriceMap(p.CacheReadPriceByModality, factor)

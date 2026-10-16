@@ -143,6 +143,15 @@ func TestParseRejectsLongContextCacheWriteWithoutStandardRate(t *testing.T) {
 	)
 	_, err := Parse("test", []byte(invalid))
 	assert.Error(t, err)
+
+	invalid1h := strings.Replace(
+		validCatalog,
+		`"output_price_per_1m_tokens": "5.00"`,
+		`"output_price_per_1m_tokens": "5.00", "long_context_threshold_tokens": 200000, "long_context_input_price_per_1m_tokens": "2.50", "long_context_cache_read_price_per_1m_tokens": "0.25", "long_context_output_price_per_1m_tokens": "10.00", "long_context_cache_write_1h_price_per_1m_tokens": "5.00"`,
+		1,
+	)
+	_, err = Parse("test", []byte(invalid1h))
+	assert.Error(t, err)
 }
 
 func TestParseRejectsNonFinitePrices(t *testing.T) {

@@ -309,3 +309,79 @@ func TestUsageAbsorbNilIsNoOp(t *testing.T) {
 	usage.Absorb(nil)
 	assert.Equal(t, 5, usage.InputTokens)
 }
+
+func TestUsageUnmarshalAnthropicCacheCreationBreakdown(t *testing.T) {
+	t.Run("with top-level cache_creation_input_tokens", func(t *testing.T) {
+		var usage Usage
+		err := json.Unmarshal([]byte(`{
+			"input_tokens": 120,
+			"cache_creation_input_tokens": 8500,
+			"cache_read_input_tokens": 30000,
+			"cache_creation": {
+				"ephemeral_5m_input_tokens": 500,
+				"ephemeral_1h_input_tokens": 8000
+			},
+			"output_tokens": 42
+		}`), &usage)
+		assert.NoError(t, err)
+		assert.Equal(t, 120, usage.InputTokens)
+		assert.Equal(t, 8500, usage.CacheCreationInputTokens)
+		assert.Equal(t, 500, usage.CacheCreation5mInputTokens)
+		assert.Equal(t, 8000, usage.CacheCreation1hInputTokens)
+		assert.Equal(t, 30000, usage.CacheReadInputTokens)
+		assert.Equal(t, 42, usage.OutputTokens)
+		assert.Equal(t, 38620, usage.TotalInputTokens())
+	})
+
+	t.Run("without top-level cache_creation_input_tokens", func(t *testing.T) {
+		var usage Usage
+		err := json.Unmarshal([]byte(`{
+			"input_tokens": 120,
+			"cache_read_input_tokens": 30000,
+			"cache_creation": {
+				"ephemeral_5m_input_tokens": 500,
+				"ephemeral_1h_input_tokens": 8000
+			},
+			"output_tokens": 42
+		}`), &usage)
+		assert.NoError(t, err)
+		assert.Equal(t, 8500, usage.CacheCreationInputTokens)
+		assert.Equal(t, 500, usage.CacheCreation5mInputTokens)
+		assert.Equal(t, 8000, usage.CacheCreation1hInputTokens)
+		assert.Equal(t, 38620, usage.TotalInputTokens())
+	})
+
+	t.Run("copy absorb and add preserve breakdown", func(t *testing.T) {
+		start := &Usage{
+			InputTokens:                10,
+			CacheCreationInputTokens:   8500,
+			CacheCreation5mInputTokens: 500,
+			CacheCreation1hInputTokens: 8000,
+			CacheReadInputTokens:       20000,
+			OutputTokens:               2,
+		}
+		accumulated := start.Copy()
+		// message_delta frame that omits cache_creation must not zero the breakdown.
+		accumulated.Absorb(&Usage{
+			InputTokens:              10,
+			CacheCreationInputTokens: 8500,
+			CacheReadInputTokens:     20000,
+			OutputTokens:             55,
+		})
+		assert.Equal(t, 8500, accumulated.CacheCreationInputTokens)
+		assert.Equal(t, 500, accumulated.CacheCreation5mInputTokens)
+		assert.Equal(t, 8000, accumulated.CacheCreation1hInputTokens)
+		assert.Equal(t, 55, accumulated.OutputTokens)
+
+		total := &Usage{}
+		total.Add(accumulated)
+		total.Add(&Usage{
+			CacheCreationInputTokens:   1300,
+			CacheCreation5mInputTokens: 300,
+			CacheCreation1hInputTokens: 1000,
+		})
+		assert.Equal(t, 9800, total.CacheCreationInputTokens)
+		assert.Equal(t, 800, total.CacheCreation5mInputTokens)
+		assert.Equal(t, 9000, total.CacheCreation1hInputTokens)
+	})
+}

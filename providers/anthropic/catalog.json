@@ -234,6 +234,7 @@
         "updated_at": "2026-09-30",
         "cache_read_price_per_1m_tokens": "0.20",
         "cache_write_price_per_1m_tokens": "2.50",
+        "cache_write_1h_price_per_1m_tokens": "4.00",
         "note": "Standard tier, including the full 1M context window."
       },
       {
@@ -244,12 +245,14 @@
         "updated_at": "2026-10-07",
         "cache_read_price_per_1m_tokens": "0.01",
         "cache_write_price_per_1m_tokens": "0.125",
+        "cache_write_1h_price_per_1m_tokens": "0.20",
         "long_context_threshold_tokens": 100001,
         "long_context_input_price_per_1m_tokens": "0.50",
         "long_context_output_price_per_1m_tokens": "2.50",
         "long_context_cache_read_price_per_1m_tokens": "0.05",
         "long_context_cache_write_price_per_1m_tokens": "0.625",
-        "note": "Priced by prompt length: prompts over 100,000 tokens pay the higher rates. Cache writes are the 5-minute rate."
+        "long_context_cache_write_1h_price_per_1m_tokens": "1.00",
+        "note": "Priced by prompt length: prompts over 100,000 tokens pay the higher rates. Cache writes state both the 5-minute (1.25x) and 1-hour (2x) rates."
       },
       {
         "model": "claude-3-5-haiku-20241022",
