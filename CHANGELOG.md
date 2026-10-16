@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-10-16
+
 ### Added
 
 - **Anthropic 1-hour prompt-cache write usage and pricing.** `llm.Usage` parses
