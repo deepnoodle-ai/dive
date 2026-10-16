@@ -2146,6 +2146,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 			// loop-local slice is picked up by newMessage's closure, so later
 			// assistant/tool messages append to the compacted set.
 			updatedMessages = hctx.Messages
+			if hctx.FinalCall {
+				hctx.FinalCall = false
+				lastIteration = true
+			}
 		}
 		deliverReminders(hctx.reminders.drainPending())
 		systemPrompt = ensureReminderPriming(systemPrompt)

@@ -135,6 +135,13 @@ type HookContext struct {
 	// Iteration is the zero-based iteration number within the generation loop.
 	Iteration int
 
+	// FinalCall, when a PreIteration hook sets it, makes the upcoming model
+	// call the last one of this generation loop: tools are disabled for it, as
+	// at the tool iteration limit. To tell the model why, append a Recorded
+	// reminder in the same hook; it is delivered before the call and kept in
+	// the turn's output. The agent clears the flag once applied.
+	FinalCall bool
+
 	// OnIncompleteTurn
 
 	// Turn is the turn as it will be returned and saved. Set for
