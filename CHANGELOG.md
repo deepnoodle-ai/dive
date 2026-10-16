@@ -8,23 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Anthropic 1-hour prompt-cache write usage and pricing.** `llm.Usage`
-  parses `usage.cache_creation.ephemeral_5m_input_tokens` and
-  `ephemeral_1h_input_tokens` into `CacheCreation5mInputTokens` and
-  `CacheCreation1hInputTokens` while keeping `CacheCreationInputTokens` as the
-  total cache-write token count. `llm.PricingInfo` adds `CacheWrite1hPrice` and
-  `LongContextCacheWrite1hPrice` so `CostOf` prices 1-hour cache writes at 2x
-  input (including long-context tiers such as Claude Haiku 5.5 above 100k
-  tokens) while 5-minute writes remain at 1.25x input.
+- **Anthropic 1-hour prompt-cache write usage and pricing.** `llm.Usage` parses
+  5-minute and 1-hour cache-creation token counts, and `llm.PricingInfo` prices
+  1-hour cache writes at 2x input (including long-context tiers).
 
 ### Changed
 
 - **Anthropic prompt-cache history anchors stay at fixed block positions across
-  turns.** `placeCacheAnchors` now places up to `maxAnchors` breakpoints at the
-  latest fixed multiples of `cacheAnchorGap` before the message tail rather than
-  measuring backward from the moving tail on every call, so 1-hour history
-  anchors hit the cache on subsequent turns instead of rewriting at a shifted
-  offset each turn.
+  turns.** `placeCacheAnchors` anchors fixed multiples of `cacheAnchorGap`
+  before the tail instead of shifting with the tail on every call.
 
 ## [1.38.0] - 2026-10-16
 
