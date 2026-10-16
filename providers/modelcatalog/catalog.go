@@ -93,10 +93,12 @@ type TokenPrice struct {
 	LongContextCacheReadPrice    string            `json:"long_context_cache_read_price_per_1m_tokens,omitempty"`
 	LongContextOutputPrice       string            `json:"long_context_output_price_per_1m_tokens,omitempty"`
 	LongContextCacheWritePrice   string            `json:"long_context_cache_write_price_per_1m_tokens,omitempty"`
+	LongContextCacheWrite1hPrice string            `json:"long_context_cache_write_1h_price_per_1m_tokens,omitempty"`
 	CacheReadPrice               string            `json:"cache_read_price_per_1m_tokens,omitempty"`
 	CacheReadPriceAboveThreshold string            `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
 	CacheReadPriceThreshold      int               `json:"cache_read_price_threshold_tokens,omitempty"`
 	CacheWritePrice              string            `json:"cache_write_price_per_1m_tokens,omitempty"`
+	CacheWrite1hPrice            string            `json:"cache_write_1h_price_per_1m_tokens,omitempty"`
 	InputPriceByModality         map[string]string `json:"input_price_per_1m_tokens_by_modality,omitempty"`
 	OutputPriceByModality        map[string]string `json:"output_price_per_1m_tokens_by_modality,omitempty"`
 	CacheReadPriceByModality     map[string]string `json:"cache_read_price_per_1m_tokens_by_modality,omitempty"`
@@ -361,16 +363,18 @@ func validateTextPrices(name string, prices []TextPrice) error {
 // by image models their provider bills per token.
 func validateTokenPrice(name, model string, price TokenPrice) error {
 	for field, value := range map[string]string{
-		"input_price_per_1m_tokens":                      price.InputPrice,
-		"output_price_per_1m_tokens":                     price.OutputPrice,
-		"long_context_input_price_per_1m_tokens":         price.LongContextInputPrice,
-		"long_context_cache_read_price_per_1m_tokens":    price.LongContextCacheReadPrice,
-		"long_context_output_price_per_1m_tokens":        price.LongContextOutputPrice,
-		"long_context_cache_write_price_per_1m_tokens":   price.LongContextCacheWritePrice,
-		"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
-		"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
-		"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
-		"non_global_price_multiplier":                    price.NonGlobalPriceMultiplier,
+		"input_price_per_1m_tokens":                       price.InputPrice,
+		"output_price_per_1m_tokens":                      price.OutputPrice,
+		"long_context_input_price_per_1m_tokens":          price.LongContextInputPrice,
+		"long_context_cache_read_price_per_1m_tokens":     price.LongContextCacheReadPrice,
+		"long_context_output_price_per_1m_tokens":         price.LongContextOutputPrice,
+		"long_context_cache_write_price_per_1m_tokens":    price.LongContextCacheWritePrice,
+		"long_context_cache_write_1h_price_per_1m_tokens": price.LongContextCacheWrite1hPrice,
+		"cache_read_price_per_1m_tokens":                  price.CacheReadPrice,
+		"cache_read_price_above_threshold_per_1m_tokens":  price.CacheReadPriceAboveThreshold,
+		"cache_write_price_per_1m_tokens":                 price.CacheWritePrice,
+		"cache_write_1h_price_per_1m_tokens":              price.CacheWrite1hPrice,
+		"non_global_price_multiplier":                     price.NonGlobalPriceMultiplier,
 	} {
 		if err := validateDecimal(name, model, field, value, field == "input_price_per_1m_tokens" || field == "output_price_per_1m_tokens"); err != nil {
 			return err
@@ -402,7 +406,7 @@ func validateTokenPrice(name, model string, price TokenPrice) error {
 		return fmt.Errorf("%s pricing for %s requires a positive cache-read threshold and above-threshold price together", name, model)
 	}
 	hasLongThreshold := price.LongContextThreshold != 0
-	hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != "" || price.LongContextCacheWritePrice != ""
+	hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != "" || price.LongContextCacheWritePrice != "" || price.LongContextCacheWrite1hPrice != ""
 	if hasLongThreshold != hasLongPrices || price.LongContextThreshold < 0 {
 		return fmt.Errorf("%s pricing for %s requires a positive long-context threshold and long-context prices together", name, model)
 	}
@@ -413,6 +417,9 @@ func validateTokenPrice(name, model string, price TokenPrice) error {
 	// surcharge writes at all has no rate to raise past the threshold.
 	if price.LongContextCacheWritePrice != "" && price.CacheWritePrice == "" {
 		return fmt.Errorf("%s pricing for %s has a long-context cache-write price without a standard one", name, model)
+	}
+	if price.LongContextCacheWrite1hPrice != "" && price.CacheWrite1hPrice == "" {
+		return fmt.Errorf("%s pricing for %s has a long-context 1h cache-write price without a standard one", name, model)
 	}
 	return nil
 }

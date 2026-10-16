@@ -1206,5 +1206,74 @@ class CheckedInBaselineTests(unittest.TestCase):
         )
 
 
+CATALOG_SCRIPT = Path(__file__).with_name("generate_provider_catalogs.py")
+CATALOG_SPEC = importlib.util.spec_from_file_location(
+    "generate_provider_catalogs", CATALOG_SCRIPT
+)
+assert CATALOG_SPEC and CATALOG_SPEC.loader
+generate_provider_catalogs = importlib.util.module_from_spec(CATALOG_SPEC)
+sys.modules[CATALOG_SPEC.name] = generate_provider_catalogs
+CATALOG_SPEC.loader.exec_module(generate_provider_catalogs)
+
+
+class CatalogGeneratorValidationTests(unittest.TestCase):
+    def test_validate_token_rates_rejects_long_context_1h_cache_write_without_standard(
+        self,
+    ) -> None:
+        rates = {
+            "input_price_per_1m_tokens": "1.00",
+            "output_price_per_1m_tokens": "5.00",
+            "long_context_threshold_tokens": 100000,
+            "long_context_input_price_per_1m_tokens": "2.50",
+            "long_context_cache_read_price_per_1m_tokens": "0.25",
+            "long_context_output_price_per_1m_tokens": "12.50",
+            "long_context_cache_write_1h_price_per_1m_tokens": "5.00",
+        }
+        with self.assertRaisesRegex(
+            generate_provider_catalogs.CatalogError,
+            "1h cache-write price without a standard one",
+        ):
+            generate_provider_catalogs.validate_token_rates(
+                rates, Path("catalog.json"), "text", "claude-haiku-5-5"
+            )
+
+    def test_validate_token_rates_rejects_long_context_1h_cache_write_without_threshold(
+        self,
+    ) -> None:
+        rates = {
+            "input_price_per_1m_tokens": "1.00",
+            "output_price_per_1m_tokens": "5.00",
+            "cache_write_1h_price_per_1m_tokens": "2.00",
+            "long_context_cache_write_1h_price_per_1m_tokens": "5.00",
+        }
+        with self.assertRaisesRegex(
+            generate_provider_catalogs.CatalogError,
+            "incomplete long-context pricing",
+        ):
+            generate_provider_catalogs.validate_token_rates(
+                rates, Path("catalog.json"), "text", "claude-haiku-5-5"
+            )
+
+    def test_validate_token_rates_accepts_complete_1h_cache_write_rates(
+        self,
+    ) -> None:
+        rates = {
+            "input_price_per_1m_tokens": "1.00",
+            "output_price_per_1m_tokens": "5.00",
+            "cache_write_price_per_1m_tokens": "1.25",
+            "cache_write_1h_price_per_1m_tokens": "2.00",
+            "long_context_threshold_tokens": 100000,
+            "long_context_input_price_per_1m_tokens": "2.50",
+            "long_context_cache_read_price_per_1m_tokens": "0.25",
+            "long_context_output_price_per_1m_tokens": "12.50",
+            "long_context_cache_write_price_per_1m_tokens": "3.125",
+            "long_context_cache_write_1h_price_per_1m_tokens": "5.00",
+        }
+        generate_provider_catalogs.validate_token_rates(
+            rates, Path("catalog.json"), "text", "claude-haiku-5-5"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
+

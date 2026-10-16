@@ -102,6 +102,57 @@ func TestPricingInfoCostOf_LongContextCacheWrite(t *testing.T) {
 	assert.Equal(t, 50_000*2.5/1_000_000, flat.CostOf(long).CacheWrite)
 }
 
+func TestPricingInfoCostOf_PerTTLCacheWrites(t *testing.T) {
+	p := PricingInfo{
+		Model:                        "tiered-cache-model",
+		InputPrice:                   0.10,
+		OutputPrice:                  0.50,
+		CacheReadPrice:               0.01,
+		CacheWritePrice:              0.125, // 1.25x input (5m)
+		CacheWrite1hPrice:            0.20,  // 2.0x input (1h)
+		LongContextThreshold:         100_001,
+		LongContextInputPrice:        0.50,
+		LongContextOutputPrice:       2.50,
+		LongContextCacheReadPrice:    0.05,
+		LongContextCacheWritePrice:   0.625, // 1.25x long input (5m)
+		LongContextCacheWrite1hPrice: 1.00,  // 2.0x long input (1h)
+		Currency:                     "USD",
+	}
+
+	// Standard tier (<= 100k total input): 20k 5m writes at $0.125/M + 60k 1h writes at $0.20/M.
+	standard := p.CostOf(&Usage{
+		InputTokens:                10_000,
+		CacheCreationInputTokens:   80_000,
+		CacheCreation5mInputTokens: 20_000,
+		CacheCreation1hInputTokens: 60_000,
+		CacheReadInputTokens:       10_000,
+		OutputTokens:               1_000,
+	})
+	wantStandardWrite := (20_000*0.125 + 60_000*0.20) / 1_000_000
+	assert.InDelta(t, wantStandardWrite, standard.CacheWrite, 1e-12)
+
+	// Long-context tier (>= 100,001 total input): 20k 5m writes at $0.625/M + 60k 1h writes at $1.00/M.
+	long := p.CostOf(&Usage{
+		InputTokens:                20_000,
+		CacheCreationInputTokens:   80_000,
+		CacheCreation5mInputTokens: 20_000,
+		CacheCreation1hInputTokens: 60_000,
+		CacheReadInputTokens:       10_000,
+		OutputTokens:               1_000,
+	})
+	wantLongWrite := (20_000*0.625 + 60_000*1.00) / 1_000_000
+	assert.InDelta(t, wantLongWrite, long.CacheWrite, 1e-12)
+
+	// Struct literal with per-TTL fields only (CacheCreationInputTokens omitted)
+	// still sizes TotalInputTokens and prices both buckets.
+	breakdownOnly := p.CostOf(&Usage{
+		InputTokens:                25_000,
+		CacheCreation5mInputTokens: 20_000,
+		CacheCreation1hInputTokens: 60_000,
+	})
+	assert.InDelta(t, wantLongWrite, breakdownOnly.CacheWrite, 1e-12)
+}
+
 func TestPricingInfoCostOf_ModalityOverrides(t *testing.T) {
 	p := PricingInfo{
 		InputPrice:     1,
@@ -146,14 +197,18 @@ func TestPricingInfoScaledDeepCopiesPrices(t *testing.T) {
 		LongContextOutputPrice:       6,
 		CacheReadPriceAboveThreshold: 0.3,
 		CacheWritePrice:              1.25,
+		CacheWrite1hPrice:            2.0,
 		LongContextCacheWritePrice:   2.5,
+		LongContextCacheWrite1hPrice: 4.0,
 	}
 
 	factor := 1.1
 	scaled := p.Scaled(factor)
 	assert.Equal(t, p.InputPrice*factor, scaled.InputPrice)
 	assert.Equal(t, p.LongContextInputPrice*factor, scaled.LongContextInputPrice)
+	assert.Equal(t, p.CacheWrite1hPrice*factor, scaled.CacheWrite1hPrice)
 	assert.Equal(t, p.LongContextCacheWritePrice*factor, scaled.LongContextCacheWritePrice)
+	assert.Equal(t, p.LongContextCacheWrite1hPrice*factor, scaled.LongContextCacheWrite1hPrice)
 	assert.Equal(t, p.InputPriceByModality["audio"]*factor, scaled.InputPriceByModality["audio"])
 	assert.Equal(t, p.CacheReadPriceByModality["audio"]*factor, scaled.CacheReadPriceByModality["audio"])
 	assert.Equal(t, p.OutputPriceByModality["audio"]*factor, scaled.OutputPriceByModality["audio"])

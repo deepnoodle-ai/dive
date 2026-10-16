@@ -14,7 +14,7 @@ import (
 // Anthropic repeats the full cumulative usage object in message_delta that
 // message_start already carried. The accumulated usage must equal the final
 // frame's values, not the sum of both frames.
-const cumulativeUsageAnthropicStream = `data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"test-model","content":[],"usage":{"input_tokens":14,"cache_creation_input_tokens":8012,"cache_read_input_tokens":120000,"output_tokens":4}}}
+const cumulativeUsageAnthropicStream = `data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":14,"cache_creation_input_tokens":8012,"cache_creation":{"ephemeral_5m_input_tokens":2012,"ephemeral_1h_input_tokens":6000},"cache_read_input_tokens":120000,"output_tokens":4}}}
 
 data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
 
@@ -51,7 +51,13 @@ func TestStreamCumulativeUsageNotDoubleCounted(t *testing.T) {
 	usage := accumulator.Response().Usage
 	assert.Equal(t, 14, usage.InputTokens)
 	assert.Equal(t, 8012, usage.CacheCreationInputTokens)
+	assert.Equal(t, 2012, usage.CacheCreation5mInputTokens)
+	assert.Equal(t, 6000, usage.CacheCreation1hInputTokens)
 	assert.Equal(t, 120000, usage.CacheReadInputTokens)
 	assert.Equal(t, 7, usage.OutputTokens)
 	assert.Equal(t, 128026, usage.TotalInputTokens())
+	assert.NotNil(t, usage.Cost)
+	// Opus 4.8: 5m write = $6.25/M, 1h write = $10.00/M.
+	wantWriteCost := (2012*6.25 + 6000*10.00) / 1_000_000
+	assert.InDelta(t, wantWriteCost, usage.Cost.CacheWrite, 1e-12)
 }

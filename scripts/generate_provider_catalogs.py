@@ -164,9 +164,11 @@ def validate_token_rates(
         "long_context_cache_read_price_per_1m_tokens",
         "long_context_output_price_per_1m_tokens",
         "long_context_cache_write_price_per_1m_tokens",
+        "long_context_cache_write_1h_price_per_1m_tokens",
         "cache_read_price_per_1m_tokens",
         "cache_read_price_above_threshold_per_1m_tokens",
         "cache_write_price_per_1m_tokens",
+        "cache_write_1h_price_per_1m_tokens",
         "non_global_price_multiplier",
     ):
         value = rates.get(field)
@@ -220,7 +222,10 @@ def validate_token_rates(
     long_cache_write = rates.get(
         "long_context_cache_write_price_per_1m_tokens"
     )
-    if bool(long_threshold) != (any(long_prices) or bool(long_cache_write)) or (
+    long_cache_write_1h = rates.get(
+        "long_context_cache_write_1h_price_per_1m_tokens"
+    )
+    if bool(long_threshold) != (any(long_prices) or bool(long_cache_write) or bool(long_cache_write_1h)) or (
         long_threshold is not None
         and (not isinstance(long_threshold, int) or long_threshold <= 0)
     ) or (long_threshold and not all(long_prices)):
@@ -232,6 +237,10 @@ def validate_token_rates(
     if long_cache_write and not rates.get("cache_write_price_per_1m_tokens"):
         raise CatalogError(
             f"{path}: {table_name}/{model_id} has a long-context cache-write price without a standard one"
+        )
+    if long_cache_write_1h and not rates.get("cache_write_1h_price_per_1m_tokens"):
+        raise CatalogError(
+            f"{path}: {table_name}/{model_id} has a long-context 1h cache-write price without a standard one"
         )
     multiplier = rates.get("non_global_price_multiplier")
     if multiplier not in (None, "") and float(multiplier) <= 0:
@@ -581,7 +590,9 @@ TOKEN_RATE_FIELDS = (
     ("CacheReadPrice", "cache_read_price_per_1m_tokens"),
     ("CacheReadPriceAboveThreshold", "cache_read_price_above_threshold_per_1m_tokens"),
     ("CacheWritePrice", "cache_write_price_per_1m_tokens"),
+    ("CacheWrite1hPrice", "cache_write_1h_price_per_1m_tokens"),
     ("LongContextCacheWritePrice", "long_context_cache_write_price_per_1m_tokens"),
+    ("LongContextCacheWrite1hPrice", "long_context_cache_write_1h_price_per_1m_tokens"),
     ("NonGlobalPriceMultiplier", "non_global_price_multiplier"),
 )
 

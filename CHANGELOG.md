@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Anthropic 1-hour prompt-cache write usage and pricing.** `llm.Usage` parses
+  5-minute and 1-hour cache-creation token counts, and `llm.PricingInfo` prices
+  1-hour cache writes at 2x input (including long-context tiers).
+
+### Changed
+
+- **Anthropic prompt-cache history anchors stay at fixed block positions across
+  turns.** `placeCacheAnchors` anchors fixed multiples of `cacheAnchorGap`
+  before the tail instead of shifting with the tail on every call.
+
 ## [1.38.0] - 2026-10-16
 
 ### Added
