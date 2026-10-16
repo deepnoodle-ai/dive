@@ -14,7 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `OutputMessages` see the canonical bytes; the values are unchanged, number
   text included. A transcript replayed from a store that sorts keys, such as
   Postgres `jsonb` read into Go maps, now sends the same bytes as the live
-  turn, so the provider's prompt cache reads it instead of rewriting it.
+  turn when the store also keeps number text (decode with `UseNumber`), so
+  the provider's prompt cache reads it instead of rewriting it. Decoding to
+  `float64` still rewrites literals such as `0.10` and `1.0`.
 
 ## [1.37.0] - 2026-10-13
 

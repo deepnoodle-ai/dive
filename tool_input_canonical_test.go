@@ -84,6 +84,20 @@ func BenchmarkCanonicalJSON(b *testing.B) {
 	}
 }
 
+// Both tool-call content types are canonicalized in place; other content is
+// left alone.
+func TestCanonicalizeToolInputs(t *testing.T) {
+	toolUse := &llm.ToolUseContent{ID: "t1", Name: "clone", Input: json.RawMessage(`{"repo": "a/b", "branch": "main"}`)}
+	mcpToolUse := &llm.MCPToolUseContent{ID: "m1", Name: "get_pr", ServerName: "github", Input: json.RawMessage(`{"repo": "a/b", "pr": {"number": 7, "draft": false}}`)}
+	text := &llm.TextContent{Text: `{"b": 1, "a": 2}`}
+
+	canonicalizeToolInputs([]llm.Content{text, toolUse, mcpToolUse})
+
+	assert.Equal(t, `{"branch":"main","repo":"a/b"}`, string(toolUse.Input))
+	assert.Equal(t, `{"pr":{"draft":false,"number":7},"repo":"a/b"}`, string(mcpToolUse.Input))
+	assert.Equal(t, `{"b": 1, "a": 2}`, text.Text)
+}
+
 // The request that follows a tool call carries the call in canonical form, the
 // same bytes a replay from a structured transcript store produces, and the
 // recorded output messages match it.
