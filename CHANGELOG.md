@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`HookContext.FinalCall`.** A PreIteration hook can make the upcoming
+  model call the last one of the loop: tools are disabled for it, as at the
+  tool iteration limit. Pair it with a Recorded reminder appended in the same
+  hook to tell the model why; the reminder is part of the turn's output, so a
+  replay sends the same bytes. Use it to wrap a turn up before a context or
+  price ceiling.
+
 ## [1.37.1] - 2026-10-16
 
 ### Changed

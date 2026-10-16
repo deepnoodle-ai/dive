@@ -889,6 +889,71 @@ func TestPreIterationHook(t *testing.T) {
 		assert.Equal(t, 1, len(capturedPrompts))
 		assert.Equal(t, "Modified prompt\n\n"+reminderPrimingRule, capturedPrompts[0])
 	})
+
+	t.Run("FinalCall makes the next call final", func(t *testing.T) {
+		var choices []*llm.ToolChoice
+		var lastMessages []*llm.Message
+		mockLLM := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				var config llm.Config
+				config.Apply(opts...)
+				choices = append(choices, config.ToolChoice)
+				lastMessages = config.Messages
+				if len(choices) == 1 {
+					return &llm.Response{
+						ID: "resp_1", Model: "test-model", Role: llm.Assistant, Type: "message", StopReason: "tool_use",
+						Content: []llm.Content{&llm.ToolUseContent{ID: "tool_1", Name: "test_tool", Input: []byte(`{}`)}},
+					}, nil
+				}
+				return &llm.Response{
+					ID: "resp_2", Model: "test-model", Role: llm.Assistant, Type: "message", StopReason: "stop",
+					Content: []llm.Content{&llm.TextContent{Text: "Progress note"}},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+		tool := &mockTool{
+			name: "test_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("tool output"), nil
+			},
+		}
+		agent, err := NewAgent(AgentOptions{
+			Model: mockLLM,
+			Tools: []Tool{tool},
+			Hooks: Hooks{
+				PreIteration: []PreIterationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						if hctx.Iteration == 1 {
+							hctx.FinalCall = true
+							reminder, err := NewOperatorReminder("context-budget", "Write a progress note.")
+							if err != nil {
+								return err
+							}
+							return hctx.AppendReminder(reminder, Recorded)
+						}
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, 2, len(choices))
+		assert.Nil(t, choices[0])
+		assert.Equal(t, llm.ToolChoiceNone, choices[1])
+		// The hook's recorded reminder is the last message the final call
+		// sees, and the same message is in the turn's output.
+		sent := lastMessages[len(lastMessages)-1]
+		assert.True(t, sent == resp.OutputMessages[2])
+		reminder, ok := FindLatestReminder([]*llm.Message{sent}, "context-budget")
+		assert.True(t, ok)
+		assert.Equal(t, "Write a progress note.", reminder.Content)
+		assert.Equal(t, 4, len(resp.OutputMessages))
+	})
 }
 
 // newToolCallingMockLLM returns a mockLLM that issues one tool call on the
