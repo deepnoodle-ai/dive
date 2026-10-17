@@ -126,7 +126,10 @@ func (s *retryingStreamIterator) Next() bool {
 		BaseWait:    s.config.RetryBaseWait,
 		MaxWait:     maxStreamRetryBackoff,
 		RetryIf: func(err error) bool {
-			if s.ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// The caller's own deadline shows up as s.ctx.Err(). Matching
+			// context.DeadlineExceeded on err would also refuse http.Client
+			// timeouts, which report as that error while the caller is live.
+			if s.ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				return false
 			}
 			return !retry.IsPermanent(err)

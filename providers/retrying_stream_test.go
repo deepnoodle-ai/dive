@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -169,6 +170,65 @@ func TestRetryingStreamStopsOnPermanentFactoryError(t *testing.T) {
 
 	assert.False(t, iterator.Next())
 	assert.Error(t, iterator.Err())
+	assert.Equal(t, int64(1), attempts.Load())
+}
+
+func TestRetryingStreamRetriesHTTPClientTimeout(t *testing.T) {
+	// An http.Client timeout reports itself as context.DeadlineExceeded even
+	// though the caller's context is still live. It is a slow provider, not a
+	// caller that gave up, so the stream retries it.
+	release := make(chan struct{})
+	defer close(release)
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := &http.Client{Timeout: 50 * time.Millisecond}
+
+	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+		Provider:      "test",
+		MaxRetries:    2,
+		RetryBaseWait: time.Millisecond,
+	}, func() (llm.StreamIterator, error) {
+		resp, err := client.Get(server.URL)
+		if err != nil {
+			return nil, err
+		}
+		resp.Body.Close()
+		return &testStreamIterator{events: []*llm.Event{{Type: llm.EventTypeMessageStart}}}, nil
+	})
+	defer iterator.Close()
+
+	assert.True(t, iterator.Next())
+	assert.NoError(t, iterator.Err())
+	assert.Equal(t, int64(2), requests.Load())
+}
+
+func TestRetryingStreamCallerDeadlineStopsRetries(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	var attempts atomic.Int64
+	iterator := NewRetryingStreamIterator(ctx, StreamRetryConfig{
+		Provider:      "test",
+		MaxRetries:    2,
+		RetryBaseWait: time.Millisecond,
+	}, func() (llm.StreamIterator, error) {
+		attempts.Add(1)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	defer iterator.Close()
+
+	assert.False(t, iterator.Next())
+	assert.True(t, errors.Is(iterator.Err(), context.DeadlineExceeded))
 	assert.Equal(t, int64(1), attempts.Load())
 }
 
