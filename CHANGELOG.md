@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Stream timeouts.** `WithStreamTimeouts(firstEvent, idle)` on the Anthropic,
+  OpenAI, OpenAI Completions and Google providers. An attempt with no event by
+  `firstEvent` is retried (Anthropic and OpenAI default 1m, Completions 5m,
+  Google off); a stream quiet for `idle` (5m) ends.
+
+### Changed
+
+- **Streams ignore `http.Client.Timeout`.** It covered reading the body, so a
+  healthy stream past 5 minutes was cut off; it now applies to `Generate` only.
+- **`providers.StreamFactory` takes the attempt's `context.Context`.** Custom
+  providers must make their request with it so a timed-out attempt is cancelled.
+
+### Fixed
+
+- **Streams retry an `http.Client` timeout** instead of failing on the first
+  attempt while the caller's context is live.
+- **A provider timeout is no longer reported as the turn's deadline.**
+  `TurnReasonDeadline` now requires the invocation's context to have expired;
+  otherwise it is `provider_error` or `stream_interrupted`.
+
 ## [1.39.0] - 2026-10-16
 
 ### Added

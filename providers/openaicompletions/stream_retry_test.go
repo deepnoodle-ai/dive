@@ -168,3 +168,67 @@ func TestStreamDoesNotRetryBodyFailureAfterFirstEvent(t *testing.T) {
 	assert.Equal(t, int64(1), requests.Load())
 	assert.True(t, partialBody.closed.Load())
 }
+
+func TestStreamRetriesHangBeforeHeaders(t *testing.T) {
+	var requests atomic.Int64
+	client := &http.Client{Transport: completionsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if requests.Add(1) == 1 {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}
+		return completionsResponse(req, io.NopCloser(strings.NewReader(successfulChatCompletionsStream))), nil
+	})}
+	provider := New(
+		WithAPIKey("test-key"),
+		WithClient(client),
+		WithMaxRetries(1),
+		WithBaseWait(time.Millisecond),
+		WithStreamTimeouts(50*time.Millisecond, time.Second),
+	)
+	iterator, err := provider.Stream(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")))
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	accumulator := consumeCompletionsStream(t, iterator)
+	assert.Equal(t, "ok", accumulator.Response().Message().Text())
+	assert.Equal(t, int64(2), requests.Load())
+}
+
+// pauseReader pauses once, then reports EOF so io.MultiReader moves on. Like
+// a network body, it fails if the request's context ends during the pause.
+type pauseReader struct {
+	ctx   context.Context
+	delay time.Duration
+}
+
+func (r pauseReader) Read([]byte) (int, error) {
+	select {
+	case <-time.After(r.delay):
+		return 0, io.EOF
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	}
+}
+
+func TestStreamOutlastsClientTimeout(t *testing.T) {
+	// http.Client.Timeout covers reading the body, so it would cut off a
+	// stream that runs longer. Stream drops it.
+	start, rest, _ := strings.Cut(successfulChatCompletionsStream, "\n\n")
+	client := &http.Client{
+		Timeout: 50 * time.Millisecond,
+		Transport: completionsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return completionsResponse(req, io.NopCloser(io.MultiReader(strings.NewReader(start+"\n\n"),
+				pauseReader{req.Context(), 100 * time.Millisecond}, strings.NewReader(rest)))), nil
+		}),
+	}
+	provider := New(WithAPIKey("test-key"), WithClient(client))
+	iterator, err := provider.Stream(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")))
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	accumulator := consumeCompletionsStream(t, iterator)
+	assert.True(t, accumulator.IsComplete())
+	assert.Equal(t, "ok", accumulator.Response().Message().Text())
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
@@ -59,6 +60,10 @@ func New(opts ...Option) *Provider {
 		anthropic.WithMaxRetries(p.maxRetries),
 		anthropic.WithBaseWait(p.retryBaseWait),
 		anthropic.WithModel(p.model),
+		// Ollama may load the model before it sends anything, so it gets the
+		// shared first-event timeout rather than Anthropic's shorter one.
+		anthropic.WithStreamTimeouts(providers.DefaultStreamFirstEventTimeout,
+			providers.DefaultStreamIdleTimeout),
 	)
 	return p
 }

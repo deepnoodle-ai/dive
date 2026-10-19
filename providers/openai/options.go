@@ -27,7 +27,8 @@ func WithEndpoint(endpoint string) Option {
 
 // WithClient sets the HTTP client used for every request to the OpenAI API.
 // The constructor flows p.httpClient into the SDK client via
-// option.WithHTTPClient — see New.
+// option.WithHTTPClient — see New. Its Timeout applies to Generate; Stream
+// ignores it and uses WithStreamTimeouts instead.
 func WithClient(client *http.Client) Option {
 	return func(p *Provider) {
 		p.httpClient = client
@@ -56,6 +57,18 @@ func WithMaxTokens(maxTokens int) Option {
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
 		p.maxRetries = maxRetries
+	}
+}
+
+// WithStreamTimeouts bounds how long Stream waits for events. firstEvent
+// limits each attempt's wait for its first event, response headers included;
+// an attempt that runs out is retried. idle limits the wait for each later
+// event. Zero disables a limit. Defaults: DefaultStreamFirstEventTimeout and
+// DefaultStreamIdleTimeout.
+func WithStreamTimeouts(firstEvent, idle time.Duration) Option {
+	return func(p *Provider) {
+		p.streamFirstEventTimeout = firstEvent
+		p.streamIdleTimeout = idle
 	}
 }
 

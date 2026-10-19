@@ -170,3 +170,66 @@ func TestStreamDoesNotRetryBodyFailureAfterFirstEvent(t *testing.T) {
 	assert.Equal(t, int64(1), requests.Load())
 	assert.True(t, partialBody.closed.Load())
 }
+
+func TestStreamRetriesHangBeforeHeaders(t *testing.T) {
+	release := make(chan struct{})
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if requests.Add(1) == 1 {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, successfulAnthropicStream)
+	}))
+	defer server.Close()
+	defer close(release)
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithMaxRetries(1),
+		WithBaseWait(time.Millisecond),
+		WithStreamTimeouts(50*time.Millisecond, time.Second),
+	)
+	iterator, err := provider.Stream(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")))
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	accumulator := consumeAnthropicStream(t, iterator)
+	assert.Equal(t, "ok", accumulator.Response().Message().Text())
+	assert.Equal(t, int64(2), requests.Load())
+}
+
+func TestStreamOutlastsClientTimeout(t *testing.T) {
+	// http.Client.Timeout covers reading the body, so it would cut off a
+	// stream that runs longer. Stream drops it.
+	start, rest, _ := strings.Cut(successfulAnthropicStream, "\n\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, start+"\n\n")
+		w.(http.Flusher).Flush()
+		time.Sleep(100 * time.Millisecond)
+		_, _ = io.WriteString(w, rest)
+	}))
+	defer server.Close()
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithClient(&http.Client{Timeout: 50 * time.Millisecond}),
+	)
+	iterator, err := provider.Stream(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")))
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	accumulator := consumeAnthropicStream(t, iterator)
+	assert.True(t, accumulator.IsComplete())
+	assert.Equal(t, "ok", accumulator.Response().Message().Text())
+}

@@ -23,6 +23,11 @@ var (
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second
 	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
+
+	// DefaultStreamFirstEventTimeout is shorter than the shared default
+	// because the Responses API sends response.created before the model works.
+	DefaultStreamFirstEventTimeout = time.Minute
+	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 
 var _ llm.LLM = &Provider{}
@@ -41,6 +46,9 @@ type Provider struct {
 	supportsPromptCacheKey bool
 	options                []option.RequestOption
 	extraRequestOptions    []option.RequestOption
+
+	streamFirstEventTimeout time.Duration
+	streamIdleTimeout       time.Duration
 }
 
 // New creates a new OpenAI provider with the given options.
@@ -56,6 +64,9 @@ func New(opts ...Option) *Provider {
 		maxRetries:    DefaultMaxRetries,
 		retryBaseWait: DefaultRetryBaseWait,
 		httpClient:    DefaultClient,
+
+		streamFirstEventTimeout: DefaultStreamFirstEventTimeout,
+		streamIdleTimeout:       DefaultStreamIdleTimeout,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -176,20 +187,24 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
+	// A request timeout or http.Client.Timeout would cap the whole stream, so
+	// streams drop both and rely on the stream timeouts instead.
 	streamOpts := append([]option.RequestOption{
-		option.WithRequestTimeout(5 * time.Minute),
+		option.WithHTTPClient(providers.StreamClient(p.httpClient)),
 	}, p.extraRequestOptions...)
 	stream := providers.NewRetryingStreamIterator(
 		ctx,
 		providers.StreamRetryConfig{
-			Provider:       p.Name(),
-			MaxRetries:     p.maxRetries,
-			RetryBaseWait:  p.retryBaseWait,
-			Logger:         config.Logger,
-			NormalizeError: normalizeOpenAIError,
+			Provider:          p.Name(),
+			MaxRetries:        p.maxRetries,
+			RetryBaseWait:     p.retryBaseWait,
+			Logger:            config.Logger,
+			NormalizeError:    normalizeOpenAIError,
+			FirstEventTimeout: p.streamFirstEventTimeout,
+			IdleTimeout:       p.streamIdleTimeout,
 		},
-		func() (llm.StreamIterator, error) {
-			streamSDK := p.client.Responses.NewStreaming(ctx, params, streamOpts...)
+		func(attemptCtx context.Context) (llm.StreamIterator, error) {
+			streamSDK := p.client.Responses.NewStreaming(attemptCtx, params, streamOpts...)
 			return newOpenAIStreamIterator(streamSDK, config), nil
 		},
 	)

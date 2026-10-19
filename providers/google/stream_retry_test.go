@@ -127,3 +127,34 @@ func TestWrapGoogleErrorHandlesValueAndPointerForms(t *testing.T) {
 	assert.True(t, retry.IsPermanent(wrapGoogleError(valueErr)))
 	assert.False(t, retry.IsPermanent(wrapGoogleError(pointerErr)))
 }
+
+func TestStreamRetriesHangBeforeFirstChunk(t *testing.T) {
+	release := make(chan struct{})
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if requests.Add(1) == 1 {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"responseId\":\"resp_1\",\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{}}\n\n")
+	}))
+	defer server.Close()
+	defer close(release)
+
+	provider := newRetryTestProvider(t, server.URL, 1)
+	provider.streamFirstEventTimeout = 50 * time.Millisecond
+
+	iterator, err := provider.Stream(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")))
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	accumulator := consumeGoogleProviderStream(t, iterator)
+	assert.Equal(t, "ok", accumulator.Response().Message().Text())
+	assert.Equal(t, int64(2), requests.Load())
+}

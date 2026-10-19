@@ -294,10 +294,12 @@ const (
 // failureOutcome classifies the error that ended an invocation. A context
 // error wins, since whatever failed may have failed because of it; then a
 // hook abort, the event callback, and the model call, identified by the
-// errors the turn record saw them return. Next is reconcile, whatever the
-// reason, when a call of the stopped batch has an unknown result and is not
-// read-only.
-func failureOutcome(err error, record *turnRecord) *TurnOutcome {
+// errors the turn record saw them return. A deadline counts only when ctxErr,
+// the invocation context's error, says it passed: an http.Client timeout also
+// matches context.DeadlineExceeded, and is a failed model call. Next is
+// reconcile, whatever the reason, when a call of the stopped batch has an
+// unknown result and is not read-only.
+func failureOutcome(err, ctxErr error, record *turnRecord) *TurnOutcome {
 	outcome := &TurnOutcome{Reason: TurnReasonError, Error: err.Error()}
 	var abortErr *HookAbortError
 	record.mu.Lock()
@@ -308,7 +310,7 @@ func failureOutcome(err error, record *turnRecord) *TurnOutcome {
 	switch {
 	case errors.Is(err, context.Canceled):
 		outcome.Reason = TurnReasonCanceled
-	case errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded) && errors.Is(ctxErr, context.DeadlineExceeded):
 		outcome.Reason = TurnReasonDeadline
 	case errors.As(err, &abortErr):
 		outcome.Reason = TurnReasonHookAbort

@@ -342,7 +342,7 @@ func (t *turn) fail(ctx context.Context, err error) (*Response, error) {
 			Items:          slices.Clone(r.items),
 		}
 	}
-	outcome := failureOutcome(err, t.record)
+	outcome := failureOutcome(err, ctx.Err(), t.record)
 	if t.agent.incompleteTurns.Discard {
 		return t.discardIncomplete(outcome, err)
 	}

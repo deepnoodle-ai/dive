@@ -3,6 +3,7 @@ package dive_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -549,6 +550,27 @@ func TestStreamFailureReasons(t *testing.T) {
 	assert.NoError(t, err)
 	resp, err = agent.CreateResponse(context.Background(), WithInput("hi"))
 	assertIncomplete(t, resp, err, TurnReasonProviderError, TurnNextContinue)
+}
+
+// An http.Client timeout matches context.DeadlineExceeded while the caller's
+// context is live. That is a failed model call, not the turn's deadline.
+func TestProviderTimeoutIsNotDeadline(t *testing.T) {
+	errTimeout := fmt.Errorf("error making request: %w", context.DeadlineExceeded)
+	start := &llm.Event{
+		Type:    llm.EventTypeMessageStart,
+		Message: &llm.Response{ID: "msg_1", Role: llm.Assistant, Model: "broken-stream"},
+	}
+
+	agent, err := NewAgent(AgentOptions{Model: &brokenStreamLLM{err: errTimeout}})
+	assert.NoError(t, err)
+	resp, err := agent.CreateResponse(context.Background(), WithInput("hi"))
+	assert.True(t, errors.Is(err, context.DeadlineExceeded))
+	assertIncomplete(t, resp, err, TurnReasonProviderError, TurnNextContinue)
+
+	agent, err = NewAgent(AgentOptions{Model: &brokenStreamLLM{events: []*llm.Event{start}, err: errTimeout}})
+	assert.NoError(t, err)
+	resp, err = agent.CreateResponse(context.Background(), WithInput("hi"))
+	assertIncomplete(t, resp, err, TurnReasonStreamInterrupted, TurnNextContinue)
 }
 
 // A final Stop hook's changes to the response reach the PostGeneration
