@@ -51,7 +51,7 @@ func TestRetryingStreamFirstAttemptSuccess(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return stream, nil
 	})
@@ -76,7 +76,7 @@ func TestRetryingStreamSharesBudgetAcrossFactoryAndIteratorErrors(t *testing.T) 
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		switch attempts.Add(1) {
 		case 1:
 			return nil, NewError(429, "rate limited")
@@ -102,7 +102,7 @@ func TestRetryingStreamClosesIteratorReturnedWithFactoryError(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    1,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		if attempts.Add(1) == 1 {
 			return failed, NewError(http.StatusTooManyRequests, "rate limited")
 		}
@@ -124,7 +124,7 @@ func TestRetryingStreamRetriesCloseErrorBeforeFirstEvent(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    1,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		if attempts.Add(1) == 1 {
 			return failed, nil
 		}
@@ -145,7 +145,7 @@ func TestRetryingStreamPreservesStreamAndCloseErrors(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    0,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		return stream, nil
 	})
 	defer iterator.Close()
@@ -162,7 +162,7 @@ func TestRetryingStreamStopsOnPermanentFactoryError(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return nil, NewError(400, "bad request")
 	})
@@ -197,7 +197,7 @@ func TestRetryingStreamRetriesHTTPClientTimeout(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		resp, err := client.Get(server.URL)
 		if err != nil {
 			return nil, err
@@ -220,7 +220,7 @@ func TestRetryingStreamCallerDeadlineStopsRetries(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -232,6 +232,143 @@ func TestRetryingStreamCallerDeadlineStopsRetries(t *testing.T) {
 	assert.Equal(t, int64(1), attempts.Load())
 }
 
+// stallingStreamIterator yields its events, then blocks until ctx is done, as
+// a response body bound to ctx does when the provider goes quiet.
+type stallingStreamIterator struct {
+	ctx    context.Context
+	events []*llm.Event
+	pos    int
+	err    error
+}
+
+func (s *stallingStreamIterator) Next() bool {
+	if s.pos < len(s.events) {
+		s.pos++
+		return true
+	}
+	<-s.ctx.Done()
+	s.err = s.ctx.Err()
+	return false
+}
+
+func (s *stallingStreamIterator) Event() *llm.Event { return s.events[s.pos-1] }
+func (s *stallingStreamIterator) Err() error        { return s.err }
+func (s *stallingStreamIterator) Close() error      { return nil }
+
+func TestRetryingStreamRetriesFirstEventTimeout(t *testing.T) {
+	// The first attempt hangs awaiting headers. Cancelling it reports
+	// context.Canceled from the transport, which must surface as the
+	// first-event timeout so the attempt is retried.
+	release := make(chan struct{})
+	defer close(release)
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+		Provider:          "test",
+		MaxRetries:        2,
+		RetryBaseWait:     time.Millisecond,
+		FirstEventTimeout: 50 * time.Millisecond,
+	}, func(ctx context.Context) (llm.StreamIterator, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		resp.Body.Close()
+		return &testStreamIterator{events: []*llm.Event{{Type: llm.EventTypeMessageStart}}}, nil
+	})
+	defer iterator.Close()
+
+	assert.True(t, iterator.Next())
+	assert.NoError(t, iterator.Err())
+	assert.Equal(t, int64(2), requests.Load())
+}
+
+func TestRetryingStreamFirstEventTimeoutExhaustsRetries(t *testing.T) {
+	var attempts atomic.Int64
+	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+		Provider:          "test",
+		MaxRetries:        1,
+		RetryBaseWait:     time.Millisecond,
+		FirstEventTimeout: 20 * time.Millisecond,
+	}, func(ctx context.Context) (llm.StreamIterator, error) {
+		attempts.Add(1)
+		return &stallingStreamIterator{ctx: ctx}, nil
+	})
+	defer iterator.Close()
+
+	assert.False(t, iterator.Next())
+	assert.True(t, errors.Is(iterator.Err(), ErrStreamFirstEventTimeout))
+	assert.False(t, errors.Is(iterator.Err(), context.Canceled))
+	assert.Equal(t, int64(2), attempts.Load())
+}
+
+func TestRetryingStreamIdleTimeoutEndsCommittedStream(t *testing.T) {
+	var attempts atomic.Int64
+	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+		Provider:      "test",
+		MaxRetries:    2,
+		RetryBaseWait: time.Millisecond,
+		IdleTimeout:   20 * time.Millisecond,
+	}, func(ctx context.Context) (llm.StreamIterator, error) {
+		attempts.Add(1)
+		return &stallingStreamIterator{ctx: ctx, events: []*llm.Event{
+			{Type: llm.EventTypeMessageStart},
+		}}, nil
+	})
+	defer iterator.Close()
+
+	assert.True(t, iterator.Next())
+	assert.False(t, iterator.Next())
+	assert.True(t, errors.Is(iterator.Err(), ErrStreamIdleTimeout))
+	assert.Equal(t, int64(1), attempts.Load())
+}
+
+func TestRetryingStreamIdleTimeoutIgnoresSlowConsumer(t *testing.T) {
+	// The idle timeout measures the wait on the provider, not the time the
+	// consumer spends between calls to Next.
+	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+		Provider:    "test",
+		IdleTimeout: 20 * time.Millisecond,
+	}, func(ctx context.Context) (llm.StreamIterator, error) {
+		return &testStreamIterator{events: []*llm.Event{
+			{Type: llm.EventTypeMessageStart},
+			{Type: llm.EventTypeMessageStop},
+		}}, nil
+	})
+	defer iterator.Close()
+
+	assert.True(t, iterator.Next())
+	time.Sleep(60 * time.Millisecond)
+	assert.True(t, iterator.Next())
+	assert.False(t, iterator.Next())
+	assert.NoError(t, iterator.Err())
+}
+
+func TestStreamClientDropsTimeout(t *testing.T) {
+	client := &http.Client{Timeout: time.Minute}
+	streamClient := StreamClient(client)
+	assert.Equal(t, time.Duration(0), streamClient.Timeout)
+	assert.Equal(t, time.Minute, client.Timeout)
+
+	noTimeout := &http.Client{}
+	assert.True(t, StreamClient(noTimeout) == noTimeout)
+}
+
 func TestRetryingStreamExhaustsTransientIteratorErrors(t *testing.T) {
 	sentinel := errors.New("connection reset before first event")
 	var attempts atomic.Int64
@@ -240,7 +377,7 @@ func TestRetryingStreamExhaustsTransientIteratorErrors(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		stream := &testStreamIterator{err: sentinel}
 		streams = append(streams, stream)
@@ -272,7 +409,7 @@ func TestRetryingStreamStopsOnNormalizedPermanentIteratorError(t *testing.T) {
 			assert.True(t, errors.Is(err, rawErr))
 			return NewError(http.StatusUnauthorized, "unauthorized")
 		},
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return stream, nil
 	})
@@ -292,7 +429,7 @@ func TestRetryingStreamEmptySuccessDoesNotRetry(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return stream, nil
 	})
@@ -320,7 +457,7 @@ func TestRetryingStreamRejectsNilFactoryAndNilStream(t *testing.T) {
 		iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
 			MaxRetries:    2,
 			RetryBaseWait: time.Millisecond,
-		}, func() (llm.StreamIterator, error) {
+		}, func(context.Context) (llm.StreamIterator, error) {
 			attempts.Add(1)
 			return nil, nil
 		})
@@ -336,7 +473,7 @@ func TestRetryingStreamClampsNegativeRetryBudget(t *testing.T) {
 	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
 		MaxRetries:    -1,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return nil, NewError(http.StatusTooManyRequests, "rate limited")
 	})
@@ -358,7 +495,7 @@ func TestRetryingStreamDoesNotRetryAfterFirstEvent(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return committed, nil
 	})
@@ -376,7 +513,7 @@ func TestRetryingStreamCloseBeforeNextDoesNotStartAttempt(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return &testStreamIterator{}, nil
 	})
@@ -396,7 +533,7 @@ func TestRetryingStreamCanceledBeforeNextDoesNotStartAttempt(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return &testStreamIterator{}, nil
 	})
@@ -415,7 +552,7 @@ func TestRetryingStreamCancellationFromAttemptStopsRetries(t *testing.T) {
 		Provider:      "test",
 		MaxRetries:    2,
 		RetryBaseWait: time.Millisecond,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		cancel()
 		return nil, errors.New("transport stopped")
@@ -450,7 +587,7 @@ func TestRetryingStreamCancellationStopsBackoff(t *testing.T) {
 		MaxRetries:    2,
 		RetryBaseWait: 10 * time.Second,
 		Logger:        logger,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		attempts.Add(1)
 		return nil, NewError(429, "rate limited")
 	})
@@ -496,7 +633,7 @@ func TestRetryingStreamLogsAttemptWithoutProviderBody(t *testing.T) {
 		MaxRetries:    1,
 		RetryBaseWait: time.Millisecond,
 		Logger:        logger,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		if attempts.Add(1) == 1 {
 			return nil, NewError(429, "sensitive provider response")
 		}
@@ -530,7 +667,7 @@ func TestRetryingStreamLogsTransportErrorWithoutStatus(t *testing.T) {
 		MaxRetries:    1,
 		RetryBaseWait: time.Millisecond,
 		Logger:        logger,
-	}, func() (llm.StreamIterator, error) {
+	}, func(context.Context) (llm.StreamIterator, error) {
 		if attempts.Add(1) == 1 {
 			return nil, errors.New("connection reset")
 		}

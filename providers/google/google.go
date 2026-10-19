@@ -24,6 +24,11 @@ var (
 	DefaultMaxRetries    = 3
 	DefaultRetryBaseWait = 1 * time.Second
 	DefaultVersion       = "v1"
+
+	// Gemini may send nothing until the model produces output, which can
+	// follow minutes of thinking.
+	DefaultStreamFirstEventTimeout = providers.DefaultStreamFirstEventTimeout
+	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -41,6 +46,9 @@ type Provider struct {
 	retryBaseWait time.Duration
 	version       string
 	mutex         sync.Mutex
+
+	streamFirstEventTimeout time.Duration
+	streamIdleTimeout       time.Duration
 }
 
 // New creates a new Google Gemini provider with the given options.
@@ -58,6 +66,9 @@ func New(opts ...Option) *Provider {
 		maxRetries:    DefaultMaxRetries,
 		retryBaseWait: DefaultRetryBaseWait,
 		version:       DefaultVersion,
+
+		streamFirstEventTimeout: DefaultStreamFirstEventTimeout,
+		streamIdleTimeout:       DefaultStreamIdleTimeout,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -229,16 +240,18 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	}
 
 	stream := providers.NewRetryingStreamIterator(ctx, providers.StreamRetryConfig{
-		Provider:      p.Name(),
-		MaxRetries:    p.maxRetries,
-		RetryBaseWait: p.retryBaseWait,
-		Logger:        config.Logger,
-	}, func() (llm.StreamIterator, error) {
+		Provider:          p.Name(),
+		MaxRetries:        p.maxRetries,
+		RetryBaseWait:     p.retryBaseWait,
+		Logger:            config.Logger,
+		FirstEventTimeout: p.streamFirstEventTimeout,
+		IdleTimeout:       p.streamIdleTimeout,
+	}, func(attemptCtx context.Context) (llm.StreamIterator, error) {
 		// GenerateContentStream reports request failures through its lazy
 		// sequence. The shared iterator consumes the first result as part of
 		// the provider's pre-event retry boundary.
-		streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
-		return newStreamIteratorFromSeq(ctx, streamSeq, request.Model, p.pricingContext(request.ServiceTier)), nil
+		streamSeq := p.client.Models.GenerateContentStream(attemptCtx, request.Model, contents, genConfig)
+		return newStreamIteratorFromSeq(attemptCtx, streamSeq, request.Model, p.pricingContext(request.ServiceTier)), nil
 	})
 
 	return stream, nil

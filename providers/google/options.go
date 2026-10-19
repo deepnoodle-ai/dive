@@ -49,6 +49,17 @@ func WithRetryBaseWait(retryBaseWait time.Duration) Option {
 	}
 }
 
+// WithStreamTimeouts bounds how long Stream waits for events. firstEvent
+// limits each attempt's wait for its first event; an attempt that runs out is
+// retried. idle limits the wait for each later event. Zero disables a limit.
+// Defaults: DefaultStreamFirstEventTimeout and DefaultStreamIdleTimeout.
+func WithStreamTimeouts(firstEvent, idle time.Duration) Option {
+	return func(p *Provider) {
+		p.streamFirstEventTimeout = firstEvent
+		p.streamIdleTimeout = idle
+	}
+}
+
 // WithVersion sets the API version.
 func WithVersion(version string) Option {
 	return func(p *Provider) {

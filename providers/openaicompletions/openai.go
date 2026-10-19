@@ -54,6 +54,11 @@ var (
 	ModelToolBehavior = map[string]ToolBehavior{
 		"o1-mini": ToolBehaviorOmit,
 	}
+
+	// A Chat Completions endpoint may send nothing until the model produces
+	// output, which a reasoning model can take minutes to do.
+	DefaultStreamFirstEventTimeout = providers.DefaultStreamFirstEventTimeout
+	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -87,6 +92,9 @@ type Provider struct {
 	// Provider wrappers opt into these compatible endpoint capabilities.
 	supportsPromptCacheKey bool
 	supportsResponseFormat bool
+
+	streamFirstEventTimeout time.Duration
+	streamIdleTimeout       time.Duration
 }
 
 // New creates a new OpenAI Completions provider with the given options.
@@ -100,6 +108,9 @@ func New(opts ...Option) *Provider {
 		maxRetries:    DefaultMaxRetries,
 		retryBaseWait: DefaultRetryBaseWait,
 		systemRole:    DefaultSystemRole,
+
+		streamFirstEventTimeout: DefaultStreamFirstEventTimeout,
+		streamIdleTimeout:       DefaultStreamIdleTimeout,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -310,18 +321,21 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
+	client := providers.StreamClient(p.client)
 	stream := providers.NewRetryingStreamIterator(ctx, providers.StreamRetryConfig{
-		Provider:      p.Name(),
-		MaxRetries:    p.maxRetries,
-		RetryBaseWait: p.retryBaseWait,
-		Logger:        config.Logger,
-	}, func() (llm.StreamIterator, error) {
-		req, err := p.createRequest(ctx, body, config, true)
+		Provider:          p.Name(),
+		MaxRetries:        p.maxRetries,
+		RetryBaseWait:     p.retryBaseWait,
+		Logger:            config.Logger,
+		FirstEventTimeout: p.streamFirstEventTimeout,
+		IdleTimeout:       p.streamIdleTimeout,
+	}, func(attemptCtx context.Context) (llm.StreamIterator, error) {
+		req, err := p.createRequest(attemptCtx, body, config, true)
 		if err != nil {
 			return nil, err
 		}
 
-		resp, err := p.client.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("error making request: %w", err)
 		}

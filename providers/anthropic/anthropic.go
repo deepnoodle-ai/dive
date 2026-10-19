@@ -26,6 +26,11 @@ var (
 	DefaultMaxRetries    = 3
 	DefaultRetryBaseWait = 2 * time.Second
 	DefaultVersion       = "2023-06-01"
+
+	// DefaultStreamFirstEventTimeout is shorter than the shared default
+	// because the Messages API sends message_start before the model works.
+	DefaultStreamFirstEventTimeout = 2 * time.Minute
+	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -42,6 +47,9 @@ type Provider struct {
 	retryBaseWait time.Duration
 	version       string
 
+	streamFirstEventTimeout time.Duration
+	streamIdleTimeout       time.Duration
+
 	prefixMismatchBehavior PrefixMismatchBehavior
 }
 
@@ -56,6 +64,9 @@ func New(opts ...Option) *Provider {
 		maxRetries:    DefaultMaxRetries,
 		retryBaseWait: DefaultRetryBaseWait,
 		version:       DefaultVersion,
+
+		streamFirstEventTimeout: DefaultStreamFirstEventTimeout,
+		streamIdleTimeout:       DefaultStreamIdleTimeout,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -220,17 +231,20 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
+	client := providers.StreamClient(p.client)
 	stream := providers.NewRetryingStreamIterator(ctx, providers.StreamRetryConfig{
-		Provider:      p.Name(),
-		MaxRetries:    p.maxRetries,
-		RetryBaseWait: p.retryBaseWait,
-		Logger:        config.Logger,
-	}, func() (llm.StreamIterator, error) {
-		req, err := p.createRequest(ctx, body, config, betas, true)
+		Provider:          p.Name(),
+		MaxRetries:        p.maxRetries,
+		RetryBaseWait:     p.retryBaseWait,
+		Logger:            config.Logger,
+		FirstEventTimeout: p.streamFirstEventTimeout,
+		IdleTimeout:       p.streamIdleTimeout,
+	}, func(attemptCtx context.Context) (llm.StreamIterator, error) {
+		req, err := p.createRequest(attemptCtx, body, config, betas, true)
 		if err != nil {
 			return nil, err
 		}
-		resp, err := p.client.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("error making request: %w", err)
 		}

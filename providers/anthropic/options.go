@@ -30,7 +30,8 @@ func WithEndpoint(endpoint string) Option {
 	}
 }
 
-// WithClient sets the HTTP client.
+// WithClient sets the HTTP client. Its Timeout applies to Generate; Stream
+// ignores it and uses WithStreamTimeouts instead.
 func WithClient(client *http.Client) Option {
 	return func(p *Provider) {
 		p.client = client
@@ -62,6 +63,18 @@ func WithMaxRetries(maxRetries int) Option {
 func WithBaseWait(baseWait time.Duration) Option {
 	return func(p *Provider) {
 		p.retryBaseWait = baseWait
+	}
+}
+
+// WithStreamTimeouts bounds how long Stream waits for events. firstEvent
+// limits each attempt's wait for its first event, response headers included;
+// an attempt that runs out is retried. idle limits the wait for each later
+// event. Zero disables a limit. Defaults: DefaultStreamFirstEventTimeout and
+// DefaultStreamIdleTimeout.
+func WithStreamTimeouts(firstEvent, idle time.Duration) Option {
+	return func(p *Provider) {
+		p.streamFirstEventTimeout = firstEvent
+		p.streamIdleTimeout = idle
 	}
 }
 
