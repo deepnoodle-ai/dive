@@ -24,7 +24,9 @@ var (
 	DefaultRetryBaseWait = 1 * time.Second
 	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
 
-	DefaultStreamFirstEventTimeout = providers.DefaultStreamFirstEventTimeout
+	// DefaultStreamFirstEventTimeout is shorter than the shared default
+	// because the Responses API sends response.created before the model works.
+	DefaultStreamFirstEventTimeout = time.Minute
 	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 

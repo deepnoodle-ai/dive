@@ -29,7 +29,7 @@ var (
 
 	// DefaultStreamFirstEventTimeout is shorter than the shared default
 	// because the Messages API sends message_start before the model works.
-	DefaultStreamFirstEventTimeout = 2 * time.Minute
+	DefaultStreamFirstEventTimeout = time.Minute
 	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 

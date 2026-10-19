@@ -25,9 +25,10 @@ var (
 	DefaultRetryBaseWait = 1 * time.Second
 	DefaultVersion       = "v1"
 
-	// Gemini may send nothing until the model produces output, which can
-	// follow minutes of thinking.
-	DefaultStreamFirstEventTimeout = providers.DefaultStreamFirstEventTimeout
+	// DefaultStreamFirstEventTimeout is off. Without thought summaries,
+	// Gemini sends nothing, not even headers, until the model produces
+	// output, which can follow several minutes of thinking.
+	DefaultStreamFirstEventTimeout = time.Duration(0)
 	DefaultStreamIdleTimeout       = providers.DefaultStreamIdleTimeout
 )
 

@@ -10,8 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Stream timeouts.** `WithStreamTimeouts(firstEvent, idle)` on the Anthropic,
   OpenAI, OpenAI Completions and Google providers. An attempt with no event by
-  `firstEvent` is retried (Anthropic default 2m, others 5m); a stream quiet for
-  `idle` (5m) ends.
+  `firstEvent` is retried (Anthropic and OpenAI default 1m, Completions 5m,
+  Google off); a stream quiet for `idle` (5m) ends.
 
 ### Changed
 
