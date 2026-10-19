@@ -24,8 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Streams retry an `http.Client` timeout** instead of failing on the first
-  attempt while the caller's context is live.
+- **Streams retry a timed-out attempt** while the caller's context is live,
+  instead of failing on the first attempt. This covers the first-event limit
+  and transport timeouts such as `http.Transport.ResponseHeaderTimeout`.
 - **A provider timeout is no longer reported as the turn's deadline.**
   `TurnReasonDeadline` now requires the invocation's context to have expired;
   otherwise it is `provider_error` or `stream_interrupted`.
