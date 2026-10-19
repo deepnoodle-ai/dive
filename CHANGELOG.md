@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.40.0] - 2026-10-18
+
 ### Added
 
 - **Stream timeouts.** `WithStreamTimeouts(firstEvent, idle)` on the Anthropic,
