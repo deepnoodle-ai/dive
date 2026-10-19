@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -233,12 +234,16 @@ func TestRetryingStreamCallerDeadlineStopsRetries(t *testing.T) {
 }
 
 // stallingStreamIterator yields its events, then blocks until ctx is done, as
-// a response body bound to ctx does when the provider goes quiet.
+// a response body bound to ctx does when the provider goes quiet. It then
+// reports ctx's error, or endErr when cleanEnd is set, as an iterator that
+// treats cancellation as the end of the stream would.
 type stallingStreamIterator struct {
-	ctx    context.Context
-	events []*llm.Event
-	pos    int
-	err    error
+	ctx      context.Context
+	events   []*llm.Event
+	pos      int
+	err      error
+	cleanEnd bool
+	endErr   error
 }
 
 func (s *stallingStreamIterator) Next() bool {
@@ -248,6 +253,9 @@ func (s *stallingStreamIterator) Next() bool {
 	}
 	<-s.ctx.Done()
 	s.err = s.ctx.Err()
+	if s.cleanEnd {
+		s.err = s.endErr
+	}
 	return false
 }
 
@@ -336,6 +344,46 @@ func TestRetryingStreamIdleTimeoutEndsCommittedStream(t *testing.T) {
 	assert.False(t, iterator.Next())
 	assert.True(t, errors.Is(iterator.Err(), ErrStreamIdleTimeout))
 	assert.Equal(t, int64(1), attempts.Load())
+}
+
+func TestRetryingStreamTimeoutWinsOverCleanEnd(t *testing.T) {
+	// An iterator may end cleanly, with no error or io.EOF, when its context
+	// is cancelled. A first-event timeout must still retry, and an idle
+	// timeout must not pass for a complete stream.
+	for _, endErr := range []error{nil, io.EOF} {
+		t.Run(fmt.Sprintf("first event %v", endErr), func(t *testing.T) {
+			var attempts atomic.Int64
+			iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+				Provider:          "test",
+				MaxRetries:        1,
+				RetryBaseWait:     time.Millisecond,
+				FirstEventTimeout: 20 * time.Millisecond,
+			}, func(ctx context.Context) (llm.StreamIterator, error) {
+				attempts.Add(1)
+				return &stallingStreamIterator{ctx: ctx, cleanEnd: true, endErr: endErr}, nil
+			})
+			defer iterator.Close()
+
+			assert.False(t, iterator.Next())
+			assert.True(t, errors.Is(iterator.Err(), ErrStreamFirstEventTimeout))
+			assert.Equal(t, int64(2), attempts.Load())
+		})
+		t.Run(fmt.Sprintf("idle %v", endErr), func(t *testing.T) {
+			iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+				Provider:    "test",
+				IdleTimeout: 20 * time.Millisecond,
+			}, func(ctx context.Context) (llm.StreamIterator, error) {
+				return &stallingStreamIterator{ctx: ctx, cleanEnd: true, endErr: endErr, events: []*llm.Event{
+					{Type: llm.EventTypeMessageStart},
+				}}, nil
+			})
+			defer iterator.Close()
+
+			assert.True(t, iterator.Next())
+			assert.False(t, iterator.Next())
+			assert.True(t, errors.Is(iterator.Err(), ErrStreamIdleTimeout))
+		})
+	}
 }
 
 func TestRetryingStreamIdleTimeoutIgnoresSlowConsumer(t *testing.T) {

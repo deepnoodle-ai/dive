@@ -265,19 +265,20 @@ func (s *retryingStreamIterator) stopWatch() {
 }
 
 func (s *retryingStreamIterator) normalizeError(err error) error {
+	// The transport reports a watchdog cancellation as context.Canceled, and
+	// an iterator may report it as a clean end. Report the timeout that
+	// caused it either way: it is retried before the first event, and after
+	// it the stream is interrupted, not complete.
+	if s.ctx.Err() == nil && s.attemptCtx != nil && s.attemptCtx.Err() != nil {
+		if cause := context.Cause(s.attemptCtx); errors.Is(cause, ErrStreamFirstEventTimeout) || errors.Is(cause, ErrStreamIdleTimeout) {
+			return cause
+		}
+	}
 	if err == nil || errors.Is(err, io.EOF) {
 		return nil
 	}
 	if s.ctx.Err() != nil {
 		return s.ctx.Err()
-	}
-	// The transport reports a watchdog cancellation as context.Canceled.
-	// Report the timeout that caused it, which is retried before the first
-	// event and classified as an interrupted stream after it.
-	if s.attemptCtx != nil && s.attemptCtx.Err() != nil {
-		if cause := context.Cause(s.attemptCtx); errors.Is(cause, ErrStreamFirstEventTimeout) || errors.Is(cause, ErrStreamIdleTimeout) {
-			return cause
-		}
 	}
 	if s.config.NormalizeError != nil {
 		return s.config.NormalizeError(err)
