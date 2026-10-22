@@ -8,12 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Stop hooks can continue without a reason.** A Stop hook that appends a
-  reminder with `hctx.AppendReminder` can return `StopDecision{Continue: true}`
-  with an empty `Reason`. The loop re-enters with only that reminder as new
-  input and adds no `stop-continuation` message, which says the input came
-  from the user. With no appended reminder, the turn fails with
-  `ErrStopContinueWithoutInput`.
+- **Stop hooks can continue without a reason.** With an empty `Reason`, the
+  hook's `Recorded` reminders are the only new input and no `stop-continuation`
+  message is added; with none, the turn fails with `ErrStopContinueWithoutInput`.
 
 ## [1.40.0] - 2026-10-18
 
