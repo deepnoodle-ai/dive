@@ -1359,18 +1359,26 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 					continue
 				}
 				if decision != nil && decision.Continue {
-					// Inject reason as user message and re-enter generate loop.
-					// The reason message becomes part of the conversation the LLM
-					// sees, so it must also be recorded in the turn so a
-					// subsequent suspend doesn't drop it.
-					reasonReminder, reminderErr := NewContextReminder("stop-continuation", "The following input arrived from the user: "+decision.Reason)
-					if reminderErr != nil {
-						return t.end(ctx, failedExit(reminderErr))
+					if decision.Reason == "" && (hctx.reminders == nil || len(hctx.reminders.pending) == 0) {
+						// With no reason, the hook's appended reminders are the
+						// next model input. Without one the model would see no
+						// new input, so this is a hook contract error.
+						return t.end(ctx, failedExit(ErrStopContinueWithoutInput))
 					}
-					reasonMsg := NewReminderMessage(reasonReminder)
 					messages = append(messages, genResult.OutputMessages...)
-					messages = append(messages, reasonMsg)
-					t.record.addOutput(reasonMsg)
+					if decision.Reason != "" {
+						// Inject reason as user message and re-enter generate loop.
+						// The reason message becomes part of the conversation the LLM
+						// sees, so it must also be recorded in the turn so a
+						// subsequent suspend doesn't drop it.
+						reasonReminder, reminderErr := NewContextReminder("stop-continuation", "The following input arrived from the user: "+decision.Reason)
+						if reminderErr != nil {
+							return t.end(ctx, failedExit(reminderErr))
+						}
+						reasonMsg := NewReminderMessage(reasonReminder)
+						messages = append(messages, reasonMsg)
+						t.record.addOutput(reasonMsg)
+					}
 					t.syncResponse(false)
 					hctx.Messages = messages
 					stopHookActive = true
