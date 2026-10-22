@@ -343,6 +343,28 @@ func TestStopContinueWithoutReasonOrReminderFailsTheTurn(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
+func TestStopContinueWithoutReasonAndOnlyModelOnlyReminderFailsTheTurn(t *testing.T) {
+	var calls atomic.Int32
+	model := &mockLLM{generateFunc: func(_ context.Context, _ ...llm.Option) (*llm.Response, error) {
+		calls.Add(1)
+		return textResponse("round"), nil
+	}}
+	nudge, _ := NewContextReminder("nudge", "keep going")
+	agent, err := NewAgent(AgentOptions{
+		Model: model,
+		Hooks: Hooks{Stop: []StopHook{func(_ context.Context, hctx *HookContext) (*StopDecision, error) {
+			if err := hctx.AppendReminder(nudge, ModelOnly); err != nil {
+				return nil, err
+			}
+			return &StopDecision{Continue: true}, nil
+		}}},
+	})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.True(t, errors.Is(err, ErrStopContinueWithoutInput))
+	assert.Equal(t, int32(1), calls.Load())
+}
+
 // resumeReminderAgent builds an agent whose PostToolUse hook appends a
 // recorded reminder named "resumed-<toolID>" for each completed tool, capturing
 // the messages sent to the model in received.

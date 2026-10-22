@@ -1359,10 +1359,11 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 					continue
 				}
 				if decision != nil && decision.Continue {
-					if decision.Reason == "" && (hctx.reminders == nil || len(hctx.reminders.pending) == 0) {
+					if decision.Reason == "" && !hctx.reminders.hasPendingRecorded() {
 						// With no reason, the hook's appended reminders are the
-						// next model input. Without one the model would see no
-						// new input, so this is a hook contract error.
+						// next model input. One must be recorded: a model-only
+						// reminder is not saved, so the saved turn would hold
+						// two assistant answers with no input between them.
 						return t.end(ctx, failedExit(ErrStopContinueWithoutInput))
 					}
 					messages = append(messages, genResult.OutputMessages...)
