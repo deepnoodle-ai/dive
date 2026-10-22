@@ -362,6 +362,7 @@ func TestStopContinueWithoutReasonAndOnlyModelOnlyReminderFailsTheTurn(t *testin
 	assert.NoError(t, err)
 	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.True(t, errors.Is(err, ErrStopContinueWithoutInput))
+	assert.Contains(t, err.Error(), "no appended Recorded reminder")
 	assert.Equal(t, int32(1), calls.Load())
 }
 

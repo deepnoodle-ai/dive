@@ -376,7 +376,7 @@ type StopDecision struct {
 
 // ErrStopContinueWithoutInput fails a turn whose Stop hook asked to continue
 // with an empty Reason and appended no Recorded reminder.
-var ErrStopContinueWithoutInput = errors.New("dive: stop hook continued with no reason and no appended reminder")
+var ErrStopContinueWithoutInput = errors.New("dive: stop hook continued with no reason and no appended Recorded reminder")
 
 // NewHookContext creates a new HookContext with initialized Values map.
 func NewHookContext() *HookContext {
