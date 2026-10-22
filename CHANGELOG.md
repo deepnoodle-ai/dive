@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.41.0] - 2026-10-22
+
 ### Added
 
 - **Stop hooks can continue without a reason.** With an empty `Reason`, the
