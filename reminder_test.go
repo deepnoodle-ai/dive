@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -271,6 +272,98 @@ func TestModelOnlyReminderSurvivesStopHookReentry(t *testing.T) {
 	assert.True(t, visible)
 	_, recorded := FindLatestReminder(resp.OutputMessages, "ephemeral-stop")
 	assert.False(t, recorded)
+}
+
+func TestStopContinueWithoutReasonDeliversOnlyAppendedReminder(t *testing.T) {
+	var calls atomic.Int32
+	var secondCall []*llm.Message
+	model := &mockLLM{generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+		cfg := &llm.Config{}
+		cfg.Apply(opts...)
+		if calls.Add(1) == 2 {
+			secondCall = cfg.Messages
+		}
+		return textResponse("round"), nil
+	}}
+	result, _ := NewContextReminder("task-result", "the background task finished")
+	agent, err := NewAgent(AgentOptions{
+		Model: model,
+		Hooks: Hooks{Stop: []StopHook{func(_ context.Context, hctx *HookContext) (*StopDecision, error) {
+			if hctx.StopHookActive {
+				return nil, nil
+			}
+			if err := hctx.AppendReminder(result, Recorded); err != nil {
+				return nil, err
+			}
+			return &StopDecision{Continue: true}, nil
+		}}},
+	})
+	assert.NoError(t, err)
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load())
+
+	// The second model call ends with the appended reminder and carries no
+	// stop-continuation message.
+	_, continuation := FindLatestReminder(secondCall, "stop-continuation")
+	assert.False(t, continuation)
+	last := secondCall[len(secondCall)-1]
+	got, ok := FindReminder(last, "task-result")
+	assert.True(t, ok)
+	assert.Equal(t, "the background task finished", got.Content)
+
+	// The turn records the reminder once, between the two answers.
+	count := 0
+	for _, msg := range resp.OutputMessages {
+		if _, ok := FindReminder(msg, "task-result"); ok {
+			count++
+		}
+		_, continuation := FindReminder(msg, "stop-continuation")
+		assert.False(t, continuation)
+	}
+	assert.Equal(t, 1, count)
+	assert.Equal(t, 3, len(resp.OutputMessages))
+}
+
+func TestStopContinueWithoutReasonOrReminderFailsTheTurn(t *testing.T) {
+	var calls atomic.Int32
+	model := &mockLLM{generateFunc: func(_ context.Context, _ ...llm.Option) (*llm.Response, error) {
+		calls.Add(1)
+		return textResponse("round"), nil
+	}}
+	agent, err := NewAgent(AgentOptions{
+		Model: model,
+		Hooks: Hooks{Stop: []StopHook{func(_ context.Context, _ *HookContext) (*StopDecision, error) {
+			return &StopDecision{Continue: true}, nil
+		}}},
+	})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.True(t, errors.Is(err, ErrStopContinueWithoutInput))
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestStopContinueWithoutReasonAndOnlyModelOnlyReminderFailsTheTurn(t *testing.T) {
+	var calls atomic.Int32
+	model := &mockLLM{generateFunc: func(_ context.Context, _ ...llm.Option) (*llm.Response, error) {
+		calls.Add(1)
+		return textResponse("round"), nil
+	}}
+	nudge, _ := NewContextReminder("nudge", "keep going")
+	agent, err := NewAgent(AgentOptions{
+		Model: model,
+		Hooks: Hooks{Stop: []StopHook{func(_ context.Context, hctx *HookContext) (*StopDecision, error) {
+			if err := hctx.AppendReminder(nudge, ModelOnly); err != nil {
+				return nil, err
+			}
+			return &StopDecision{Continue: true}, nil
+		}}},
+	})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.True(t, errors.Is(err, ErrStopContinueWithoutInput))
+	assert.Contains(t, err.Error(), "no appended Recorded reminder")
+	assert.Equal(t, int32(1), calls.Load())
 }
 
 // resumeReminderAgent builds an agent whose PostToolUse hook appends a

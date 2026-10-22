@@ -288,8 +288,8 @@ lifetime, provider-fallback, and compaction contract.
 ## Stop Hook
 
 Runs when the agent is about to stop responding. A hook can return
-`Continue: true` to inject a reason as a user message and re-enter the
-generation loop.
+`Continue: true` to re-enter the generation loop, with its `Reason` injected
+as a user message.
 
 ```go
 Hooks: dive.Hooks{
@@ -312,6 +312,12 @@ Hooks: dive.Hooks{
 
 Check `hctx.StopHookActive` to prevent infinite loops — it's true when the
 current stop check was triggered by a previous continuation.
+
+The `Reason` reminder tells the model that the input came from the user. For
+other content, such as a background task result, append a `Recorded` reminder
+with `hctx.AppendReminder` and leave `Reason` empty. The loop re-enters with
+only that reminder as new input. Continuing with an empty `Reason` and no
+`Recorded` reminder fails the turn with `dive.ErrStopContinueWithoutInput`.
 
 ## OnSuspend Hook
 

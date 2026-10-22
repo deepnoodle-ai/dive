@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Stop hooks can continue without a reason.** With an empty `Reason`, the
+  hook's `Recorded` reminders are the only new input and no `stop-continuation`
+  message is added; with none, the turn fails with `ErrStopContinueWithoutInput`.
+
 ## [1.40.0] - 2026-10-18
 
 ### Added

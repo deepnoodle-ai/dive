@@ -158,7 +158,7 @@ Hooks: dive.Hooks{
 },
 ```
 
-When a Stop hook returns `Continue: true`, the `Reason` is injected as a user message and the generation loop re-enters. `hctx.StopHookActive` is true on subsequent stop checks.
+When a Stop hook returns `Continue: true`, the `Reason` is injected as a user message and the generation loop re-enters. A hook that appended a `Recorded` reminder with `hctx.AppendReminder` can leave `Reason` empty to continue with only that reminder as new input. `hctx.StopHookActive` is true on subsequent stop checks.
 
 ### PreIteration Hook
 

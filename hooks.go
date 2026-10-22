@@ -231,7 +231,10 @@ type PostToolUseFailureHook func(ctx context.Context, hctx *HookContext) error
 
 // StopHook is called when the agent is about to stop responding.
 // A hook can prevent stopping by returning a StopDecision with Continue: true,
-// which injects the Reason as a user message and re-enters the generation loop.
+// which re-enters the generation loop. A non-empty Reason is injected as a
+// user message. A hook that appended a Recorded reminder with
+// hctx.AppendReminder may leave Reason empty: the loop then re-enters with
+// only the appended reminders as new input.
 //
 // hctx.StopHookActive is true when this stop check was triggered by a
 // previous stop hook continuation. Check this to prevent infinite loops.
@@ -361,10 +364,19 @@ type StopDecision struct {
 	// why it should keep going.
 	Continue bool
 
-	// Reason is required when Continue is true. It's added to the
-	// conversation as context for the next LLM iteration.
+	// Reason is added to the conversation as a "stop-continuation" reminder
+	// that says the input arrived from the user. Leave it empty when the hook
+	// appended its own Recorded reminder with hctx.AppendReminder, for content
+	// that did not come from the user: the loop then re-enters with no
+	// stop-continuation message. Continue with an empty Reason and no
+	// appended Recorded reminder fails the turn with
+	// ErrStopContinueWithoutInput.
 	Reason string
 }
+
+// ErrStopContinueWithoutInput fails a turn whose Stop hook asked to continue
+// with an empty Reason and appended no Recorded reminder.
+var ErrStopContinueWithoutInput = errors.New("dive: stop hook continued with no reason and no appended Recorded reminder")
 
 // NewHookContext creates a new HookContext with initialized Values map.
 func NewHookContext() *HookContext {

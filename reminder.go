@@ -185,6 +185,20 @@ func (s *reminderState) drainPending() []reminderDelivery {
 	return pending
 }
 
+// hasPendingRecorded reports whether a Recorded reminder is waiting for
+// delivery.
+func (s *reminderState) hasPendingRecorded() bool {
+	if s == nil {
+		return false
+	}
+	for _, delivery := range s.pending {
+		if delivery.recording == Recorded {
+			return true
+		}
+	}
+	return false
+}
+
 func queueReminderDeliveries(state *reminderState, deliveries []reminderDelivery) {
 	if state == nil {
 		return
