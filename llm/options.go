@@ -414,8 +414,9 @@ func WithSpeed(speed Speed) Option {
 // down as it thinks, calls tools, reads tool results, and writes, and paces
 // itself to finish within it. MaxTokens remains the hard limit on each
 // response. Anthropic beta, on Opus 4.7 and later, Sonnet 5.5, Haiku 5.5,
-// and Fable 5 and 5.1 (Anthropic also lists Mythos 5 and 5.1, untested);
-// other models and providers drop it with a warning on each call.
+// and Fable 5 and 5.1 (Anthropic also lists Mythos 5 and 5.1, untested).
+// Claude models known to lack support, and other providers, drop it with a
+// warning on each call; Claude model IDs Dive does not know get it as asked.
 type TaskBudget struct {
 	// Total is the number of tokens the loop may spend. Anthropic's minimum
 	// is 20,000.

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.42.0] - 2026-10-23
+
 ### Added
 
 - **Claude task budgets.** `ModelSettings.TaskBudget` gives the model a token
