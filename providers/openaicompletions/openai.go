@@ -926,6 +926,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	req.Tools = tools
+	if config.TaskBudget != nil && config.Logger != nil {
+		config.Logger.Warn("provider does not support task budgets; ignoring the task budget",
+			"provider", p.Name(), "model", req.Model)
+	}
 	if config.Temperature != nil && !modelcaps.AcceptsTemperature(p.Name(), req.Model) {
 		if config.Logger != nil {
 			config.Logger.Warn("model does not support temperature; omitting it", "model", req.Model)

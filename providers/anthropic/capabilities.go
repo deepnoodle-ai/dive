@@ -55,6 +55,12 @@ type modelCapabilities struct {
 	// output_config.effort (the mid-conversation-output-config beta). Fable 5
 	// answers "this model does not" support per-turn effort.
 	perMessageEffort bool
+
+	// taskBudget reports whether output_config.task_budget is accepted (the
+	// task-budgets beta). The 4.5 and 4.6 generations answer "does not
+	// support user-configurable task budgets". Sonnet 5 returns 200 but is
+	// documented as unsupported, so it is left out.
+	taskBudget bool
 }
 
 // reasoningKind classifies how the model takes a reasoning effort.
@@ -160,10 +166,10 @@ var modelCapabilityTable = []capabilityEntry{
 
 	// --- 4.7/4.8: adaptive-only thinking; temperature and manual budgets rejected. ---
 	{prefix: "claude-opus-4-7", caps: modelCapabilities{
-		efforts: effortsFull, adaptive: true, explicitDisable: true,
+		efforts: effortsFull, adaptive: true, explicitDisable: true, taskBudget: true,
 	}},
 	{prefix: "claude-opus-4-8", caps: modelCapabilities{
-		efforts: effortsFull, adaptive: true, explicitDisable: true,
+		efforts: effortsFull, adaptive: true, explicitDisable: true, taskBudget: true,
 	}},
 
 	// --- Claude 5: thinking on by default, adaptive-only, no temperature. ---
@@ -171,14 +177,14 @@ var modelCapabilityTable = []capabilityEntry{
 	{prefix: "claude-opus-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
 		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
-		perMessageEffort: true,
+		perMessageEffort: true, taskBudget: true,
 	}},
 	// Opus 5.5 needs its own entry: by prefix it would inherit Opus 5's, which
 	// sends an explicit disable. 5.5 rejects the disable at every effort level
 	// and, like Fable 5.1, rejects a forced tool_choice.
 	{prefix: "claude-opus-5-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
-		perMessageEffort: true,
+		perMessageEffort: true, taskBudget: true,
 	}},
 	{prefix: "claude-sonnet-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
@@ -190,7 +196,7 @@ var modelCapabilityTable = []capabilityEntry{
 	{prefix: "claude-sonnet-5-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, betweenToolsDisable: true,
 		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
-		perMessageEffort: true,
+		perMessageEffort: true, taskBudget: true,
 	}},
 	// Verified against the Claude API on 2026-10-07. Haiku 5.5 matches Opus 5:
 	// it takes an explicit disable but caps effort at high while disabled,
@@ -199,7 +205,7 @@ var modelCapabilityTable = []capabilityEntry{
 	{prefix: "claude-haiku-5-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, explicitDisable: true,
 		thinkingOnByDefault: true, disabledEffortCap: llm.ReasoningEffortHigh,
-		perMessageEffort: true,
+		perMessageEffort: true, taskBudget: true,
 	}},
 	// Fable 5 and Mythos 5 always think and reject an explicit disable, so
 	// Dive omits the thinking parameter for them instead. The 5.1 point
@@ -208,21 +214,21 @@ var modelCapabilityTable = []capabilityEntry{
 	// requestThinkingBlocksForcedToolChoice rejects a forced choice for any
 	// model that always thinks and cannot be disabled.
 	{prefix: "claude-fable-5", caps: modelCapabilities{
-		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true, taskBudget: true,
 	}},
 	{prefix: "claude-fable-5-1", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
-		perMessageEffort: true,
+		perMessageEffort: true, taskBudget: true,
 	}},
 	// Mythos 5 and 5.1 are catalogued but reachable only through Anthropic's
 	// limited-availability program, so these values mirror Fable and are
 	// untested against the live API.
 	{prefix: "claude-mythos-5", caps: modelCapabilities{
-		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true, taskBudget: true,
 	}},
 	{prefix: "claude-mythos-5-1", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
-		perMessageEffort: true,
+		perMessageEffort: true, taskBudget: true,
 	}},
 	{prefix: "claude-mythos-preview", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,

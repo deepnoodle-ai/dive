@@ -19,10 +19,14 @@ type ModelSettings struct {
 	Thinking          llm.ThinkingType
 	ThinkingDisplay   llm.ThinkingDisplay
 	Speed             llm.Speed
-	ToolChoice        *llm.ToolChoice
-	Features          []string
-	RequestHeaders    http.Header
-	MCPServers        []llm.MCPServerConfig
+	// TaskBudget gives the model an advisory token budget for each
+	// CreateResponse: every model call of the turn shares it. See
+	// llm.TaskBudget.
+	TaskBudget     *llm.TaskBudget
+	ToolChoice     *llm.ToolChoice
+	Features       []string
+	RequestHeaders http.Header
+	MCPServers     []llm.MCPServerConfig
 }
 
 // Options returns the LLM options corresponding to the model settings.
@@ -54,6 +58,9 @@ func (m *ModelSettings) Options() []llm.Option {
 	}
 	if m.Speed != "" {
 		opts = append(opts, llm.WithSpeed(m.Speed))
+	}
+	if m.TaskBudget != nil {
+		opts = append(opts, llm.WithTaskBudget(*m.TaskBudget))
 	}
 	if m.MaxTokens != nil {
 		opts = append(opts, llm.WithMaxTokens(*m.MaxTokens))

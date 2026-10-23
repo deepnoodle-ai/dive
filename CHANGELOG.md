@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Claude task budgets.** `ModelSettings.TaskBudget` gives the model a token
+  budget it can see for the whole turn; unsupported models drop it with a
+  warning. See the LLM guide.
+
 ## [1.41.0] - 2026-10-22
 
 ### Added

@@ -317,6 +317,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 | `Thinking`          | `llm.ThinkingType`    | adaptive, enabled, or disabled extended thinking |
 | `ThinkingDisplay`   | `llm.ThinkingDisplay` | summarized, omitted, or updates (Claude beta)    |
 | `Speed`             | `llm.Speed`           | fast or standard (Claude fast mode)              |
+| `TaskBudget`        | `*llm.TaskBudget`     | Token budget for a whole turn (Claude beta)      |
 | `Caching`           | `*bool`               | Enable prompt caching (Claude)                   |
 | `ParallelToolCalls` | `*bool`               | Allow simultaneous tool calls                    |
 | `ToolChoice`        | `*llm.ToolChoice`     | auto, any, none, or specific tool                |
@@ -394,6 +395,42 @@ Each of these sends its beta header automatically.
   drop those blocks instead. `Response.InputTransformations` lists what was
   dropped. Enabling `anthropic.FeatureThinkingBindingControls` alone reports
   mismatches without enforcing anything.
+
+### Task Budgets On Claude
+
+`max_tokens` caps each response, but the model cannot see it, so a long
+thinking pass can use the whole cap and leave no answer. A task budget is a
+limit the model can see: it counts down as Claude thinks, calls tools, reads
+tool results, and writes, and Claude paces itself to finish within it.
+
+```go
+ModelSettings: &dive.ModelSettings{
+    ReasoningEffort: llm.ReasoningEffortMedium,
+    TaskBudget:      &llm.TaskBudget{Total: 40000}, // -> output_config.task_budget
+}
+```
+
+- **One budget per turn.** Every model call of one `CreateResponse` shares the
+  budget. Dive sends the same `Total` on each call and lets the API count the
+  spend from the history. When a PreIteration hook replaces messages of the
+  turn, as mid-turn compaction does, Dive also sends `Remaining`: the total
+  less the removed messages' tokens (output tokens for model responses, an
+  estimate for tool results). A message counts as removed when the hook drops
+  it from `hctx.Messages`, so a hook should keep the messages it does not
+  change instead of copying them.
+- **Tool results count.** A turn that reads 36,000 tokens of tool output under
+  a 40,000-token budget has little left for its answer. Size the budget from
+  measured turns.
+- **Earlier turns count.** Anthropic counts the history of earlier turns that
+  is still in the context against a new turn's budget.
+- **Advisory.** The model can overrun the budget; `MaxTokens` stays the hard
+  limit on each response.
+- **Models.** Opus 4.7 and later, Sonnet 5.5, Haiku 5.5, and Fable 5 and 5.1,
+  verified against the API. Anthropic also lists Mythos 5 and 5.1, which Dive
+  has not tested. Other models and providers drop the setting and log a
+  warning on each model call. A `Total` below 20,000
+  (`anthropic.MinTaskBudgetTotal`) is a request error. The
+  `task-budgets-2026-03-13` beta header is sent for you.
 
 ### Computer Use On Claude
 

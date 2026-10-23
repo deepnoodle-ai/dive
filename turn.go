@@ -68,6 +68,10 @@ type turnRecord struct {
 	// version counts changes to the record, so an exit can tell whether
 	// the response is behind it.
 	version int
+
+	// budget follows the turn's spend of its task budget. Only the
+	// generation loop uses it, so it needs no lock.
+	budget taskBudgetSpend
 }
 
 // newTurnRecord returns an empty record with zero usage.

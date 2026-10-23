@@ -404,7 +404,7 @@ func resolveEffortMessages(messages []*llm.Message, req *Request, config *llm.Co
 		// Sonnet 5.5 defaults to high effort. Use the resolved request effort,
 		// including its disabled-mode cap, instead of the caller's raw setting.
 		effort := string(llm.ReasoningEffortHigh)
-		if req.OutputConfig != nil {
+		if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
 			effort = req.OutputConfig.Effort
 		}
 		for _, message := range messages {
@@ -786,6 +786,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	if err := applyReasoningConfig(req, config, p.prefixMismatchBehavior); err != nil {
 		return err
 	}
+	if err := applyTaskBudget(req, config); err != nil {
+		return err
+	}
 	if requestHasThinkingEnabled(req.Model, req.Thinking) && config.Prefill != "" {
 		return fmt.Errorf("anthropic extended thinking cannot be used with prefilled assistant responses")
 	}
@@ -909,6 +912,40 @@ func applyReasoningConfig(req *Request, config *llm.Config, binding PrefixMismat
 			}
 		}
 		req.Thinking = thinking
+	}
+	return nil
+}
+
+// MinTaskBudgetTotal is the smallest task budget total the API accepts.
+const MinTaskBudgetTotal = 20000
+
+// applyTaskBudget places the task budget on output_config. A total below the
+// API's minimum is an error on every model, since no model accepts it. A known
+// model without task budgets gets none, with a warning, so one ModelSettings
+// can move between models; an unknown model gets it as asked.
+func applyTaskBudget(req *Request, config *llm.Config) error {
+	budget := config.TaskBudget
+	if budget == nil {
+		return nil
+	}
+	if budget.Total < MinTaskBudgetTotal {
+		return fmt.Errorf("anthropic task budget total %d is below the minimum of %d tokens", budget.Total, MinTaskBudgetTotal)
+	}
+	if r := budget.Remaining; r != nil && (*r < 0 || *r > budget.Total) {
+		return fmt.Errorf("anthropic task budget remaining %d must be between 0 and the total %d", *r, budget.Total)
+	}
+	if caps, known := lookupCapabilities(req.Model); known && !caps.taskBudget {
+		warnf(config, "model does not support task budgets; ignoring the task budget",
+			"model", req.Model, "total", budget.Total)
+		return nil
+	}
+	if req.OutputConfig == nil {
+		req.OutputConfig = &OutputConfig{}
+	}
+	req.OutputConfig.TaskBudget = &TaskBudget{
+		Type:      "tokens",
+		Total:     budget.Total,
+		Remaining: budget.Remaining,
 	}
 	return nil
 }
@@ -1228,6 +1265,9 @@ func requestBetas(req *Request) []string {
 			break
 		}
 	}
+	if req.OutputConfig != nil && req.OutputConfig.TaskBudget != nil {
+		betas = append(betas, FeatureTaskBudgets)
+	}
 	return betas
 }
 
@@ -1307,6 +1347,7 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 		FeatureMidConversationOutputConfig,
 		FeatureThinkingBindingControls,
 		FeatureThinkingDisplayUpdates,
+		FeatureTaskBudgets,
 	} {
 		if config.IsFeatureEnabled(feature) || slices.Contains(betas, feature) {
 			betaFeatures = append(betaFeatures, feature)

@@ -545,6 +545,11 @@
       "go_name": "FeatureThinkingDisplayUpdates",
       "lifecycle": "beta",
       "id": "thinking-display-updates-2026-08-18"
+    },
+    {
+      "go_name": "FeatureTaskBudgets",
+      "lifecycle": "beta",
+      "id": "task-budgets-2026-03-13"
     }
   ]
 }

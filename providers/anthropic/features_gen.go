@@ -25,4 +25,5 @@ const (
 	FeatureMidConversationOutputConfig = "mid-conversation-output-config-2026-07-01"
 	FeatureThinkingBindingControls     = "thinking-binding-controls-2026-08-01"
 	FeatureThinkingDisplayUpdates      = "thinking-display-updates-2026-08-18"
+	FeatureTaskBudgets                 = "task-budgets-2026-03-13"
 )
