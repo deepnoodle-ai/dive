@@ -1,8 +1,11 @@
-package llm
+// Package tokenest estimates the tokens of messages without a tokenizer.
+package tokenest
 
 import (
 	"encoding/base64"
 	"encoding/json"
+
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // Token cost of embedded media, which is not proportional to its byte size.
@@ -21,7 +24,7 @@ const (
 	base64DocumentBytesPerToken = 25
 )
 
-// EstimateTokens approximates a message's token footprint. Text, tool inputs,
+// Message approximates a message's token footprint. Text, tool inputs,
 // and tool results are sized from their serialized JSON (~4 bytes per token);
 // counting the serialization rather than Message.Text is what catches tool
 // payloads, often the largest part of a turn.
@@ -33,22 +36,22 @@ const (
 // context window and trigger an early compaction or an exhausted task budget.
 //
 // Best effort throughout: a marshal error yields 0.
-func EstimateTokens(m *Message) int {
+func Message(m *llm.Message) int {
 	total := 0
-	for _, content := range m.Content {
-		total += EstimateContentTokens(content)
+	for _, c := range m.Content {
+		total += content(c)
 	}
 	return total
 }
 
-// EstimateContentTokens approximates one content block's token footprint.
-func EstimateContentTokens(c Content) int {
+// content approximates one content block's token footprint.
+func content(c llm.Content) int {
 	switch cc := c.(type) {
-	case *ImageContent:
+	case *llm.ImageContent:
 		if isBase64Source(cc.Source) {
 			return base64ImageTokens
 		}
-	case *DocumentContent:
+	case *llm.DocumentContent:
 		if isBase64Source(cc.Source) {
 			decoded := base64.StdEncoding.DecodedLen(len(cc.Source.Data))
 			if tokens := decoded / base64DocumentBytesPerToken; tokens > base64ImageTokens {
@@ -64,6 +67,6 @@ func EstimateContentTokens(c Content) int {
 	return len(data) / 4
 }
 
-func isBase64Source(s *ContentSource) bool {
-	return s != nil && s.Type == ContentSourceTypeBase64 && s.Data != ""
+func isBase64Source(s *llm.ContentSource) bool {
+	return s != nil && s.Type == llm.ContentSourceTypeBase64 && s.Data != ""
 }

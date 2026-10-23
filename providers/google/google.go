@@ -319,6 +319,11 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 			"model", req.Model)
 	}
 
+	if config.TaskBudget != nil {
+		warnf(config, "provider does not support task budgets; ignoring the task budget",
+			"provider", p.Name(), "model", req.Model)
+	}
+
 	req.Thinking = buildThinkingConfig(req.Model, config)
 	req.System = config.SystemPrompt
 	switch strings.ToLower(config.ServiceTier) {

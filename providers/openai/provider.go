@@ -262,6 +262,11 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		params.MaxOutputTokens = openai.Int(int64(p.maxTokens))
 	}
 
+	if config.TaskBudget != nil && config.Logger != nil {
+		config.Logger.Warn("provider does not support task budgets; ignoring the task budget",
+			"provider", p.Name(), "model", string(params.Model))
+	}
+
 	// Set temperature, unless the model rejects it. Several reasoning models
 	// answer 400 for "Unsupported parameter: 'temperature'".
 	if config.Temperature != nil {

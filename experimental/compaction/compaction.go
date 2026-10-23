@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/deepnoodle-ai/dive/internal/tokenest"
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
@@ -343,10 +344,9 @@ func filterPendingToolUse(messages []*llm.Message) []*llm.Message {
 	return result
 }
 
-// estimateTokens approximates a message's token footprint
-// (llm.EstimateTokens).
+// estimateTokens approximates a message's token footprint (tokenest.Message).
 func estimateTokens(m *llm.Message) int {
-	return llm.EstimateTokens(m)
+	return tokenest.Message(m)
 }
 
 func messageBytes(m *llm.Message) int {

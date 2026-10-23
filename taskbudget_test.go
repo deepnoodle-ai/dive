@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive/internal/tokenest"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -99,7 +100,7 @@ func TestTaskBudgetRemainingAfterMidTurnCompaction(t *testing.T) {
 	assert.Len(t, removed, 2)
 	// The first response's output tokens are exact; its tool result is
 	// estimated.
-	want := 40000 - 500 - llm.EstimateTokens(removed[1])
+	want := 40000 - 500 - tokenest.Message(removed[1])
 	for i, config := range model.configs {
 		if i < 2 {
 			assert.Equal(t, &llm.TaskBudget{Total: 40000}, config.TaskBudget)
@@ -107,6 +108,37 @@ func TestTaskBudgetRemainingAfterMidTurnCompaction(t *testing.T) {
 		}
 		assert.Equal(t, &llm.TaskBudget{Total: 40000, Remaining: &want}, config.TaskBudget)
 	}
+}
+
+// A Stop-hook continuation sends the turn's full history again, so the
+// provider can derive the spend once more and no remaining is sent.
+func TestTaskBudgetStopContinuationAfterCompaction(t *testing.T) {
+	model := &budgetLLM{toolCalls: 3}
+	compact := func(ctx context.Context, hctx *HookContext) error {
+		if hctx.Iteration == 2 && !hctx.StopHookActive {
+			msgs := hctx.Messages
+			summary := llm.NewUserTextMessage("<summary>read one file</summary>")
+			hctx.Messages = append([]*llm.Message{msgs[0], summary}, msgs[3:]...)
+		}
+		return nil
+	}
+	continueOnce := func(ctx context.Context, hctx *HookContext) (*StopDecision, error) {
+		if hctx.StopHookActive {
+			return nil, nil
+		}
+		return &StopDecision{Continue: true, Reason: "Add a summary table."}, nil
+	}
+	agent := budgetAgent(t, model, &llm.TaskBudget{Total: 40000}, Hooks{
+		PreIteration: []PreIterationHook{compact},
+		Stop:         []StopHook{continueOnce},
+	})
+
+	_, err := agent.CreateResponse(context.Background(), WithInput("read a lot"))
+	assert.NoError(t, err)
+
+	assert.Len(t, model.configs, 5)
+	assert.NotNil(t, model.configs[3].TaskBudget.Remaining)
+	assert.Equal(t, &llm.TaskBudget{Total: 40000}, model.configs[4].TaskBudget)
 }
 
 func TestTaskBudgetNotSetWithoutModelSettings(t *testing.T) {

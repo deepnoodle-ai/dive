@@ -1,6 +1,9 @@
 package dive
 
-import "github.com/deepnoodle-ai/dive/llm"
+import (
+	"github.com/deepnoodle-ai/dive/internal/tokenest"
+	"github.com/deepnoodle-ai/dive/llm"
+)
 
 // taskBudgetSpend follows the messages the generation loop adds to the
 // working history, so that the task budget can be carried across a history
@@ -58,7 +61,7 @@ func (s *taskBudgetSpend) removed(working []*llm.Message) int {
 		if generated, ok := s.generated[msg]; ok {
 			tokens += generated
 		} else {
-			tokens += llm.EstimateTokens(msg)
+			tokens += tokenest.Message(msg)
 		}
 	}
 	return tokens

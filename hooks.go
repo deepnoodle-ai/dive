@@ -245,6 +245,12 @@ type StopHook func(ctx context.Context, hctx *HookContext) (*StopDecision, error
 //
 // hctx.Iteration provides the zero-based iteration number.
 // Errors abort generation (same as PreGeneration).
+//
+// A hook that rewrites hctx.Messages should keep the messages it does not
+// change as the same pointers. With a task budget (ModelSettings.TaskBudget),
+// a message of the turn that is no longer in hctx.Messages counts as removed,
+// and its tokens are taken off the remaining budget; a copy of it counts as
+// removed although its content is still sent.
 type PreIterationHook func(ctx context.Context, hctx *HookContext) error
 
 // PostBackgroundToolUseHook fires when a background task's result is delivered

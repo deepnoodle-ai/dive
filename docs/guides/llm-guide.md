@@ -415,7 +415,9 @@ ModelSettings: &dive.ModelSettings{
   spend from the history. When a PreIteration hook replaces messages of the
   turn, as mid-turn compaction does, Dive also sends `Remaining`: the total
   less the removed messages' tokens (output tokens for model responses, an
-  estimate for tool results).
+  estimate for tool results). A message counts as removed when the hook drops
+  it from `hctx.Messages`, so a hook should keep the messages it does not
+  change instead of copying them.
 - **Tool results count.** A turn that reads 36,000 tokens of tool output under
   a 40,000-token budget has little left for its answer. Size the budget from
   measured turns.

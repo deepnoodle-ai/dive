@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive/internal/tokenest"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -377,13 +378,13 @@ func TestReduceToSummaryBudgetCullsUntruncatableContent(t *testing.T) {
 		}}
 		// An image has a fixed estimate however long its encoding is, so the
 		// budget has to be under that for culling to be the right call.
-		out := reduceToSummaryBudget([]*llm.Message{image}, llm.EstimateTokens(image)/2)
+		out := reduceToSummaryBudget([]*llm.Message{image}, tokenest.Message(image)/2)
 
 		assert.Equal(t, 1, len(out)) // not dropped
 		txt, isText := out[0].Content[0].(*llm.TextContent)
 		assert.True(t, isText) // image culled to a text placeholder
 		assert.True(t, strings.Contains(txt.Text, "image content omitted"))
-		assert.True(t, totalTokens(out) <= llm.EstimateTokens(image)/2)
+		assert.True(t, totalTokens(out) <= tokenest.Message(image)/2)
 	})
 
 	t.Run("keeps an image that fits the budget", func(t *testing.T) {
