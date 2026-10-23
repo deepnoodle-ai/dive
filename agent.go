@@ -2090,6 +2090,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 	newMessage := func(msg *llm.Message) {
 		updatedMessages = append(updatedMessages, msg)
 		record.addOutput(msg)
+		record.budget.track(msg)
 	}
 	deliverReminders := func(deliveries []reminderDelivery) {
 		for _, delivery := range deliveries {
@@ -2177,6 +2178,13 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
+		}
+		if a.modelSettings != nil {
+			// After a hook removed messages of this turn, the budget carries
+			// what they spent (taskBudgetSpend).
+			if opt := record.budget.option(a.modelSettings.TaskBudget, updatedMessages); opt != nil {
+				iterOpts = append(iterOpts, opt)
+			}
 		}
 
 		if err := stepStopErr(ctx); err != nil {
@@ -2284,6 +2292,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, record *turnRec
 		canonicalizeToolInputs(assistantMsg.Content)
 		record.addModelResponse(response)
 		if len(assistantMsg.Content) > 0 {
+			record.budget.setGenerated(assistantMsg, response.Usage.OutputTokens)
 			newMessage(assistantMsg)
 			// Always call callback for every LLM-generated message
 			if err := callback(ctx, &ResponseItem{

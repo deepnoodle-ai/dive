@@ -27,6 +27,7 @@ type Config struct {
 	Thinking           ThinkingType             `json:"thinking,omitempty"`
 	ThinkingDisplay    ThinkingDisplay          `json:"thinking_display,omitempty"`
 	Speed              Speed                    `json:"speed,omitempty"`
+	TaskBudget         *TaskBudget              `json:"task_budget,omitempty"`
 	ContextManagement  *ContextManagementConfig `json:"context_management,omitempty"`
 	Tools              []Tool                   `json:"tools,omitempty"`
 	ToolChoice         *ToolChoice              `json:"tool_choice,omitempty"`
@@ -405,6 +406,33 @@ const (
 func WithSpeed(speed Speed) Option {
 	return func(config *Config) {
 		config.Speed = speed
+	}
+}
+
+// TaskBudget is an advisory token budget for a whole agentic loop: every
+// model call that answers one user message. The model sees the budget count
+// down as it thinks, calls tools, reads tool results, and writes, and paces
+// itself to finish within it. MaxTokens remains the hard limit on each
+// response. Anthropic beta, on Opus 4.7 and later, Sonnet 5.5, Haiku 5.5,
+// Fable 5 and 5.1, and Mythos 5 and 5.1; other models and providers drop it
+// with a warning.
+type TaskBudget struct {
+	// Total is the number of tokens the loop may spend. Anthropic's minimum
+	// is 20,000.
+	Total int `json:"total"`
+
+	// Remaining is what is left of Total. Leave it nil in a loop that sends
+	// its full history on every call: the provider derives the spend from that
+	// history. Set it only after history has been compacted or rewritten,
+	// when the spend can no longer be derived. The agent does this itself.
+	Remaining *int `json:"remaining,omitempty"`
+}
+
+// WithTaskBudget sets an advisory token budget for the agentic loop. See
+// TaskBudget.
+func WithTaskBudget(budget TaskBudget) Option {
+	return func(config *Config) {
+		config.TaskBudget = &budget
 	}
 }
 

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Claude task budgets.** `ModelSettings.TaskBudget` (`llm.WithTaskBudget`)
+  gives the model a token budget it can see for the whole turn. The agent sends
+  `Remaining` after a hook compacts the turn's history; models without support
+  drop the setting with a warning.
+- **`llm.EstimateTokens`**, the media-aware token estimate that compaction used.
+
 ## [1.41.0] - 2026-10-22
 
 ### Added

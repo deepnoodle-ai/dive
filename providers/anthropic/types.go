@@ -67,10 +67,20 @@ const (
 )
 
 // OutputConfig carries the effort parameter, which controls how eagerly the
-// model spends tokens (thinking, tool calls, and text). Supported on Opus 4.5+
-// and Sonnet 4.6 with no beta header required.
+// model spends tokens (thinking, tool calls, and text), and the task budget.
+// Effort is supported on Opus 4.5+ and Sonnet 4.6 with no beta header
+// required; the task budget needs the task-budgets beta.
 type OutputConfig struct {
-	Effort string `json:"effort,omitempty"`
+	Effort     string      `json:"effort,omitempty"`
+	TaskBudget *TaskBudget `json:"task_budget,omitempty"`
+}
+
+// TaskBudget is output_config.task_budget, an advisory token budget for the
+// agentic loop (llm.TaskBudget).
+type TaskBudget struct {
+	Type      string `json:"type"`
+	Total     int    `json:"total"`
+	Remaining *int   `json:"remaining,omitempty"`
 }
 
 // requestMessage is a message in wire form. It adds output_config, which only
