@@ -425,10 +425,12 @@ ModelSettings: &dive.ModelSettings{
   is still in the context against a new turn's budget.
 - **Advisory.** The model can overrun the budget; `MaxTokens` stays the hard
   limit on each response.
-- **Models.** Opus 4.7 and later, Sonnet 5.5, Haiku 5.5, Fable 5 and 5.1, and
-  Mythos 5 and 5.1. Other models and providers drop the setting with a
-  warning. A `Total` below 20,000 (`anthropic.MinTaskBudgetTotal`) is a
-  request error. The `task-budgets-2026-03-13` beta header is sent for you.
+- **Models.** Opus 4.7 and later, Sonnet 5.5, Haiku 5.5, and Fable 5 and 5.1,
+  verified against the API. Anthropic also lists Mythos 5 and 5.1, which Dive
+  has not tested. Other models and providers drop the setting and log a
+  warning on each model call. A `Total` below 20,000
+  (`anthropic.MinTaskBudgetTotal`) is a request error. The
+  `task-budgets-2026-03-13` beta header is sent for you.
 
 ### Computer Use On Claude
 
