@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Google Veo video works on Vertex AI**, with audio except on Veo 2. Gemini
+  API calls now also send `Duration` and the first reference image (start frame);
+  Veo fails on values it rejects. `VideoGeneration` offers only valid durations.
+
 ## [1.42.0] - 2026-10-23
 
 ### Added

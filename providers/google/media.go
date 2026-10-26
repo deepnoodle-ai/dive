@@ -21,10 +21,16 @@ type MediaProvider struct {
 	location       string
 	imagenLocation string
 
+	// videoPollInterval is the wait between video operation polls. Zero
+	// means defaultVideoPollInterval. Tests set it to a short value.
+	videoPollInterval time.Duration
+
 	mu           sync.Mutex
 	client       *genai.Client
 	imagenClient *genai.Client
 }
+
+const defaultVideoPollInterval = 10 * time.Second
 
 // MediaOption configures a MediaProvider.
 type MediaOption func(*MediaProvider)
@@ -287,6 +293,10 @@ func (p *MediaProvider) EditImage(ctx context.Context, prompt string, config *me
 }
 
 // GenerateVideo implements media.VideoProvider.
+//
+// The first image in config.ReferenceImages, if any, is the first frame of
+// the video. config.Duration sets the video length in whole seconds. On
+// Vertex AI the video includes generated audio.
 func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config *media.Config) (*media.VideoResult, error) {
 	if _, err := p.ensureClient(ctx); err != nil {
 		return nil, err
@@ -302,14 +312,35 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		NumberOfVideos: 1,
 		AspectRatio:    string(aspectRatio),
 	}
+	if secs := int32(config.Duration / time.Second); secs > 0 {
+		videoConfig.DurationSeconds = genai.Ptr(secs)
+	}
+	vertex := p.client.ClientConfig().Backend == genai.BackendVertexAI
+	if vertex && veoGeneratesAudio(model) {
+		// genai rejects GenerateAudio on the Gemini API backend, and Veo 2
+		// rejects it on Vertex.
+		videoConfig.GenerateAudio = genai.Ptr(true)
+	}
 
-	operation, err := p.client.Models.GenerateVideos(ctx, model, prompt, nil, videoConfig)
+	source := &genai.GenerateVideosSource{Prompt: prompt}
+	if len(config.ReferenceImages) > 0 {
+		img := config.ReferenceImages[0]
+		source.Image = &genai.Image{
+			ImageBytes: img,
+			MIMEType:   media.DetectMIMEFromBytes(img),
+		}
+	}
+
+	operation, err := p.client.Models.GenerateVideosFromSource(ctx, model, source, videoConfig)
 	if err != nil {
 		return nil, fmt.Errorf("veo video generation start: %w", err)
 	}
 
 	// Poll until complete, respecting context deadline.
-	pollInterval := 10 * time.Second
+	pollInterval := p.videoPollInterval
+	if pollInterval <= 0 {
+		pollInterval = defaultVideoPollInterval
+	}
 	for !operation.Done {
 		select {
 		case <-ctx.Done():
@@ -322,24 +353,38 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		}
 	}
 
-	if operation.Response == nil || len(operation.Response.GeneratedVideos) == 0 {
-		return nil, fmt.Errorf("no videos generated")
+	if operation.Error != nil {
+		if msg, ok := operation.Error["message"].(string); ok && msg != "" {
+			if code, ok := operation.Error["code"]; ok && code != nil {
+				return nil, fmt.Errorf("veo video generation failed: %s (code %v)", msg, code)
+			}
+			return nil, fmt.Errorf("veo video generation failed: %s", msg)
+		}
+		return nil, fmt.Errorf("veo video generation failed: %v", operation.Error)
 	}
 
-	firstVideo := operation.Response.GeneratedVideos[0]
-	if firstVideo.Video == nil {
-		return nil, fmt.Errorf("no video data in response")
-	}
-
-	videoData, err := p.client.Files.Download(ctx, genai.NewDownloadURIFromGeneratedVideo(firstVideo), nil)
+	firstVideo, err := firstGeneratedVideo(operation.Response)
 	if err != nil {
-		return nil, fmt.Errorf("downloading video: %w", err)
-	}
-	if len(videoData) == 0 {
-		return nil, fmt.Errorf("empty video data after download")
+		return nil, err
 	}
 
-	width, height := media.StandardVideoDimensions(aspectRatio)
+	videoData := firstVideo.Video.VideoBytes
+	if len(videoData) == 0 {
+		// Vertex returns the bytes inline. genai refuses Files.Download
+		// on Vertex, so only the Gemini API backend downloads the file.
+		if vertex {
+			return nil, fmt.Errorf("no video bytes in vertex response (uri %q)", firstVideo.Video.URI)
+		}
+		videoData, err = p.client.Files.Download(ctx, genai.NewDownloadURIFromGeneratedVideo(firstVideo), nil)
+		if err != nil {
+			return nil, fmt.Errorf("downloading video: %w", err)
+		}
+		if len(videoData) == 0 {
+			return nil, fmt.Errorf("empty video data after download")
+		}
+	}
+
+	width, height := veoVideoDimensions(aspectRatio)
 	result := &media.VideoResult{
 		Data:        videoData,
 		Model:       model,
@@ -355,6 +400,41 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	}
 	result.SetVideoFormat(mimeType)
 	return result, nil
+}
+
+// veoGeneratesAudio reports whether the Veo model accepts generateAudio.
+// Veo 2 models reject the field.
+func veoGeneratesAudio(model string) bool {
+	return !strings.HasPrefix(model, "veo-2")
+}
+
+// veoVideoDimensions returns the pixel size of a Veo video. Veo makes 720p
+// video when the request sets no resolution, and Dive sets none.
+func veoVideoDimensions(ar media.AspectRatio) (width, height int) {
+	if ar == media.Aspect9x16 {
+		return 720, 1280
+	}
+	return 1280, 720
+}
+
+// firstGeneratedVideo returns the first video in a finished operation. When
+// safety filters blocked every video, the error includes the filter reasons.
+func firstGeneratedVideo(resp *genai.GenerateVideosResponse) (*genai.GeneratedVideo, error) {
+	if resp != nil {
+		for _, v := range resp.GeneratedVideos {
+			if v != nil && v.Video != nil && (len(v.Video.VideoBytes) > 0 || v.Video.URI != "") {
+				return v, nil
+			}
+		}
+		if len(resp.RAIMediaFilteredReasons) > 0 {
+			return nil, fmt.Errorf("video blocked by safety filters: %s",
+				strings.Join(resp.RAIMediaFilteredReasons, "; "))
+		}
+		if resp.RAIMediaFilteredCount > 0 {
+			return nil, fmt.Errorf("video blocked by safety filters")
+		}
+	}
+	return nil, fmt.Errorf("no videos generated")
 }
 
 // TextToSpeech implements media.TextToSpeechProvider.

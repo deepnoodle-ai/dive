@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -19,8 +21,9 @@ type VideoGenerationInput struct {
 	// Prompt is the text description of the video to generate.
 	Prompt string `json:"prompt"`
 
-	// Duration is the target video duration (e.g., "4s", "8s", "12s").
-	// Defaults to "8s" if not specified.
+	// Duration is the target video duration (e.g., "4s", "8s"). Defaults
+	// to "8s" if not specified. For Veo models the tool accepts only the
+	// durations the model accepts.
 	Duration string `json:"duration,omitempty"`
 
 	// AspectRatio is the desired aspect ratio (e.g., "16:9", "9:16", "1:1").
@@ -67,7 +70,32 @@ func (t *videoGenerationTool) Description() string {
 		"Use descriptive, detailed prompts for best results.", t.model)
 }
 
+// videoDurations returns the durations the model accepts, or nil when the
+// tool does not know them. Veo 3 accepts 4, 6, and 8 seconds. Veo 2
+// accepts 5 to 8 seconds.
+func videoDurations(model string) []string {
+	switch {
+	case strings.HasPrefix(model, "veo-2"):
+		return []string{"5s", "6s", "7s", "8s"}
+	case strings.HasPrefix(model, "veo-"):
+		return []string{"4s", "6s", "8s"}
+	default:
+		return nil
+	}
+}
+
 func (t *videoGenerationTool) Schema() *schema.Schema {
+	duration := &schema.Property{
+		Type:        "string",
+		Description: "Video duration as a Go duration string (e.g. 4s, 8s). Allowed values depend on the model.",
+	}
+	if allowed := videoDurations(t.model); allowed != nil {
+		duration.Description = "Video duration: " + strings.Join(allowed, ", ")
+		duration.Enum = make([]any, len(allowed))
+		for i, d := range allowed {
+			duration.Enum[i] = d
+		}
+	}
 	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"prompt"},
@@ -76,10 +104,7 @@ func (t *videoGenerationTool) Schema() *schema.Schema {
 				Type:        "string",
 				Description: "Detailed text description of the video to generate",
 			},
-			"duration": {
-				Type:        "string",
-				Description: "Video duration as a Go duration string (e.g. 8s, 16s, 20s). Exact duration depends on the provider.",
-			},
+			"duration": duration,
 			"aspect_ratio": {
 				Type:        "string",
 				Description: "Aspect ratio: 16:9 (landscape), 9:16 (portrait), 1:1 (square)",
@@ -119,6 +144,11 @@ func (t *videoGenerationTool) Call(ctx context.Context, input *VideoGenerationIn
 			return NewToolResultError(fmt.Sprintf("invalid duration %q: %v", input.Duration, err)), nil
 		}
 		duration = parsed
+	}
+	if allowed := videoDurations(t.model); allowed != nil &&
+		!slices.Contains(allowed, duration.String()) {
+		return NewToolResultError(fmt.Sprintf("duration %s is not supported by %s; use one of %s",
+			duration, t.model, strings.Join(allowed, ", "))), nil
 	}
 	opts = append(opts, media.WithDuration(duration))
 
