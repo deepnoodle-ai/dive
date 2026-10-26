@@ -8,9 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Google Veo video works on Vertex AI.** `GenerateVideo` sends `Duration`,
-  uses the first reference image as the start frame, requests audio on Vertex,
-  and reads the inline video bytes. A safety block returns the filter reasons.
+- **Google Veo video works on Vertex AI**, with audio except on Veo 2. Gemini
+  API calls now also send `Duration` and the first reference image (start frame);
+  Veo fails on values it rejects. `VideoGeneration` offers only valid durations.
 
 ## [1.42.0] - 2026-10-23
 

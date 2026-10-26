@@ -122,7 +122,8 @@ Video generation is synchronous from the caller's perspective — the call block
 until the provider completes or the context is cancelled.
 
 With Veo, `media.WithReferenceImage` sets the first frame of the video. Veo
-uses only the first reference image. On Vertex AI, Veo also generates audio.
+uses only the first reference image. On Vertex AI, Veo 3 also generates audio.
+Veo 3 accepts durations of 4, 6, or 8 seconds; Veo 2 accepts 5 to 8.
 
 ## Text-to-Speech
 
@@ -230,7 +231,7 @@ result, err := media.Transcribe(ctx, audio,
 | `WithAspectRatio(ar)`        | `1:1`, `16:9`, `9:16`                                      | `1:1` (image), `16:9` (video) |
 | `WithOutputFormat(f)`        | `FormatPNG`, `FormatJPEG`, `FormatWebP`                    | Provider default              |
 | `WithCount(n)`               | Number of images to generate                               | 1                             |
-| `WithReferenceImage(data)`   | Reference image bytes for editing                          | —                             |
+| `WithReferenceImage(data)`   | Reference image for editing, or the Veo start frame        | —                             |
 | `WithDuration(d)`            | Video duration                                             | Provider default              |
 | `WithAudioFormat(f)`         | `AudioFormatMP3`, `AudioFormatWAV`, `AudioFormatPCM`, etc. | Provider default              |
 | `WithAudioMIMEType(mime)`    | Input audio MIME hint for transcription                    | Auto-detected                 |
