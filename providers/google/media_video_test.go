@@ -152,6 +152,17 @@ func TestGenerateVideo_SafetyFilterReasons(t *testing.T) {
 	assert.Contains(t, err.Error(), "The prompt may violate our policies.")
 }
 
+func TestGenerateVideo_SafetyFilterCountOnly(t *testing.T) {
+	fake := &fakeVeo{
+		final: `{"name":"operations/op-1","done":true,"response":{"raiMediaFilteredCount":1}}`,
+	}
+	p := newFakeVeoProvider(t, genai.BackendVertexAI, fake)
+
+	_, err := p.GenerateVideo(context.Background(), "blocked", &media.Config{Model: "veo-3.1-fast-generate-001"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "safety filters")
+}
+
 // TestGoogleGenerateVideo_Vertex_Integration makes a paid Veo call on Vertex
 // AI. It needs RUN_INTEGRATION_TESTS, GOOGLE_CLOUD_PROJECT, and application
 // default credentials. GOOGLE_CLOUD_LOCATION defaults to us-central1.
@@ -208,5 +219,5 @@ func TestGenerateVideo_OperationError(t *testing.T) {
 
 	_, err := p.GenerateVideo(context.Background(), "x", &media.Config{Model: "veo-3.1-fast-generate-001"})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "duration not supported")
+	assert.Contains(t, err.Error(), "duration not supported (code 3)")
 }

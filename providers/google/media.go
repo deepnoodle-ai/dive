@@ -353,7 +353,10 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	}
 
 	if operation.Error != nil {
-		return nil, fmt.Errorf("veo video generation failed: %v", operation.Error["message"])
+		if msg, ok := operation.Error["message"].(string); ok && msg != "" {
+			return nil, fmt.Errorf("veo video generation failed: %s (code %v)", msg, operation.Error["code"])
+		}
+		return nil, fmt.Errorf("veo video generation failed: %v", operation.Error)
 	}
 
 	firstVideo, err := firstGeneratedVideo(operation.Response)
@@ -407,6 +410,9 @@ func firstGeneratedVideo(resp *genai.GenerateVideosResponse) (*genai.GeneratedVi
 		if len(resp.RAIMediaFilteredReasons) > 0 {
 			return nil, fmt.Errorf("video blocked by safety filters: %s",
 				strings.Join(resp.RAIMediaFilteredReasons, "; "))
+		}
+		if resp.RAIMediaFilteredCount > 0 {
+			return nil, fmt.Errorf("video blocked by safety filters")
 		}
 	}
 	return nil, fmt.Errorf("no videos generated")
