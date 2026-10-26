@@ -121,6 +121,9 @@ fmt.Printf("Saved: %s (%dx%d %s, %s)\n",
 Video generation is synchronous from the caller's perspective — the call blocks
 until the provider completes or the context is cancelled.
 
+With Veo, `media.WithReferenceImage` sets the first frame of the video. Veo
+uses only the first reference image. On Vertex AI, Veo also generates audio.
+
 ## Text-to-Speech
 
 Generate spoken audio from text with OpenAI TTS or Gemini TTS models:

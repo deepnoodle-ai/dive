@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Google Veo video works on Vertex AI.** `GenerateVideo` sends `Duration`,
+  uses the first reference image as the start frame, requests audio on Vertex,
+  and reads the inline video bytes. A safety block returns the filter reasons.
+
 ## [1.42.0] - 2026-10-23
 
 ### Added
