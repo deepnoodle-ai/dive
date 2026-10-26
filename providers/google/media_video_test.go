@@ -100,6 +100,8 @@ func TestGenerateVideo_VertexSendsDurationImageAndAudio(t *testing.T) {
 	assert.Equal(t, videoBytes, result.Data)
 	assert.Equal(t, "mp4", result.Format)
 	assert.Equal(t, 4*time.Second, result.Duration)
+	assert.Equal(t, 1280, result.Width)
+	assert.Equal(t, 720, result.Height)
 
 	instance := fake.startBody["instances"].([]any)[0].(map[string]any)
 	assert.Equal(t, "clouds drift", instance["prompt"])
@@ -220,4 +222,35 @@ func TestGenerateVideo_OperationError(t *testing.T) {
 	_, err := p.GenerateVideo(context.Background(), "x", &media.Config{Model: "veo-3.1-fast-generate-001"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duration not supported (code 3)")
+}
+
+func TestGenerateVideo_OperationErrorWithoutCode(t *testing.T) {
+	fake := &fakeVeo{
+		final: `{"name":"operations/op-1","done":true,"error":{"message":"quota exceeded"}}`,
+	}
+	p := newFakeVeoProvider(t, genai.BackendVertexAI, fake)
+
+	_, err := p.GenerateVideo(context.Background(), "x", &media.Config{Model: "veo-3.1-fast-generate-001"})
+	assert.Error(t, err)
+	assert.Equal(t, "veo video generation failed: quota exceeded", err.Error())
+}
+
+func TestGenerateVideo_Veo2OnVertexOmitsAudio(t *testing.T) {
+	fake := &fakeVeo{
+		final: `{"name":"operations/op-1","done":true,"response":{"videos":[{"bytesBase64Encoded":"` +
+			base64.StdEncoding.EncodeToString([]byte("v")) + `"}]}}`,
+	}
+	p := newFakeVeoProvider(t, genai.BackendVertexAI, fake)
+
+	result, err := p.GenerateVideo(context.Background(), "x", &media.Config{
+		Model:       "veo-2.0-generate-001",
+		AspectRatio: media.Aspect9x16,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 720, result.Width)
+	assert.Equal(t, 1280, result.Height)
+
+	params := fake.startBody["parameters"].(map[string]any)
+	_, hasAudio := params["generateAudio"]
+	assert.False(t, hasAudio)
 }

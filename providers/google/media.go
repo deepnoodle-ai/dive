@@ -316,8 +316,9 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		videoConfig.DurationSeconds = genai.Ptr(secs)
 	}
 	vertex := p.client.ClientConfig().Backend == genai.BackendVertexAI
-	if vertex {
-		// genai rejects GenerateAudio on the Gemini API backend.
+	if vertex && veoGeneratesAudio(model) {
+		// genai rejects GenerateAudio on the Gemini API backend, and Veo 2
+		// rejects it on Vertex.
 		videoConfig.GenerateAudio = genai.Ptr(true)
 	}
 
@@ -354,7 +355,10 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 
 	if operation.Error != nil {
 		if msg, ok := operation.Error["message"].(string); ok && msg != "" {
-			return nil, fmt.Errorf("veo video generation failed: %s (code %v)", msg, operation.Error["code"])
+			if code, ok := operation.Error["code"]; ok && code != nil {
+				return nil, fmt.Errorf("veo video generation failed: %s (code %v)", msg, code)
+			}
+			return nil, fmt.Errorf("veo video generation failed: %s", msg)
 		}
 		return nil, fmt.Errorf("veo video generation failed: %v", operation.Error)
 	}
@@ -380,7 +384,7 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		}
 	}
 
-	width, height := media.StandardVideoDimensions(aspectRatio)
+	width, height := veoVideoDimensions(aspectRatio)
 	result := &media.VideoResult{
 		Data:        videoData,
 		Model:       model,
@@ -396,6 +400,21 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	}
 	result.SetVideoFormat(mimeType)
 	return result, nil
+}
+
+// veoGeneratesAudio reports whether the Veo model accepts generateAudio.
+// Veo 2 models reject the field.
+func veoGeneratesAudio(model string) bool {
+	return !strings.HasPrefix(model, "veo-2")
+}
+
+// veoVideoDimensions returns the pixel size of a Veo video. Veo makes 720p
+// video when the request sets no resolution, and Dive sets none.
+func veoVideoDimensions(ar media.AspectRatio) (width, height int) {
+	if ar == media.Aspect9x16 {
+		return 720, 1280
+	}
+	return 1280, 720
 }
 
 // firstGeneratedVideo returns the first video in a finished operation. When
