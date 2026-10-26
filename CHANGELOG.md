@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.43.0] - 2026-10-26
+
 ### Fixed
 
 - **Google Veo video works on Vertex AI**, with audio except on Veo 2. Gemini
