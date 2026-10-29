@@ -1,6 +1,8 @@
 package toolkit
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 func TestIsPrivateIP(t *testing.T) {
@@ -251,4 +254,35 @@ func TestSafeHTTPClient_BlocksLoopbackAtDial(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not allowed")
 	assert.False(t, handlerReached)
+}
+
+// failingFetcher fails every Fetch with err and counts the calls.
+type failingFetcher struct {
+	err   error
+	calls int
+}
+
+func (f *failingFetcher) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response, error) {
+	f.calls++
+	return nil, f.err
+}
+
+func TestFetchTool_RetriesOnlyTransientErrors(t *testing.T) {
+	tests := []struct {
+		status int
+		calls  int
+	}{
+		{status: http.StatusNotFound, calls: 1},
+		{status: http.StatusServiceUnavailable, calls: 2},
+	}
+	for _, tt := range tests {
+		fetcher := &failingFetcher{err: &fetch.Error{StatusCode: tt.status, URL: "https://1.1.1.1/"}}
+		tool := &FetchTool{fetcher: fetcher, maxSize: DefaultFetchMaxSize, maxRetries: 1}
+
+		result, err := tool.Call(context.Background(), &fetch.Request{URL: "https://1.1.1.1/"})
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Equal(t, tt.calls, fetcher.calls, "status %d", tt.status)
+		assert.Contains(t, result.Content[0].Text, fmt.Sprintf("after %d attempts", tt.calls))
+	}
 }
