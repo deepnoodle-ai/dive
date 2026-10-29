@@ -171,9 +171,12 @@ func TestToolCallRendersStaticMarkerWhenNotAnimating(t *testing.T) {
 		ToolInput: `{"command":"ls"}`,
 	}
 
+	// The pulse is a color, so render with color even though a buffer is
+	// not a terminal.
 	var live, static bytes.Buffer
-	tui.Fprint(&live, app.toolCallView(msg, viewOpts{animate: true}), tui.WithWidth(80))
-	tui.Fprint(&static, app.toolCallView(msg, viewOpts{}), tui.WithWidth(80))
+	opts := []tui.PrintOption{tui.WithWidth(80), tui.WithColor(true)}
+	tui.Fprint(&live, app.toolCallView(msg, viewOpts{animate: true}), opts...)
+	tui.Fprint(&static, app.toolCallView(msg, viewOpts{}), opts...)
 
 	assert.NotEqual(t, live.String(), static.String(), "a running call should only pulse on live frames")
 	assert.Contains(t, static.String(), "Bash(ls)")

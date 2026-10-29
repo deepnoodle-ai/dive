@@ -7,7 +7,7 @@ toolchain go1.26.8
 require (
 	github.com/a2aproject/a2a-go/v2 v2.5.0
 	github.com/deepnoodle-ai/dive v1.43.0
-	github.com/deepnoodle-ai/wonton v0.2.1
+	github.com/deepnoodle-ai/wonton v0.10.2
 )
 
 require (
@@ -15,7 +15,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )
 
 replace github.com/deepnoodle-ai/dive => ..

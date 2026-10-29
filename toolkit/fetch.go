@@ -242,18 +242,19 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 		defer cancel()
 	}
 
+	// Retry only errors fetch.IsRetryable accepts; a 404 or 403
+	// will not change on a second try.
 	var response *fetch.Response
+	attempts := 0
 	err := retry.DoSimple(ctx, func() error {
+		attempts++
 		var err error
 		response, err = t.fetcher.Fetch(ctx, req)
-		if err != nil {
-			return err
-		}
-		return nil
-	}, retry.WithMaxAttempts(t.maxRetries+1))
+		return err
+	}, retry.WithMaxAttempts(t.maxRetries+1), retry.WithRetryIf(fetch.IsRetryable))
 
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to fetch url after %d attempts: %s", attempts, err)), nil
 	}
 
 	var sb strings.Builder
