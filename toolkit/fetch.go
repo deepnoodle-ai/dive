@@ -242,7 +242,7 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 		defer cancel()
 	}
 
-	// Retry only transient failures (timeouts, 429, 5xx); a 404 or 403
+	// Retry only errors fetch.IsRetryable accepts; a 404 or 403
 	// will not change on a second try.
 	var response *fetch.Response
 	attempts := 0

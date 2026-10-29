@@ -13,8 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **WebFetch retries only transient failures** (timeouts, 429, 5xx), not a
-  404 or 403, and its error states the number of attempts it made.
+- **WebFetch no longer retries a 404 or 403** when `MaxRetries` is set. It
+  retries only errors that `fetch.IsRetryable` accepts, and its error states
+  the number of attempts it made.
 
 ## [1.43.0] - 2026-10-26
 
