@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Wonton v0.10.2.** The `dive` CLI prints plain text, with no escape codes,
+  when stdout is not a terminal.
+
+### Fixed
+
+- **WebFetch retries only transient failures** (timeouts, 429, 5xx), not a
+  404 or 403, and its error states the number of attempts it made.
+
 ## [1.43.0] - 2026-10-26
 
 ### Fixed
