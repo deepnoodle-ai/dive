@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.44.0] - 2026-11-12
+
 ### Added
 
 - **New provider models and deprecations.** Added `claude-fable-5-2` and
