@@ -182,11 +182,12 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 		Currency:  "USD",
 		UpdatedAt: "2026-05-28",
 	},
+	// Retired slug; requests are served by grok-imagine-image-2.0 with quality=low and billed at its rates.
 	ModelImagineImageQuality: {
 		Model:     ModelImagineImageQuality,
-		Price:     0.05,
+		Price:     0.04,
 		Currency:  "USD",
-		UpdatedAt: "2026-05-28",
+		UpdatedAt: "2026-11-12",
 	},
 	ModelImagineImage20: {
 		Model:     ModelImagineImage20,

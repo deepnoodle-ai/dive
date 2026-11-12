@@ -3,16 +3,20 @@
 package google
 
 const (
-	ModelGemini4Argon  = "gemini-4-argon"
-	ModelGemini38Flash = "gemini-3.8-flash"
+	ModelGemini4Carbon   = "gemini-4-carbon"
+	ModelGemini4Hydrogen = "gemini-4-hydrogen"
+	ModelGemini4Argon    = "gemini-4-argon"
+	ModelGemini38Flash   = "gemini-3.8-flash"
 	// Deprecated: Google routes requests to gemini-3.8-flash. Use ModelGemini38Flash.
 	ModelGemini37Flash = "gemini-3.7-flash"
 	ModelGemini36Flash = "gemini-3.6-flash"
 	// Deprecated: Google routes requests to gemini-3.6-flash. Use ModelGemini36Flash.
-	ModelGemini35Flash                 = "gemini-3.5-flash"
-	ModelGemini35FlashLite             = "gemini-3.5-flash-lite"
-	ModelGemini35Transcribe            = "gemini-3.5-transcribe"
-	ModelGemini35TranscribeLive        = "gemini-3.5-transcribe-live"
+	ModelGemini35Flash          = "gemini-3.5-flash"
+	ModelGemini35FlashLite      = "gemini-3.5-flash-lite"
+	ModelGemini35Transcribe     = "gemini-3.5-transcribe"
+	ModelGemini35TranscribeLive = "gemini-3.5-transcribe-live"
+	ModelGeminiOmni12Flash      = "gemini-omni-1.2-flash"
+	// Deprecated: Effective December 3, 2026, use ModelGeminiOmni12Flash.
 	ModelGeminiOmni11Flash             = "gemini-omni-1.1-flash"
 	ModelGemini31ProPreview            = "gemini-3.1-pro-preview"
 	ModelGemini31ProPreviewCustomTools = "gemini-3.1-pro-preview-customtools"
@@ -33,10 +37,13 @@ const (
 	// Deprecated: Use ModelGemini3ProImage.
 	ModelGemini31ProImage = ModelGemini3ProImage
 	// Deprecated: Model was shut down March 9, 2026. Use ModelGemini31ProPreview instead.
-	ModelGemini3ProPreview  = "gemini-3-pro-preview"
-	ModelGemini25Pro        = "gemini-2.5-pro"
-	ModelGemini25Flash      = "gemini-2.5-flash"
-	ModelGemini25FlashLite  = "gemini-2.5-flash-lite"
+	ModelGemini3ProPreview = "gemini-3-pro-preview"
+	// Deprecated: Deprecated by Google.
+	ModelGemini25Pro = "gemini-2.5-pro"
+	// Deprecated: Deprecated by Google.
+	ModelGemini25Flash     = "gemini-2.5-flash"
+	ModelGemini25FlashLite = "gemini-2.5-flash-lite"
+	// Deprecated: Model was shut down October 2, 2026. Use ModelGemini31FlashImage or ModelGemini31FlashLiteImage.
 	ModelGemini25FlashImage = "gemini-2.5-flash-image"
 	ModelGemini25FlashTTS   = "gemini-2.5-flash-preview-tts"
 	ModelGemini25ProTTS     = "gemini-2.5-pro-preview-tts"

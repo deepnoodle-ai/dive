@@ -85,6 +85,16 @@
       "description": "Original version; no contributor tier is offered"
     },
     {
+      "go_name": "ModelMuseEmber10",
+      "id": "muse-ember-1.0",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Muse Ember 1.0",
+      "recommended": true,
+      "cli_order": 3,
+      "description": "Efficient execution model for high-volume tasks, sub-agents, and routing; 1M context, standard tier only"
+    },
+    {
       "go_name": "ModelMuseImage",
       "id": "muse-image-1.0",
       "kind": "image",
@@ -109,6 +119,19 @@
         "currency": "USD",
         "updated_at": "2026-10-13",
         "note": "Standard tier only; Meta offers no Contributor variant and no long-context premium."
+      },
+      {
+        "model": "muse-ember-1.0",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.50",
+        "cache_read_price_per_1m_tokens": "0.004",
+        "long_context_threshold_tokens": 200001,
+        "long_context_input_price_per_1m_tokens": "0.30",
+        "long_context_output_price_per_1m_tokens": "1.50",
+        "long_context_cache_read_price_per_1m_tokens": "0.012",
+        "currency": "USD",
+        "updated_at": "2026-11-12",
+        "note": "Standard tier only; requests over 200K input tokens bill all input, output, and cached tokens at 3x."
       },
       {
         "model": "muse-spark-1.3",

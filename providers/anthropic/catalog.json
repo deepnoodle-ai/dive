@@ -164,14 +164,28 @@
       "description": "Complex agentic coding and long-horizon work"
     },
     {
+      "go_name": "ModelClaudeFable52",
+      "id": "claude-fable-5-2",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Fable 5.2",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Most capable for demanding reasoning and long-horizon agentic work"
+    },
+    {
+      "go_name": "ModelClaudeMythos52",
+      "id": "claude-mythos-5-2",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Mythos 5.2"
+    },
+    {
       "go_name": "ModelClaudeFable51",
       "id": "claude-fable-5-1",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Fable 5.1",
-      "recommended": true,
-      "cli_order": 2,
-      "description": "Most capable for demanding reasoning and long-horizon agentic work"
+      "display_name": "Fable 5.1"
     },
     {
       "go_name": "ModelClaudeMythos51",
@@ -362,6 +376,23 @@
         "note": "Cache hits bill at 0.05x base input on Opus 5.5, not the standard 0.1x, so the rate is stated rather than derived. Cache writes keep the standard 1.25x (5m) and 2x (1h)."
       },
       {
+        "model": "claude-fable-5-2",
+        "input_price_per_1m_tokens": "8.00",
+        "output_price_per_1m_tokens": "40.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "currency": "USD",
+        "updated_at": "2026-11-12",
+        "note": "Cache hits bill at 0.025x base input on Fable 5.2 and Mythos 5.2, not the 0.1x every other Claude model uses, so the rate is stated rather than derived."
+      },
+      {
+        "model": "claude-mythos-5-2",
+        "input_price_per_1m_tokens": "8.00",
+        "output_price_per_1m_tokens": "40.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "currency": "USD",
+        "updated_at": "2026-11-12"
+      },
+      {
         "model": "claude-fable-5-1",
         "input_price_per_1m_tokens": "10.00",
         "output_price_per_1m_tokens": "50.00",
@@ -438,6 +469,23 @@
         "currency": "USD",
         "updated_at": "2026-09-22",
         "note": "Prompt-caching multipliers stack on the fast rate, so the 0.05x cache-hit rate applies to $8, not $4."
+      },
+      {
+        "model": "claude-fable-5-2",
+        "input_price_per_1m_tokens": "16.00",
+        "output_price_per_1m_tokens": "80.00",
+        "cache_read_price_per_1m_tokens": "0.40",
+        "currency": "USD",
+        "updated_at": "2026-11-12",
+        "note": "Prompt-caching multipliers stack on the fast rate, so the 0.025x cache-hit rate applies to $16, not $8."
+      },
+      {
+        "model": "claude-mythos-5-2",
+        "input_price_per_1m_tokens": "16.00",
+        "output_price_per_1m_tokens": "80.00",
+        "cache_read_price_per_1m_tokens": "0.40",
+        "currency": "USD",
+        "updated_at": "2026-11-12"
       }
     ],
     "image": [],

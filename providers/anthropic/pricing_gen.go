@@ -141,6 +141,23 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:       "USD",
 		UpdatedAt:      "2026-09-22",
 	},
+	// Cache hits bill at 0.025x base input on Fable 5.2 and Mythos 5.2, not the 0.1x every other Claude model uses, so the rate is stated rather than derived.
+	ModelClaudeFable52: {
+		Model:          ModelClaudeFable52,
+		InputPrice:     8.00,
+		OutputPrice:    40.00,
+		CacheReadPrice: 0.20,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-12",
+	},
+	ModelClaudeMythos52: {
+		Model:          ModelClaudeMythos52,
+		InputPrice:     8.00,
+		OutputPrice:    40.00,
+		CacheReadPrice: 0.20,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-12",
+	},
 	// Cache hits bill at 0.025x base input on Fable 5.1 and Mythos 5.1, not the 0.1x every other Claude model uses, so the rate is stated rather than derived.
 	ModelClaudeFable51: {
 		Model:          ModelClaudeFable51,
@@ -220,5 +237,22 @@ var FastModeTextPricing = map[string]llm.PricingInfo{
 		CacheReadPrice: 0.40,
 		Currency:       "USD",
 		UpdatedAt:      "2026-09-22",
+	},
+	// Prompt-caching multipliers stack on the fast rate, so the 0.025x cache-hit rate applies to $16, not $8.
+	ModelClaudeFable52: {
+		Model:          ModelClaudeFable52,
+		InputPrice:     16.00,
+		OutputPrice:    80.00,
+		CacheReadPrice: 0.40,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-12",
+	},
+	ModelClaudeMythos52: {
+		Model:          ModelClaudeMythos52,
+		InputPrice:     16.00,
+		OutputPrice:    80.00,
+		CacheReadPrice: 0.40,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-12",
 	},
 }

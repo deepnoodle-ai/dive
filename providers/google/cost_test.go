@@ -10,6 +10,8 @@ import (
 
 func TestGoogleCacheReadPricingCoverage(t *testing.T) {
 	expected := map[string]float64{
+		ModelGemini4Carbon:                 0.10,
+		ModelGemini4Hydrogen:               0.075,
 		ModelGemini4Argon:                  0.10,
 		ModelGemini38Flash:                 0.075,
 		ModelGemini37Flash:                 0.075,

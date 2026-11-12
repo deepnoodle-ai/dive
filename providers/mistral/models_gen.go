@@ -36,8 +36,12 @@ const (
 	ModelMixtral8x22B        = "open-mixtral-8x22b"
 	ModelGLM53               = "zai-glm-5-3"
 	// Deprecated: Retired by Mistral on September 30, 2026. Use ModelLeanstral151.
-	ModelLeanstral15  = "labs-leanstral-1-5"
-	ModelLeanstral151 = "labs-leanstral-1-5-1"
+	ModelLeanstral15                     = "labs-leanstral-1-5"
+	ModelLeanstral151                    = "labs-leanstral-1-5-1"
+	ModelVoxtralMiniTranscribe30         = "voxtral-mini-transcribe-3-0"
+	ModelVoxtralMiniTranscribeRealtime30 = "voxtral-mini-transcribe-realtime-3-0"
+	ModelVoxtralSmallTranscribe30        = "voxtral-small-transcribe-3-0"
+	ModelVoxtralMiniTTS30                = "voxtral-mini-tts-3-0"
 )
 
 // DefaultModel is generated from the catalog's default model.

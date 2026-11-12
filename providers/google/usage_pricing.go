@@ -13,6 +13,8 @@ import (
 // generated catalog. Retired, live, TTS, and image-generation rows require
 // different billing shapes and intentionally remain unpriced here.
 var verifiedGoogleTextPricing = map[string]struct{}{
+	ModelGemini4Carbon:                 {},
+	ModelGemini4Hydrogen:               {},
 	ModelGemini4Argon:                  {},
 	ModelGemini38Flash:                 {},
 	ModelGemini37Flash:                 {},

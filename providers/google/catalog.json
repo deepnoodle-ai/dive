@@ -25,13 +25,31 @@
   ],
   "models": [
     {
+      "go_name": "ModelGemini4Carbon",
+      "id": "gemini-4-carbon",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Gemini 4 Carbon",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Most capable reasoning model for complex software engineering, math, science, and agents"
+    },
+    {
+      "go_name": "ModelGemini4Hydrogen",
+      "id": "gemini-4-hydrogen",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Gemini 4 Hydrogen",
+      "recommended": true,
+      "cli_order": 3,
+      "description": "Fast, efficient Gemini 4 model for everyday coding and agentic workflows"
+    },
+    {
       "go_name": "ModelGemini4Argon",
       "id": "gemini-4-argon",
       "kind": "text",
       "context_window": 1048576,
       "display_name": "Gemini 4 Argon",
-      "recommended": true,
-      "cli_order": 2,
       "description": "Flagship reasoning model for complex coding, agents, math, and science"
     },
     {
@@ -77,7 +95,7 @@
       "context_window": 1000000,
       "display_name": "Gemini 3.5 Flash-Lite",
       "recommended": true,
-      "cli_order": 3,
+      "cli_order": 4,
       "description": "Lowest-cost model for high-throughput execution"
     },
     {
@@ -95,11 +113,20 @@
       "display_name": "Gemini 3.5 Transcribe Live"
     },
     {
+      "go_name": "ModelGeminiOmni12Flash",
+      "id": "gemini-omni-1.2-flash",
+      "kind": "video",
+      "context_window": 131072,
+      "display_name": "Gemini Omni 1.2 Flash"
+    },
+    {
       "go_name": "ModelGeminiOmni11Flash",
       "id": "gemini-omni-1.1-flash",
       "kind": "video",
       "context_window": 131072,
-      "display_name": "Gemini Omni 1.1 Flash"
+      "display_name": "Gemini Omni 1.1 Flash",
+      "lifecycle": "deprecated",
+      "deprecated": "Effective December 3, 2026, use ModelGeminiOmni12Flash."
     },
     {
       "go_name": "ModelGemini31ProPreview",
@@ -231,14 +258,18 @@
       "id": "gemini-2.5-pro",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 2.5 Pro"
+      "display_name": "Gemini 2.5 Pro",
+      "lifecycle": "deprecated",
+      "deprecated": "Deprecated by Google."
     },
     {
       "go_name": "ModelGemini25Flash",
       "id": "gemini-2.5-flash",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 2.5 Flash"
+      "display_name": "Gemini 2.5 Flash",
+      "lifecycle": "deprecated",
+      "deprecated": "Deprecated by Google."
     },
     {
       "go_name": "ModelGemini25FlashLite",
@@ -252,7 +283,9 @@
       "id": "gemini-2.5-flash-image",
       "kind": "image",
       "context_window": 1000000,
-      "display_name": "Gemini 2.5 Flash"
+      "display_name": "Gemini 2.5 Flash",
+      "lifecycle": "retired",
+      "deprecated": "Model was shut down October 2, 2026. Use ModelGemini31FlashImage or ModelGemini31FlashLiteImage."
     },
     {
       "go_name": "ModelGemini25FlashTTS",
@@ -295,6 +328,23 @@
   ],
   "pricing": {
     "text": [
+      {
+        "model": "gemini-4-carbon",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "10.00",
+        "cache_read_price_per_1m_tokens": "0.10",
+        "currency": "USD",
+        "updated_at": "2026-11-12",
+        "note": "Launch rates through 2026-11-30. Google lists $4.00/$20.00 ($0.20 cache read) from 2026-12-01; revisit then."
+      },
+      {
+        "model": "gemini-4-hydrogen",
+        "input_price_per_1m_tokens": "1.50",
+        "output_price_per_1m_tokens": "7.50",
+        "cache_read_price_per_1m_tokens": "0.075",
+        "currency": "USD",
+        "updated_at": "2026-11-12"
+      },
       {
         "model": "gemini-4-argon",
         "input_price_per_1m_tokens": "2.00",
