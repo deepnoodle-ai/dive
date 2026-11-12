@@ -34,8 +34,9 @@ const (
 	// Deprecated: Retired by xAI; requests route to grok-build-0.1. Use ModelGrokBuild01.
 	ModelGrokCodeFast1 = "grok-code-fast-1"
 	// Deprecated: Retired by xAI; requests redirect to grok-imagine-image-quality. Use ModelImagineImageQuality.
-	ModelImagineImagePro     = "grok-imagine-image-pro"
-	ModelImagineImage        = "grok-imagine-image"
+	ModelImagineImagePro = "grok-imagine-image-pro"
+	ModelImagineImage    = "grok-imagine-image"
+	// Deprecated: Retired by xAI; requests are served by grok-imagine-image-2.0 with quality=low. Use ModelImagineImage20.
 	ModelImagineImageQuality = "grok-imagine-image-quality"
 	ModelImagineImage20      = "grok-imagine-image-2.0"
 	ModelImagineVideo        = "grok-imagine-video"
@@ -43,6 +44,9 @@ const (
 	ModelVoiceTranscribe20   = "grok-voice-transcribe-2.0"
 	// Deprecated: Reached end of life on October 2, 2026. Use ModelVoiceTranscribe20.
 	ModelVoiceTranscribe10 = "grok-voice-transcribe-1.0"
+	ModelGrokVoice30       = "grok-voice-3.0"
+	// Deprecated: Deprecated by xAI. Use ModelGrokVoice30.
+	ModelGrokVoice20 = "grok-voice-2.0"
 )
 
 // DefaultModel is generated from the catalog's default model.

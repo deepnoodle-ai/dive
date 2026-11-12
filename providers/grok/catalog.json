@@ -206,6 +206,8 @@
     {
       "go_name": "ModelImagineImageQuality",
       "id": "grok-imagine-image-quality",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests are served by grok-imagine-image-2.0 with quality=low. Use ModelImagineImage20.",
       "kind": "image",
       "context_window": 131072
     },
@@ -243,6 +245,22 @@
       "description": "The original speech-to-text model. $0.10 per hour of audio (batch), $0.20 (streaming)",
       "lifecycle": "deprecated",
       "deprecated": "Reached end of life on October 2, 2026. Use ModelVoiceTranscribe20."
+    },
+    {
+      "go_name": "ModelGrokVoice30",
+      "id": "grok-voice-3.0",
+      "kind": "audio",
+      "display_name": "Grok Voice 3.0",
+      "description": "Speech to speech ($0.08/min, $0.004 text input)"
+    },
+    {
+      "go_name": "ModelGrokVoice20",
+      "id": "grok-voice-2.0",
+      "kind": "audio",
+      "display_name": "Grok Voice 2.0",
+      "description": "Speech to speech ($0.08/min, $0.004 text input)",
+      "lifecycle": "deprecated",
+      "deprecated": "Deprecated by xAI. Use ModelGrokVoice30."
     }
   ],
   "pricing": {

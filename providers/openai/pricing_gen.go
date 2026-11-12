@@ -40,6 +40,22 @@ var TextModelPricing = map[string]llm.PricingInfo{
 	},
 	// Standard tier. Above 272K input tokens, input, cache read, and
 	// cache write rates double and output is 1.5x.
+	ModelGPT61Terra: {
+		Model:                      ModelGPT61Terra,
+		InputPrice:                 1.00,
+		OutputPrice:                5.00,
+		LongContextInputPrice:      2.00,
+		LongContextCacheReadPrice:  0.10,
+		LongContextOutputPrice:     7.50,
+		CacheReadPrice:             0.05,
+		CacheWritePrice:            1.25,
+		LongContextCacheWritePrice: 2.50,
+		LongContextThreshold:       272001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-11-12",
+	},
+	// Standard tier. Above 272K input tokens, input, cache read, and
+	// cache write rates double and output is 1.5x.
 	ModelGPT6Sol: {
 		Model:                      ModelGPT6Sol,
 		InputPrice:                 2.00,
@@ -327,6 +343,42 @@ var TextModelPricing = map[string]llm.PricingInfo{
 
 // ImageModelPricing is generated from catalog.json.
 var ImageModelPricing = map[string]llm.ImagePricingInfo{
+	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
+	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
+	// at $30.00/1M.
+	ModelGPTImage26Sunburst: {
+		Model: ModelGPTImage26Sunburst,
+		TokenPricing: &llm.PricingInfo{
+			Model:                    ModelGPTImage26Sunburst,
+			InputPrice:               5.00,
+			OutputPrice:              30.00,
+			CacheReadPrice:           1.25,
+			InputPriceByModality:     map[string]float64{"image": 8.00},
+			CacheReadPriceByModality: map[string]float64{"image": 2.00},
+			Currency:                 "USD",
+			UpdatedAt:                "2026-11-12",
+		},
+		Currency:  "USD",
+		UpdatedAt: "2026-11-12",
+	},
+	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
+	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
+	// at $30.00/1M.
+	ModelGPTImage26Flare: {
+		Model: ModelGPTImage26Flare,
+		TokenPricing: &llm.PricingInfo{
+			Model:                    ModelGPTImage26Flare,
+			InputPrice:               5.00,
+			OutputPrice:              30.00,
+			CacheReadPrice:           1.25,
+			InputPriceByModality:     map[string]float64{"image": 8.00},
+			CacheReadPriceByModality: map[string]float64{"image": 2.00},
+			Currency:                 "USD",
+			UpdatedAt:                "2026-11-12",
+		},
+		Currency:  "USD",
+		UpdatedAt: "2026-11-12",
+	},
 	// OpenAI bills this model per token, not per image: $5.00/1M text input and $8.00/1M
 	// image input ($1.25 and $2.00 cached), with generated images billed as output tokens
 	// at $30.00/1M. The model emits no text, so the image rate sits in the base output slot

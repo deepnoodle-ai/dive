@@ -159,6 +159,7 @@ var openAITable = Table{
 	// GPT-6.1 Sol rejects none and minimal, unlike GPT-6 Sol. Verified
 	// against the Responses API on 2026-09-30; temperature is also rejected.
 	{Prefix: "gpt-6.1-sol", Caps: Capabilities{Efforts: effortsLowToMax}},
+	{Prefix: "gpt-6.1-terra", Unverified: true},
 	{Prefix: "gpt-6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
 
 	{Prefix: "o3", Caps: Capabilities{Efforts: effortsLowToHigh}},
@@ -253,6 +254,7 @@ var museTable = Table{
 	// Verified against the Meta Model API on 2026-10-13: minimal through max
 	// and temperature accepted, none rejected with HTTP 400.
 	{Prefix: "muse-wonder-1.0", Caps: Capabilities{Efforts: museMinimalToMax, Temperature: true}},
+	{Prefix: "muse-ember-1.0", Unverified: true},
 }
 
 var (

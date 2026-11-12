@@ -79,9 +79,10 @@ func TestGPT6AstraLongContextPricing(t *testing.T) {
 // GPT-6 Sol and Luna follow Astra's long-context rule.
 func TestGPT6SolAndLunaPricing(t *testing.T) {
 	for model, want := range map[string][4]float64{
-		ModelGPT6Sol:  {2.00, 0.20, 2.50, 10.00},
-		ModelGPT61Sol: {2.00, 0.10, 2.50, 10.00},
-		ModelGPT6Luna: {0.10, 0.01, 0.125, 0.50},
+		ModelGPT6Sol:    {2.00, 0.20, 2.50, 10.00},
+		ModelGPT61Sol:   {2.00, 0.10, 2.50, 10.00},
+		ModelGPT61Terra: {1.00, 0.05, 1.25, 5.00},
+		ModelGPT6Luna:   {0.10, 0.01, 0.125, 0.50},
 	} {
 		p, ok := TextModelPricing[model]
 		assert.True(t, ok, "pricing should exist for "+model)
@@ -99,6 +100,7 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 		ModelGPT6Astra:          1.00,
 		ModelGPT6Sol:            0.20,
 		ModelGPT61Sol:           0.10,
+		ModelGPT61Terra:         0.05,
 		ModelGPT6Luna:           0.01,
 		ModelGPT56:              0.40,
 		ModelGPT56Sol:           0.40,

@@ -9,6 +9,7 @@ const (
 	ModelMuseSpark12            = "muse-spark-1.2"
 	ModelMuseSpark12Contributor = "muse-spark-1.2-contributor"
 	ModelMuseSpark11            = "muse-spark-1.1"
+	ModelMuseEmber10            = "muse-ember-1.0"
 	ModelMuseImage              = "muse-image-1.0"
 	ModelMuseVoiceTranscribe    = "muse-voice-transcribe-1.0"
 )

@@ -220,13 +220,21 @@ var modelCapabilityTable = []capabilityEntry{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
 		perMessageEffort: true, taskBudget: true,
 	}},
-	// Mythos 5 and 5.1 are catalogued but reachable only through Anthropic's
+	{prefix: "claude-fable-5-2", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		perMessageEffort: true, taskBudget: true,
+	}},
+	// Mythos 5, 5.1, and 5.2 are catalogued but reachable only through Anthropic's
 	// limited-availability program, so these values mirror Fable and are
 	// untested against the live API.
 	{prefix: "claude-mythos-5", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true, taskBudget: true,
 	}},
 	{prefix: "claude-mythos-5-1", caps: modelCapabilities{
+		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
+		perMessageEffort: true, taskBudget: true,
+	}},
+	{prefix: "claude-mythos-5-2", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
 		perMessageEffort: true, taskBudget: true,
 	}},

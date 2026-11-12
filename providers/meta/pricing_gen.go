@@ -15,6 +15,19 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:       "USD",
 		UpdatedAt:      "2026-10-13",
 	},
+	// Standard tier only; requests over 200K input tokens bill all input, output, and cached tokens at 3x.
+	ModelMuseEmber10: {
+		Model:                     ModelMuseEmber10,
+		InputPrice:                0.10,
+		OutputPrice:               0.50,
+		LongContextInputPrice:     0.30,
+		LongContextCacheReadPrice: 0.012,
+		LongContextOutputPrice:    1.50,
+		CacheReadPrice:            0.004,
+		LongContextThreshold:      200001,
+		Currency:                  "USD",
+		UpdatedAt:                 "2026-11-12",
+	},
 	// Standard tier. Meta publishes no long-context premium: one rate at any context length.
 	ModelMuseSpark13: {
 		Model:          ModelMuseSpark13,
