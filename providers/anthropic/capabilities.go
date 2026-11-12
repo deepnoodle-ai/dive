@@ -220,6 +220,7 @@ var modelCapabilityTable = []capabilityEntry{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
 		perMessageEffort: true, taskBudget: true,
 	}},
+	// Fable 5.2 is untested against the live API and mirrors Fable 5.1.
 	{prefix: "claude-fable-5-2", caps: modelCapabilities{
 		efforts: effortsFull, adaptive: true, thinkingOnByDefault: true,
 		perMessageEffort: true, taskBudget: true,

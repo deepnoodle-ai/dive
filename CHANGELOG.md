@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **New provider models and deprecations.** Added `claude-fable-5-2` and
+  `claude-mythos-5-2` (Anthropic); `gemini-4-carbon`, `gemini-4-hydrogen`, and
+  `gemini-omni-1.2-flash` (Google); `gpt-6.1-terra`, `gpt-image-2.6-sunburst`,
+  and `gpt-image-2.6-flare` (OpenAI); `muse-ember-1.0` (Meta); `grok-voice-3.0`
+  and `grok-voice-2.0` (xAI); and the Voxtral 3 audio preview models
+  (`voxtral-mini-transcribe-3-0`, `voxtral-mini-transcribe-realtime-3-0`,
+  `voxtral-small-transcribe-3-0`, `voxtral-mini-tts-3-0`) (Mistral). Marked
+  `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-omni-1.1-flash`, and
+  `grok-voice-2.0` deprecated, and `gemini-2.5-flash-image` and
+  `grok-imagine-image-quality` retired.
+
 ### Changed
 
 - **Wonton v0.10.2.** The `dive` CLI prints plain text, with no escape codes,

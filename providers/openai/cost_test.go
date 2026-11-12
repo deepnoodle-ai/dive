@@ -132,6 +132,7 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	// generated view is expected to omit them.
 	responsesOnly := map[string]string{
 		ModelGPT61Sol:           "GPT-6.1 Sol requires Responses for function calling",
+		ModelGPT61Terra:         "GPT-6.1 Terra requires Responses for function calling",
 		ModelGPT6Astra:          "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",
 		ModelGPT6Sol:            "Chat Completions rejects function tools with GPT-6 Sol unless reasoning_effort is none, so the model is Responses-only",
 		ModelGPT6Luna:           "Chat Completions rejects function tools with GPT-6 Luna unless reasoning_effort is none, so the model is Responses-only",
@@ -231,7 +232,12 @@ func TestGPT56LongContextPricing(t *testing.T) {
 // in one prompt differ: text input at $5/1M, image input at $8/1M, and cached
 // image tokens at $2/1M against $1.25 for text.
 func TestGPTImage25ModalityPricing(t *testing.T) {
-	for _, model := range []string{ModelGPTImage25Sunburst, ModelGPTImage25Flare} {
+	for _, model := range []string{
+		ModelGPTImage25Sunburst,
+		ModelGPTImage25Flare,
+		ModelGPTImage26Sunburst,
+		ModelGPTImage26Flare,
+	} {
 		t.Run(model, func(t *testing.T) {
 			pricing, ok := ImageModelPricing[model]
 			assert.True(t, ok, "pricing should exist for "+model)
@@ -275,7 +281,12 @@ func TestDallEPerImagePricing(t *testing.T) {
 // llm.PopulateCost could never price an image request. Token-billed rows now
 // resolve through the same registry as text models.
 func TestTokenBilledImagePricingIsRegistered(t *testing.T) {
-	for _, model := range []string{ModelGPTImage25Sunburst, ModelGPTImage25Flare} {
+	for _, model := range []string{
+		ModelGPTImage25Sunburst,
+		ModelGPTImage25Flare,
+		ModelGPTImage26Sunburst,
+		ModelGPTImage26Flare,
+	} {
 		p, ok := providers.PricingFor(model, false)
 		assert.True(t, ok, "image pricing should be registered for "+model)
 		assert.Equal(t, 5.00, p.InputPrice)

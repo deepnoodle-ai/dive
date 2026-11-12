@@ -206,7 +206,7 @@
     {
       "go_name": "ModelImagineImageQuality",
       "id": "grok-imagine-image-quality",
-      "lifecycle": "deprecated",
+      "lifecycle": "retired",
       "deprecated": "Retired by xAI; requests are served by grok-imagine-image-2.0 with quality=low. Use ModelImagineImage20.",
       "kind": "image",
       "context_window": 131072
@@ -442,9 +442,10 @@
       },
       {
         "model": "grok-imagine-image-quality",
-        "price_per_image": "0.05",
+        "price_per_image": "0.04",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-11-12",
+        "note": "Retired slug; requests are served by grok-imagine-image-2.0 with quality=low and billed at its rates."
       },
       {
         "model": "grok-imagine-image-2.0",

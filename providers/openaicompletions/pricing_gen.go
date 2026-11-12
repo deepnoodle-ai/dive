@@ -8,22 +8,6 @@ import "github.com/deepnoodle-ai/dive/llm"
 var TextModelPricing = map[string]llm.PricingInfo{
 	// Standard tier. Above 272K input tokens, input, cache read, and
 	// cache write rates double and output is 1.5x.
-	ModelGPT61Terra: {
-		Model:                      ModelGPT61Terra,
-		InputPrice:                 1.00,
-		OutputPrice:                5.00,
-		LongContextInputPrice:      2.00,
-		LongContextCacheReadPrice:  0.10,
-		LongContextOutputPrice:     7.50,
-		CacheReadPrice:             0.05,
-		CacheWritePrice:            1.25,
-		LongContextCacheWritePrice: 2.50,
-		LongContextThreshold:       272001,
-		Currency:                   "USD",
-		UpdatedAt:                  "2026-11-12",
-	},
-	// Standard tier. Above 272K input tokens, input, cache read, and
-	// cache write rates double and output is 1.5x.
 	ModelGPT56: {
 		Model:                      ModelGPT56,
 		InputPrice:                 4.00,
