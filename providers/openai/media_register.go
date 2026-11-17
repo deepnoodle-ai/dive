@@ -12,14 +12,6 @@ func init() {
 			return NewMediaProvider()
 		},
 	})
-	// sora-2, sora-2-pro
-	media.RegisterVideo(media.VideoProviderEntry{
-		Name:  "openai",
-		Match: media.PrefixMatcher("sora-"),
-		Factory: func(model string) media.VideoProvider {
-			return NewMediaProvider()
-		},
-	})
 	// tts-1, tts-1-hd, gpt-4o-mini-tts
 	media.RegisterTextToSpeech(media.TextToSpeechProviderEntry{
 		Name:  "openai",

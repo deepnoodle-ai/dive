@@ -83,13 +83,13 @@ func main() {
 		Flags(
 			cli.String("model", "m").
 				Default("").
-				Help("Model to use (default: veo-3.1-generate-preview)"),
+				Help("Model to use (default: grok-imagine-video)"),
 			cli.String("aspect").
 				Default("").
 				Help("Aspect ratio: 16:9, 9:16, 1:1"),
 			cli.String("duration", "d").
 				Default("8s").
-				Help("Video duration (e.g. 8s, 16s, 20s). Exact duration depends on provider."),
+				Help("Video duration (e.g. 5s, 8s). Exact duration depends on provider."),
 			cli.String("out", "o").
 				Default("").
 				Help("Output file path"),
@@ -1336,7 +1336,9 @@ func getDefaultImageModel() string {
 		return "gpt-image-2"
 	}
 	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
-		return "imagen-4.0-generate-001"
+		// Not gemini-nano-banana-2.1: it declines plain prompts such as "a red
+		// circle" with IMAGE_RECITATION most of the time.
+		return "gemini-3.1-flash-image"
 	}
 	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
 		return "grok-imagine-image"
@@ -1349,13 +1351,10 @@ func getDefaultImageModel() string {
 	return ""
 }
 
+// getDefaultVideoModel picks a video model for the available keys. Only xAI
+// has one: OpenAI shut down Sora, and Veo now runs only on Vertex AI, which
+// the CLI does not configure.
 func getDefaultVideoModel() string {
-	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
-		return "veo-3.1-generate-preview"
-	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		return "sora-2"
-	}
 	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
 		return "grok-imagine-video"
 	}

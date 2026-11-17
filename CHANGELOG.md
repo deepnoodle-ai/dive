@@ -17,6 +17,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Hydrogen now get unsupported effort levels and thinking budgets adjusted.
 - **Dependency upgrades.** Wonton v0.14.2, openai-go v3.101.0, genai v1.77.0,
   a2a-go v2.9.0, and mcp-go v1.5.0. The `dive` CLI exits 2 on a usage error.
+- **`dive video` defaults to `grok-imagine-video`** and `dive image` with only a
+  Google key defaults to `gemini-3.1-flash-image`.
+- **`google.WithMediaImagenLocation` is deprecated** and does nothing.
+
+### Fixed
+
+- **Grok video generation works again.** It uses xAI's native
+  `/v1/videos/generations` API and reports the cost in `Metadata["cost_usd"]`.
+- **A Gemini image response with no image names its finish reason**, such as
+  `IMAGE_RECITATION`.
+
+### Removed
+
+- **Breaking: `openai.MediaProvider.GenerateVideo` and the `sora-` models.**
+  OpenAI shut down Sora and the Videos API on 2026-09-24. Use
+  `grok-imagine-video`.
+- **Breaking: Imagen models.** Google shut down Imagen. An `imagen-` model
+  returns an error; use a Gemini image model. Veo runs only on Vertex AI now.
 
 ## [1.44.0] - 2026-11-12
 

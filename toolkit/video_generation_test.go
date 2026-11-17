@@ -52,7 +52,7 @@ func TestVideoGenerationTool_VeoDurations(t *testing.T) {
 	veo2 := NewVideoGenerationTool("veo-2.0-generate-001").Schema().Properties["duration"]
 	assert.Equal(t, []any{"5s", "6s", "7s", "8s"}, veo2.Enum)
 
-	other := NewVideoGenerationTool("sora-2").Schema().Properties["duration"]
+	other := NewVideoGenerationTool("grok-imagine-video").Schema().Properties["duration"]
 	assert.Nil(t, other.Enum)
 	assert.NotContains(t, other.Description, "16s")
 }

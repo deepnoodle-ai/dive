@@ -21,12 +21,11 @@ import (
 	"github.com/deepnoodle-ai/dive/media"
 )
 
-// MediaProvider generates images, videos, speech, and transcriptions using OpenAI APIs.
+// MediaProvider generates images, speech, and transcriptions using OpenAI APIs.
 //
 // Supported image models: gpt-image-2.6-sunburst, gpt-image-2.6-flare,
 // gpt-image-2.5-sunburst, gpt-image-2.5-flare, gpt-image-2,
 // gpt-image-1.5, gpt-image-1, gpt-image-1-mini
-// Supported video models: sora-2, sora-2-pro
 // Supported speech models: gpt-4o-mini-tts, tts-1, tts-1-hd
 // Supported transcription models: gpt-4o-mini-transcribe, gpt-4o-transcribe, whisper-1
 type MediaProvider struct {
@@ -137,69 +136,6 @@ func (p *MediaProvider) EditImage(ctx context.Context, prompt string, config *me
 	}
 	attachImageUsage(results, resp.Usage, model)
 	return results, nil
-}
-
-// GenerateVideo implements media.VideoProvider.
-func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config *media.Config) (*media.VideoResult, error) {
-	model := config.Model
-	if model == "" {
-		model = "sora-2"
-	}
-
-	size := aspectRatioToVideoSize(config.AspectRatio, model)
-	seconds := durationToSeconds(config.Duration)
-
-	video, err := p.client.Videos.NewAndPoll(ctx, openai.VideoNewParams{
-		Model:   openai.VideoModel(model),
-		Prompt:  prompt,
-		Size:    openai.VideoSize(size),
-		Seconds: openai.VideoSeconds(seconds),
-	}, 5000)
-	if err != nil {
-		return nil, fmt.Errorf("openai video generation: %w", err)
-	}
-
-	if video.Status != openai.VideoStatusCompleted {
-		errMsg := "unknown error"
-		if video.Error.Message != "" {
-			errMsg = video.Error.Message
-		}
-		return nil, fmt.Errorf("video generation failed (status: %s): %s", video.Status, errMsg)
-	}
-
-	resp, err := p.client.Videos.DownloadContent(ctx, video.ID, openai.VideoDownloadContentParams{})
-	if err != nil {
-		return nil, fmt.Errorf("downloading video: %w", err)
-	}
-	defer resp.Body.Close()
-
-	videoData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading video data: %w", err)
-	}
-
-	ar := videoSizeToAspectRatio(size)
-	width, height := media.StandardVideoDimensions(ar)
-	duration := config.Duration
-	if duration == 0 {
-		if parsed, err := time.ParseDuration(seconds + "s"); err == nil {
-			duration = parsed
-		}
-	}
-	result := &media.VideoResult{
-		Data:        videoData,
-		Model:       string(video.Model),
-		Width:       width,
-		Height:      height,
-		Duration:    duration,
-		AspectRatio: ar,
-		Metadata: map[string]any{
-			"provider": "openai",
-			"video_id": video.ID,
-		},
-	}
-	result.SetVideoFormat("video/mp4")
-	return result, nil
 }
 
 // TextToSpeech implements media.TextToSpeechProvider.
@@ -437,54 +373,10 @@ func aspectRatioToSize(ar media.AspectRatio) string {
 	}
 }
 
-// aspectRatioToVideoSize converts a media.AspectRatio to an OpenAI video size string.
-// sora-2-pro supports 1080p; sora-2 supports 720p.
-func aspectRatioToVideoSize(ar media.AspectRatio, model string) string {
-	isPro := model == "sora-2-pro"
-	switch ar {
-	case media.Aspect9x16:
-		if isPro {
-			return "1080x1920"
-		}
-		return "720x1280"
-	default:
-		if isPro {
-			return "1920x1080"
-		}
-		return "1280x720"
-	}
-}
-
-// videoSizeToAspectRatio converts an OpenAI video size to media.AspectRatio.
-func videoSizeToAspectRatio(size string) media.AspectRatio {
-	switch size {
-	case "720x1280", "1024x1536", "1080x1920":
-		return media.Aspect9x16
-	default:
-		return media.Aspect16x9
-	}
-}
-
-// durationToSeconds maps a time.Duration to an OpenAI Sora-compatible seconds string.
-// Sora only supports discrete values: 8, 16, and 20 seconds.
-// Durations are bucketed/clamped to the nearest supported value:
-// <16s → "8", 16–19s → "16", ≥20s → "20".
-func durationToSeconds(d time.Duration) string {
-	sec := int(d.Seconds())
-	if sec >= 20 {
-		return "20"
-	}
-	if sec >= 16 {
-		return "16"
-	}
-	return "8"
-}
-
 // Compile-time interface checks.
 var (
 	_ media.ImageProvider         = (*MediaProvider)(nil)
 	_ media.ImageEditor           = (*MediaProvider)(nil)
-	_ media.VideoProvider         = (*MediaProvider)(nil)
 	_ media.TextToSpeechProvider  = (*MediaProvider)(nil)
 	_ media.TranscriptionProvider = (*MediaProvider)(nil)
 )

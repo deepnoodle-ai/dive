@@ -24,7 +24,7 @@ func runVideo(ctx *cli.Context) error {
 	if model == "" {
 		model = getDefaultVideoModel()
 		if model == "" {
-			return fmt.Errorf("no video generation API key found (set GOOGLE_API_KEY, OPENAI_API_KEY, or XAI_API_KEY)")
+			return fmt.Errorf("no video model available: set XAI_API_KEY to use grok-imagine-video")
 		}
 	}
 

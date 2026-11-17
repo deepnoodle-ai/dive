@@ -24,6 +24,10 @@ import (
 // MediaProvider generates images and videos using the xAI API.
 type MediaProvider struct {
 	client *openai.Client
+
+	// videoPollInterval is the wait between video job polls. Zero means
+	// defaultVideoPollInterval. Tests set it to a short value.
+	videoPollInterval time.Duration
 }
 
 // NewMediaProvider creates a new Grok MediaProvider.
@@ -67,53 +71,60 @@ func (p *MediaProvider) GenerateImage(ctx context.Context, prompt string, config
 	return decodeGrokImageResults(ctx, resp.Data, model)
 }
 
-// GenerateVideo implements media.VideoProvider.
+// GenerateVideo implements media.VideoProvider. It uses xAI's native video
+// API: it starts a job, polls it until it finishes, and downloads the video
+// from the temporary URL in the result.
 func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config *media.Config) (*media.VideoResult, error) {
 	model := config.Model
 	if model == "" {
 		model = ModelImagineVideo
 	}
-
 	seconds := grokDurationToSeconds(config.Duration)
+	ar := config.AspectRatio
+	if ar == "" || ar == media.AspectAuto {
+		ar = media.Aspect16x9
+	}
 
-	video, err := p.client.Videos.NewAndPoll(ctx, openai.VideoNewParams{
-		Model:   openai.VideoModel(model),
-		Prompt:  prompt,
-		Seconds: openai.VideoSeconds(seconds),
-	}, 5000)
+	var started struct {
+		RequestID string `json:"request_id"`
+	}
+	err := p.client.Post(ctx, "videos/generations", map[string]any{
+		"model":        model,
+		"prompt":       prompt,
+		"duration":     seconds,
+		"aspect_ratio": string(ar),
+	}, &started)
 	if err != nil {
 		return nil, fmt.Errorf("grok video generation: %w", err)
 	}
-
-	if video.Status != openai.VideoStatusCompleted {
-		errMsg := "unknown error"
-		if video.Error.Message != "" {
-			errMsg = video.Error.Message
-		}
-		return nil, fmt.Errorf("video generation failed (status: %s): %s", video.Status, errMsg)
+	if started.RequestID == "" {
+		return nil, fmt.Errorf("grok video generation: response has no request_id")
 	}
 
-	resp, err := p.client.Videos.DownloadContent(ctx, video.ID, openai.VideoDownloadContentParams{})
+	job, err := p.pollVideo(ctx, started.RequestID)
+	if err != nil {
+		return nil, err
+	}
+
+	videoData, err := downloadURL(ctx, job.Video.URL, maxMediaSize)
 	if err != nil {
 		return nil, fmt.Errorf("downloading video: %w", err)
 	}
-	defer resp.Body.Close()
 
-	videoData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading video data: %w", err)
-	}
-
-	ar := config.AspectRatio
-	if ar == "" {
-		ar = media.Aspect16x9
-	}
 	width, height := media.StandardVideoDimensions(ar)
-	duration := config.Duration
-	if duration == 0 {
-		if parsed, err := time.ParseDuration(seconds + "s"); err == nil {
-			duration = parsed
-		}
+	duration := time.Duration(seconds) * time.Second
+	if job.Video.Duration > 0 {
+		duration = time.Duration(job.Video.Duration * float64(time.Second))
+	}
+	metadata := map[string]any{
+		"provider":   "grok",
+		"request_id": started.RequestID,
+	}
+	if job.Usage.CostInUSDTicks > 0 {
+		metadata["cost_usd"] = float64(job.Usage.CostInUSDTicks) / usdTicksPerDollar
+	}
+	if job.Model != "" {
+		model = job.Model
 	}
 	result := &media.VideoResult{
 		Data:        videoData,
@@ -122,13 +133,63 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		Height:      height,
 		Duration:    duration,
 		AspectRatio: ar,
-		Metadata: map[string]any{
-			"provider": "grok",
-			"video_id": video.ID,
-		},
+		Metadata:    metadata,
 	}
 	result.SetVideoFormat("video/mp4")
 	return result, nil
+}
+
+// usdTicksPerDollar converts xAI's usage.cost_in_usd_ticks to dollars.
+const usdTicksPerDollar = 1e10
+
+const defaultVideoPollInterval = 5 * time.Second
+
+// grokVideoJob is the status of an xAI video job.
+type grokVideoJob struct {
+	Status string `json:"status"`
+	Model  string `json:"model"`
+	Video  struct {
+		URL      string  `json:"url"`
+		Duration float64 `json:"duration"`
+	} `json:"video"`
+	Usage struct {
+		CostInUSDTicks int64 `json:"cost_in_usd_ticks"`
+	} `json:"usage"`
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// pollVideo waits until the video job is done or failed, or ctx ends.
+func (p *MediaProvider) pollVideo(ctx context.Context, requestID string) (*grokVideoJob, error) {
+	interval := p.videoPollInterval
+	if interval == 0 {
+		interval = defaultVideoPollInterval
+	}
+	for {
+		var job grokVideoJob
+		if err := p.client.Get(ctx, "videos/"+requestID, nil, &job); err != nil {
+			return nil, fmt.Errorf("polling grok video %s: %w", requestID, err)
+		}
+		switch job.Status {
+		case "done":
+			if job.Video.URL == "" {
+				return nil, fmt.Errorf("grok video %s is done but has no video URL", requestID)
+			}
+			return &job, nil
+		case "failed", "expired":
+			msg := job.Error.Message
+			if msg == "" {
+				msg = "no reason given"
+			}
+			return nil, fmt.Errorf("grok video %s %s: %s", requestID, job.Status, msg)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // decodeGrokImageResults extracts image data from xAI response items.
@@ -146,7 +207,7 @@ func decodeGrokImageResults(ctx context.Context, data []openai.Image, model stri
 				return nil, fmt.Errorf("decoding image data: %w", err)
 			}
 		case item.URL != "":
-			imageData, err = downloadURL(ctx, item.URL)
+			imageData, err = downloadURL(ctx, item.URL, maxMediaSize)
 			if err != nil {
 				return nil, fmt.Errorf("downloading image from URL: %w", err)
 			}
@@ -176,37 +237,44 @@ func decodeGrokImageResults(ctx context.Context, data []openai.Image, model stri
 	return results, nil
 }
 
-// downloadURL fetches image data from a URL with context and size limits.
-func downloadURL(ctx context.Context, url string) ([]byte, error) {
-	const maxImageSize = 50 * 1024 * 1024 // 50 MB
+// maxMediaSize is the largest image or video that downloadURL accepts.
+const maxMediaSize = 200 * 1024 * 1024 // 200 MB
+
+// downloadURL fetches image or video data from a URL. It returns an error,
+// not truncated data, when the body is larger than limit bytes.
+func downloadURL(ctx context.Context, url string, limit int64) ([]byte, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching image", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d fetching media", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxImageSize))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("media larger than %d MB", limit/(1024*1024))
+	}
+	return data, nil
 }
 
-// grokDurationToSeconds converts a time.Duration to a seconds string for the
+// grokDurationToSeconds converts a time.Duration to whole seconds for the
 // Grok video API. Clamps to the 1–15 second range, defaulting to 5.
-func grokDurationToSeconds(d time.Duration) string {
+func grokDurationToSeconds(d time.Duration) int {
 	sec := int(d.Seconds())
 	if sec < 1 {
-		return "5"
+		return 5
 	}
-	if sec > 15 {
-		sec = 15
-	}
-	return fmt.Sprintf("%d", sec)
+	return min(sec, 15)
 }
 
 // Compile-time interface checks.
