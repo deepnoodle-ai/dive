@@ -5,17 +5,17 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/a2aproject/a2a-go/v2 v2.5.0
+	github.com/a2aproject/a2a-go/v2 v2.9.0
 	github.com/deepnoodle-ai/dive v1.44.0
-	github.com/deepnoodle-ai/wonton v0.10.2
+	github.com/deepnoodle-ai/wonton v0.14.2
 )
 
 require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	golang.org/x/mod v0.40.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 )
 
 replace github.com/deepnoodle-ai/dive => ..

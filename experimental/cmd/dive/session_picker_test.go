@@ -11,6 +11,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/termtest"
 	"github.com/deepnoodle-ai/wonton/tui"
+	"github.com/deepnoodle-ai/wonton/tui/tuitest"
 )
 
 // The picker shortens a workspace path against the real home directory, so the
@@ -51,7 +52,7 @@ func newPicker(sessions ...*session.SessionInfo) *SessionPickerApp {
 
 func renderPicker(t *testing.T, p *SessionPickerApp, width int) *termtest.Screen {
 	t.Helper()
-	return tui.SprintScreen(p.LiveView(), tui.WithWidth(width), tui.WithHeight(24))
+	return tuitest.Screen(p.LiveView(), tui.WithWidth(width), tui.WithHeight(24))
 }
 
 func TestPickerGivesEachSessionOneLine(t *testing.T) {

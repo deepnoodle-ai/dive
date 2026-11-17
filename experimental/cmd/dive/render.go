@@ -11,6 +11,8 @@ import (
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/tui"
+	// highlight registers syntax coloring for code blocks in tui.Markdown.
+	_ "github.com/deepnoodle-ai/wonton/tui/highlight"
 )
 
 // Dive's terminal palette. Brand and interactive states stay in one vivid

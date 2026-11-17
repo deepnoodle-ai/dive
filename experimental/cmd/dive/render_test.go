@@ -8,6 +8,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/termtest"
 	"github.com/deepnoodle-ai/wonton/tui"
+	"github.com/deepnoodle-ai/wonton/tui/tuitest"
 )
 
 func TestUserMessageBackgroundFillsEveryLine(t *testing.T) {
@@ -25,7 +26,7 @@ func TestUserMessageBackgroundFillsEveryLine(t *testing.T) {
 		{"blank line", "first\n\nlast", 24, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			screen := tui.SprintScreen(app.textMessageView(Message{Role: roleUser, Content: tc.content}), tui.WithWidth(tc.width))
+			screen := tuitest.Screen(app.textMessageView(Message{Role: roleUser, Content: tc.content}), tui.WithWidth(tc.width))
 			for y := 0; y < tc.rows; y++ {
 				for x := 2; x < tc.width; x++ {
 					if got := screen.Cell(x, y).Style.Background; got != wantBg {
@@ -49,7 +50,7 @@ func TestIntroViewUsesCompactThreeLineStartupText(t *testing.T) {
 	app.reasoningEffort = llm.ReasoningEffortMedium
 	intro := app.appendIntro()
 
-	screen := tui.SprintScreen(app.introView(app.messages[intro]), tui.WithWidth(80))
+	screen := tuitest.Screen(app.introView(app.messages[intro]), tui.WithWidth(80))
 	lines := strings.Split(strings.TrimRight(screen.Text(), "\n"), "\n")
 	for i := range lines {
 		lines[i] = strings.TrimRight(lines[i], " ")
@@ -222,14 +223,14 @@ func TestStatusLineShowsOnlySessionCostByDefault(t *testing.T) {
 		Cost:        &llm.Cost{Total: 1.273},
 	}
 
-	text := tui.SprintScreen(app.statusLineView(), tui.WithWidth(120), tui.WithHeight(10)).Text()
+	text := tuitest.Screen(app.statusLineView(), tui.WithWidth(120), tui.WithHeight(10)).Text()
 	assert.Contains(t, text, "test-model · high in test on main")
 	assert.Contains(t, text, "$1.27")
 	assert.NotContains(t, text, "cache read")
 	assert.NotContains(t, text, "turn")
 
 	app.showDetailedUsage = true
-	text = tui.SprintScreen(app.statusLineView(), tui.WithWidth(120), tui.WithHeight(10)).Text()
+	text = tuitest.Screen(app.statusLineView(), tui.WithWidth(120), tui.WithHeight(10)).Text()
 	assert.Contains(t, text, "cache read")
 	assert.Contains(t, text, "turn")
 	assert.Contains(t, text, "session")
