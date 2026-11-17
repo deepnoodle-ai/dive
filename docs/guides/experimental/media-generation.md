@@ -5,8 +5,8 @@
 
 Dive provides cross-provider image, video, and speech media through the `media`
 package. Image and video are also available as toolkit tools. Supported
-providers include OpenAI (gpt-image, Sora, GPT-4o mini TTS/transcribe), Google
-(Imagen, Gemini, Veo), and Grok (grok-imagine).
+providers include OpenAI (gpt-image, GPT-4o mini TTS/transcribe), Google
+(Gemini, and Veo on Vertex AI), and Grok (grok-imagine).
 
 ## Setup
 
@@ -57,7 +57,7 @@ Generate multiple images from a single prompt:
 
 ```go
 results, err := media.GenerateImageBatch(ctx, "sunset over mountains",
-    media.WithModel("imagen-4.0-generate-001"),
+    media.WithModel("gemini-nano-banana-2.1"),
     media.WithCount(4),
 )
 for i, img := range results {
@@ -71,7 +71,7 @@ Generate the same prompt with multiple models concurrently:
 
 ```go
 results, err := media.GenerateImages(ctx, "a red panda",
-    media.WithModels("gpt-image-2", "imagen-4.0-generate-001", "grok-imagine-image"),
+    media.WithModels("gpt-image-2", "gemini-nano-banana-2.1", "grok-imagine-image"),
 )
 for _, img := range results {
     if img.Err != nil {
@@ -104,7 +104,7 @@ Returns `media.ErrEditNotSupported` if the provider does not implement editing.
 
 ```go
 result, err := media.GenerateVideo(ctx, "a leaf falling from a tree",
-    media.WithModel("veo-3.1-generate-preview"),
+    media.WithModel("grok-imagine-video"),
     media.WithAspectRatio(media.Aspect16x9),
     media.WithDuration(8 * time.Second),
     media.WithTimeout(15 * time.Minute),
@@ -121,8 +121,22 @@ fmt.Printf("Saved: %s (%dx%d %s, %s)\n",
 Video generation is synchronous from the caller's perspective — the call blocks
 until the provider completes or the context is cancelled.
 
-With Veo, `media.WithReferenceImage` sets the first frame of the video. Veo
-uses only the first reference image. On Vertex AI, Veo 3 also generates audio.
+Veo runs only on Vertex AI. Google shut it down on the Gemini API in October 2026. The registry uses the Gemini API, so call a Vertex AI provider directly.
+It reads `GOOGLE_CLOUD_PROJECT` and application default credentials:
+
+```go
+p := google.NewMediaProvider(google.WithMediaVertexAI("us-central1"))
+result, err := p.GenerateVideo(ctx, "a leaf falling from a tree", &media.Config{
+    Model:    "veo-3.1-fast-generate-001",
+    Duration: 8 * time.Second,
+})
+```
+
+With Veo, `Config.ReferenceImages` sets the first frame of the video. Veo uses
+only the first reference image, and Veo 3 also generates audio.
+
+Google shut down Imagen on the Gemini API and on Vertex AI. An `imagen-` model
+returns an error. Use a Gemini image model instead.
 Veo 3 accepts durations of 4, 6, or 8 seconds; Veo 2 accepts 5 to 8.
 
 ## Text-to-Speech
@@ -194,19 +208,18 @@ result, err := media.Transcribe(ctx, audio,
 
 ### Image Models
 
-| Provider | Models                                                                                                                                                                                              |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI   | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`                                                                                                                                   |
-| Google   | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image` |
-| Grok     | `grok-imagine-image`, `grok-imagine-image-pro`                                                                                                                                                      |
+| Provider | Models                                                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI   | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`                                                                 |
+| Google   | `gemini-nano-banana-2.1`, `gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image` |
+| Grok     | `grok-imagine-image`, `grok-imagine-image-pro`                                                                                    |
 
 ### Video Models
 
-| Provider | Models                                               |
-| -------- | ---------------------------------------------------- |
-| Google   | `veo-3.1-generate-preview`, `veo-3-generate-preview` |
-| OpenAI   | `sora-2`, `sora-2-pro`                               |
-| Grok     | `grok-imagine-video`                                 |
+| Provider | Models                                                                                            |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| Grok     | `grok-imagine-video`                                                                              |
+| Google   | `veo-3.1-generate-001`, `veo-3.1-fast-generate-001`, `veo-3.1-lite-generate-001` (Vertex AI only) |
 
 ### Text-to-Speech Models
 
@@ -269,7 +282,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
         toolkit.NewImageGenerationTool("gpt-image-2",
             toolkit.WithImageToolWorkDir("/tmp/output"),
         ),
-        toolkit.NewVideoGenerationTool("veo-3.1-generate-preview",
+        toolkit.NewVideoGenerationTool("grok-imagine-video",
             toolkit.WithVideoToolWorkDir("/tmp/output"),
         ),
     },
@@ -317,7 +330,7 @@ Examples:
 dive image "a cat in a spacesuit"
 
 # Specific model and format
-dive image "mountain landscape" -m imagen-4.0-generate-001 --aspect 16:9 --format jpeg
+dive image "mountain landscape" -m gemini-nano-banana-2.1 --aspect 16:9 --format jpeg
 
 # Multiple images
 dive image "abstract art" -n 4
@@ -340,7 +353,7 @@ dive video "prompt" [flags]
 Flags:
   -m, --model      Model name (default: auto-detect)
       --aspect     Aspect ratio: 16:9, 9:16, 1:1
-  -d, --duration   Video duration, e.g. 8s, 16s, 20s (default: 8s)
+  -d, --duration   Video duration, e.g. 5s, 8s (default: 8s)
   -o, --out        Output file path (default: auto from prompt)
       --open       Open result in default viewer
 ```
@@ -352,7 +365,7 @@ Examples:
 dive video "ocean waves at sunset"
 
 # Specific model and duration
-dive video "timelapse of clouds" -m sora-2 -d 20s
+dive video "timelapse of clouds" -m grok-imagine-video -d 12s
 
 # Portrait video
 dive video "person walking" --aspect 9:16
