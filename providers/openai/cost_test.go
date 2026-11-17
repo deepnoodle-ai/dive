@@ -76,10 +76,12 @@ func TestGPT6AstraLongContextPricing(t *testing.T) {
 	assert.Equal(t, shortWrite.CacheWrite, 1.25)
 }
 
-// GPT-6 Sol and Luna follow Astra's long-context rule.
+// The rest of the GPT-6 family follows GPT-6 Astra's long-context rule.
 func TestGPT6SolAndLunaPricing(t *testing.T) {
 	for model, want := range map[string][4]float64{
 		ModelGPT6Sol:    {2.00, 0.20, 2.50, 10.00},
+		ModelGPT62Astra: {8.00, 0.40, 10.00, 40.00},
+		ModelGPT62Sol:   {2.00, 0.10, 2.50, 10.00},
 		ModelGPT61Sol:   {2.00, 0.10, 2.50, 10.00},
 		ModelGPT61Terra: {1.00, 0.05, 1.25, 5.00},
 		ModelGPT6Luna:   {0.10, 0.01, 0.125, 0.50},
@@ -97,6 +99,8 @@ func TestGPT6SolAndLunaPricing(t *testing.T) {
 
 func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	expected := map[string]float64{
+		ModelGPT62Astra:         0.40,
+		ModelGPT62Sol:           0.10,
 		ModelGPT6Astra:          1.00,
 		ModelGPT6Sol:            0.20,
 		ModelGPT61Sol:           0.10,
@@ -131,6 +135,8 @@ func TestOpenAICacheReadPricingCoverage(t *testing.T) {
 	// Models the Chat Completions adapter deliberately does not carry, so the
 	// generated view is expected to omit them.
 	responsesOnly := map[string]string{
+		ModelGPT62Astra:         "GPT-6.2 Astra requires Responses for function calling",
+		ModelGPT62Sol:           "GPT-6.2 Sol requires Responses for function calling",
 		ModelGPT61Sol:           "GPT-6.1 Sol requires Responses for function calling",
 		ModelGPT61Terra:         "GPT-6.1 Terra requires Responses for function calling",
 		ModelGPT6Astra:          "Chat Completions does not support function calling with GPT-6 Astra, so the model is Responses-only",

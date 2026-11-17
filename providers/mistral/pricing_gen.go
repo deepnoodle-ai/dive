@@ -175,6 +175,22 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:       "USD",
 		UpdatedAt:      "2026-09-30",
 	},
+	ModelGLM53Flash: {
+		Model:          ModelGLM53Flash,
+		InputPrice:     0.15,
+		OutputPrice:    0.50,
+		CacheReadPrice: 0.03,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-17",
+	},
+	ModelDeepSeekV41Flash1017: {
+		Model:          ModelDeepSeekV41Flash1017,
+		InputPrice:     0.30,
+		OutputPrice:    1.20,
+		CacheReadPrice: 0.007,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-17",
+	},
 	// Free public preview.
 	ModelLeanstral15: {
 		Model:       ModelLeanstral15,

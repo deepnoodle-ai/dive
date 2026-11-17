@@ -57,11 +57,12 @@ model := openai.New() // defaults to gpt-6-luna
 **Models:** See `providers/openai/models_gen.go` for available models.
 **Features:** Streaming, tool calling, vision input, reasoning effort
 
-Select GPT-6.1 Sol with `openai.WithModel(openai.ModelGPT61Sol)`.
-Use this Responses provider for tool calling. GPT-6.1 Sol accepts `low` through
-`max` effort; Dive adjusts `none` and `minimal` to `low` and omits temperature.
-Its standard price includes a 5% cached-input rate. Prompts above 272K input
-tokens use the catalog's long-context rates for the full request.
+Select GPT-6.2 Astra or Sol with `openai.WithModel(openai.ModelGPT62Astra)` or
+`openai.WithModel(openai.ModelGPT62Sol)`. Use this Responses provider for tool
+calling. GPT-6.2 Astra, GPT-6.2 Sol, and GPT-6.1 Sol accept `low` through `max`
+effort; Dive adjusts `none` and `minimal` to `low` and omits temperature. Their
+standard prices include a 5% cached-input rate. Prompts above 272K input tokens
+use the catalog's long-context rates for the full request.
 
 `llm.WithServiceTier` also accepts `priority`, `fast`, and `ultrafast`.
 [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)

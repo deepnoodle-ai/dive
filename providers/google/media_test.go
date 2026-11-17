@@ -17,6 +17,7 @@ import (
 func TestGoogleImageMatcher(t *testing.T) {
 	matcher := media.PrefixesMatcher("gemini-", "imagen-")
 	// Gemini image models
+	assert.True(t, matcher(ModelGeminiNanoBanana21))
 	assert.True(t, matcher(ModelGemini31FlashLiteImage))
 	assert.True(t, matcher(ModelGemini31FlashImage))
 	assert.True(t, matcher(ModelGemini3ProImage))
@@ -102,7 +103,7 @@ func TestGoogleGenerateImage_Gemini_Integration(t *testing.T) {
 
 	p := NewMediaProvider()
 	config := &media.Config{
-		Model:       "gemini-2.5-flash-image",
+		Model:       ModelGeminiNanoBanana21,
 		AspectRatio: media.Aspect1x1,
 		Count:       1,
 	}
@@ -110,7 +111,7 @@ func TestGoogleGenerateImage_Gemini_Integration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, len(results) > 0)
 	assert.True(t, len(results[0].Data) > 0)
-	assert.Equal(t, "gemini-2.5-flash-image", results[0].Model)
+	assert.Equal(t, ModelGeminiNanoBanana21, results[0].Model)
 	assert.True(t, results[0].Width > 0)
 	assert.True(t, results[0].Height > 0)
 }

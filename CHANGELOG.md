@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **GPT-6.2 Astra and Sol.** `openai.ModelGPT62Astra` and `ModelGPT62Sol` are
+  the recommended OpenAI models; new Google, Mistral, and OpenRouter models too.
+
+### Changed
+
+- **Verified reasoning controls.** GPT-6.1 Terra and Gemini 4 Carbon and
+  Hydrogen now get unsupported effort levels and thinking budgets adjusted.
+
 ## [1.44.0] - 2026-11-12
 
 ### Added

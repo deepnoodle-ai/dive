@@ -199,6 +199,13 @@
       "display_name": "Gemini 3.1 Flash"
     },
     {
+      "go_name": "ModelGeminiNanoBanana21",
+      "id": "gemini-nano-banana-2.1",
+      "kind": "image",
+      "context_window": 65536,
+      "display_name": "Nano Banana 2.1"
+    },
+    {
       "go_name": "ModelGemini31FlashLiteImage",
       "id": "gemini-3.1-flash-lite-image",
       "kind": "image",
@@ -601,6 +608,19 @@
         "currency": "USD",
         "updated_at": "2026-09-17",
         "note": "Text input and output match Gemini 2.5 Flash. Generated images bill as output\ntokens at $30.00/1M; a 1024x1024 image is 1290 tokens, about $0.039. Deprecated,\nshutting down 2026-10-02."
+      },
+      {
+        "model": "gemini-nano-banana-2.1",
+        "token_pricing": {
+          "input_price_per_1m_tokens": "1.50",
+          "output_price_per_1m_tokens": "7.50",
+          "output_price_per_1m_tokens_by_modality": {
+            "image": "30.00"
+          }
+        },
+        "currency": "USD",
+        "updated_at": "2026-11-17",
+        "note": "Input covers text, image, and video. Generated images bill as output tokens\nat $30.00/1M: about $0.034 at 1K, $0.050 at 2K, and $0.113 at 4K. Input\nimages are 1120 tokens each."
       },
       {
         "model": "gemini-3.1-flash-lite-image",

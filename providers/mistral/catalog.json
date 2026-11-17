@@ -235,6 +235,20 @@
       "display_name": "GLM 5.3"
     },
     {
+      "go_name": "ModelGLM53Flash",
+      "id": "zai-glm-5-3-flash",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "GLM 5.3 Flash"
+    },
+    {
+      "go_name": "ModelDeepSeekV41Flash1017",
+      "id": "deepseek-v4-1-flash-1017",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "DeepSeek V4.1 Flash"
+    },
+    {
       "go_name": "ModelLeanstral15",
       "id": "labs-leanstral-1-5",
       "kind": "text",
@@ -456,6 +470,22 @@
         "currency": "USD",
         "updated_at": "2026-09-30",
         "cache_read_price_per_1m_tokens": "0.14"
+      },
+      {
+        "model": "zai-glm-5-3-flash",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.50",
+        "cache_read_price_per_1m_tokens": "0.03",
+        "currency": "USD",
+        "updated_at": "2026-11-17"
+      },
+      {
+        "model": "deepseek-v4-1-flash-1017",
+        "input_price_per_1m_tokens": "0.30",
+        "output_price_per_1m_tokens": "1.20",
+        "cache_read_price_per_1m_tokens": "0.007",
+        "currency": "USD",
+        "updated_at": "2026-11-17"
       },
       {
         "model": "labs-leanstral-1-5",

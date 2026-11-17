@@ -159,7 +159,15 @@ var openAITable = Table{
 	// GPT-6.1 Sol rejects none and minimal, unlike GPT-6 Sol. Verified
 	// against the Responses API on 2026-09-30; temperature is also rejected.
 	{Prefix: "gpt-6.1-sol", Caps: Capabilities{Efforts: effortsLowToMax}},
-	{Prefix: "gpt-6.1-terra", Unverified: true},
+	// GPT-6.1 Terra keeps none but rejects minimal, so it takes gpt-5.6's
+	// ladder rather than Sol's. Verified against the Responses API on
+	// 2026-11-17; temperature is rejected.
+	{Prefix: "gpt-6.1-terra", Caps: Capabilities{Efforts: effortsNoneToMax}},
+	// GPT-6.2 Astra and Sol both reject none and minimal ("Supported values
+	// are: 'low', 'medium', 'high', 'xhigh', and 'max'") and refuse
+	// temperature. Verified against the Responses API on 2026-11-17.
+	{Prefix: "gpt-6.2-astra", Caps: Capabilities{Efforts: effortsLowToMax}},
+	{Prefix: "gpt-6.2-sol", Caps: Capabilities{Efforts: effortsLowToMax}},
 	{Prefix: "gpt-6-luna", Caps: Capabilities{Efforts: effortsNoneToMax}},
 
 	{Prefix: "o3", Caps: Capabilities{Efforts: effortsLowToHigh}},

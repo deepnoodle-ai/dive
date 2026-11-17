@@ -8,6 +8,38 @@ import "github.com/deepnoodle-ai/dive/llm"
 var TextModelPricing = map[string]llm.PricingInfo{
 	// Standard tier. Above 272K input tokens, input, cache read, and
 	// cache write rates double and output is 1.5x.
+	ModelGPT62Astra: {
+		Model:                      ModelGPT62Astra,
+		InputPrice:                 8.00,
+		OutputPrice:                40.00,
+		LongContextInputPrice:      16.00,
+		LongContextCacheReadPrice:  0.80,
+		LongContextOutputPrice:     60.00,
+		CacheReadPrice:             0.40,
+		CacheWritePrice:            10.00,
+		LongContextCacheWritePrice: 20.00,
+		LongContextThreshold:       272001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-11-17",
+	},
+	// Standard tier. Above 272K input tokens, input, cache read, and
+	// cache write rates double and output is 1.5x.
+	ModelGPT62Sol: {
+		Model:                      ModelGPT62Sol,
+		InputPrice:                 2.00,
+		OutputPrice:                10.00,
+		LongContextInputPrice:      4.00,
+		LongContextCacheReadPrice:  0.20,
+		LongContextOutputPrice:     15.00,
+		CacheReadPrice:             0.10,
+		CacheWritePrice:            2.50,
+		LongContextCacheWritePrice: 5.00,
+		LongContextThreshold:       272001,
+		Currency:                   "USD",
+		UpdatedAt:                  "2026-11-17",
+	},
+	// Standard tier. Above 272K input tokens, input, cache read, and
+	// cache write rates double and output is 1.5x.
 	ModelGPT6Astra: {
 		Model:                      ModelGPT6Astra,
 		InputPrice:                 10.00,
