@@ -106,7 +106,7 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		return nil, err
 	}
 
-	videoData, err := downloadURL(ctx, job.Video.URL)
+	videoData, err := downloadURL(ctx, job.Video.URL, maxMediaSize)
 	if err != nil {
 		return nil, fmt.Errorf("downloading video: %w", err)
 	}
@@ -207,7 +207,7 @@ func decodeGrokImageResults(ctx context.Context, data []openai.Image, model stri
 				return nil, fmt.Errorf("decoding image data: %w", err)
 			}
 		case item.URL != "":
-			imageData, err = downloadURL(ctx, item.URL)
+			imageData, err = downloadURL(ctx, item.URL, maxMediaSize)
 			if err != nil {
 				return nil, fmt.Errorf("downloading image from URL: %w", err)
 			}
@@ -237,9 +237,12 @@ func decodeGrokImageResults(ctx context.Context, data []openai.Image, model stri
 	return results, nil
 }
 
-// downloadURL fetches image or video data from a URL with context and size\n// limits.
-func downloadURL(ctx context.Context, url string) ([]byte, error) {
-	const maxSize = 200 * 1024 * 1024 // 200 MB
+// maxMediaSize is the largest image or video that downloadURL accepts.
+const maxMediaSize = 200 * 1024 * 1024 // 200 MB
+
+// downloadURL fetches image or video data from a URL. It returns an error,
+// not truncated data, when the body is larger than limit bytes.
+func downloadURL(ctx context.Context, url string, limit int64) ([]byte, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -254,7 +257,14 @@ func downloadURL(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d fetching media", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxSize))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("media larger than %d MB", limit/(1024*1024))
+	}
+	return data, nil
 }
 
 // grokDurationToSeconds converts a time.Duration to whole seconds for the

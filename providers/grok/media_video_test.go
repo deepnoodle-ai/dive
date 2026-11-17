@@ -81,3 +81,19 @@ func TestGrokGenerateVideo_Failed(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed: content moderated")
 }
+
+func TestDownloadURL_RejectsOversizedBody(t *testing.T) {
+	const limit = 2 * 1024 * 1024
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(make([]byte, limit+1))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := downloadURL(context.Background(), server.URL, limit)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "larger than 2 MB")
+
+	data, err := downloadURL(context.Background(), server.URL, limit+1)
+	assert.NoError(t, err)
+	assert.Equal(t, limit+1, len(data))
+}
