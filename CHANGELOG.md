@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.45.0] - 2026-11-17
+
 ### Added
 
 - **GPT-6.2 Astra and Sol.** `openai.ModelGPT62Astra` and `ModelGPT62Sol` are
@@ -16,7 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Verified reasoning controls.** GPT-6.1 Terra and Gemini 4 Carbon and
   Hydrogen now get unsupported effort levels and thinking budgets adjusted.
 - **Dependency upgrades.** Wonton v0.14.2, openai-go v3.101.0, genai v1.77.0,
-  a2a-go v2.9.0, and mcp-go v1.5.0. The `dive` CLI exits 2 on a usage error.
+  a2a-go v2.9.0, mcp-go v1.5.0, and OpenTelemetry 1.47. The `dive` CLI exits 2
+  on a usage error.
 - **`dive video` defaults to `grok-imagine-video`** and `dive image` with only a
   Google key defaults to `gemini-3.1-flash-image`.
 - **`google.WithMediaImagenLocation` is deprecated** and does nothing.
