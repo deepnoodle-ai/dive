@@ -8,18 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **GPT-6.2 and other new models.** Added `gpt-6.2-astra` and `gpt-6.2-sol`
-  (OpenAI, now the recommended models); `gemini-nano-banana-2.1` (Google);
-  `zai-glm-5-3-flash` and `deepseek-v4-1-flash-1017` (Mistral); and Fable 5.2,
-  GPT-6.2 Astra/Sol and Pro, GPT-6.1 Terra and Pro, and Gemini 4 Carbon and
-  Hydrogen (OpenRouter).
+- **GPT-6.2 Astra and Sol.** `openai.ModelGPT62Astra` and `ModelGPT62Sol` are
+  the recommended OpenAI models; new Google, Mistral, and OpenRouter models too.
 
 ### Changed
 
-- **Verified reasoning controls for GPT-6.1 Terra and Gemini 4 Carbon and
-  Hydrogen.** Dive now adjusts unsupported effort levels and thinking budgets
-  for these models instead of forwarding them, and sends explicit prompt-cache
-  breakpoints to GPT-6.1 Terra.
+- **Verified reasoning controls.** GPT-6.1 Terra and Gemini 4 Carbon and
+  Hydrogen now get unsupported effort levels and thinking budgets adjusted.
 
 ## [1.44.0] - 2026-11-12
 
