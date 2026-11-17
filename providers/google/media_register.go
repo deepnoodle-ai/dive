@@ -9,7 +9,7 @@ import (
 func init() {
 	media.RegisterImage(media.ImageProviderEntry{
 		Name:  "google",
-		Match: media.PrefixesMatcher("gemini-", "imagen-"),
+		Match: media.PrefixMatcher("gemini-"),
 		Factory: func(model string) media.ImageProvider {
 			return NewMediaProvider()
 		},

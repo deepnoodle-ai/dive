@@ -14,20 +14,18 @@ import (
 )
 
 // MediaProvider generates images, videos, speech, and transcriptions using Google's GenAI SDK.
-// Supports Gemini image/audio models, Imagen models, and Veo video models.
+// Supports Gemini image and audio models, and Veo video models on Vertex AI.
 type MediaProvider struct {
-	apiKey         string
-	vertexAI       bool
-	location       string
-	imagenLocation string
+	apiKey   string
+	vertexAI bool
+	location string
 
 	// videoPollInterval is the wait between video operation polls. Zero
 	// means defaultVideoPollInterval. Tests set it to a short value.
 	videoPollInterval time.Duration
 
-	mu           sync.Mutex
-	client       *genai.Client
-	imagenClient *genai.Client
+	mu     sync.Mutex
+	client *genai.Client
 }
 
 const defaultVideoPollInterval = 10 * time.Second
@@ -50,11 +48,12 @@ func WithMediaVertexAI(location string) MediaOption {
 	}
 }
 
-// WithMediaImagenLocation sets a separate location for Imagen models.
+// WithMediaImagenLocation once set a separate location for Imagen models.
+//
+// Deprecated: Google shut down Imagen on the Gemini API and Vertex AI, so
+// this option does nothing. Use a Gemini image model instead.
 func WithMediaImagenLocation(location string) MediaOption {
-	return func(p *MediaProvider) {
-		p.imagenLocation = location
-	}
+	return func(p *MediaProvider) {}
 }
 
 // NewMediaProvider creates a new Google MediaProvider.
@@ -107,18 +106,6 @@ func (p *MediaProvider) ensureClient(ctx context.Context) (*genai.Client, error)
 	}
 	p.client = client
 
-	// Create separate Imagen client if a different region is specified.
-	if p.vertexAI && p.imagenLocation != "" && p.imagenLocation != p.location {
-		imagenClient, err := genai.NewClient(ctx, &genai.ClientConfig{
-			Backend:  genai.BackendVertexAI,
-			Location: p.imagenLocation,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("creating imagen client (location=%s): %w", p.imagenLocation, err)
-		}
-		p.imagenClient = imagenClient
-	}
-
 	return p.client, nil
 }
 
@@ -134,10 +121,10 @@ func (p *MediaProvider) GenerateImage(ctx context.Context, prompt string, config
 		aspectRatio = media.Aspect1x1
 	}
 
-	if strings.HasPrefix(model, "gemini-") {
-		return p.generateImageWithGemini(ctx, prompt, model, aspectRatio, config)
+	if strings.HasPrefix(model, "imagen-") {
+		return nil, fmt.Errorf("google: Imagen models are shut down; use a Gemini image model such as %s", ModelGeminiNanoBanana21)
 	}
-	return p.generateImageWithImagen(ctx, prompt, model, aspectRatio, config)
+	return p.generateImageWithGemini(ctx, prompt, model, aspectRatio, config)
 }
 
 func (p *MediaProvider) generateImageWithGemini(ctx context.Context, prompt, model string, aspectRatio media.AspectRatio, config *media.Config) ([]*media.ImageResult, error) {
@@ -170,7 +157,11 @@ func (p *MediaProvider) generateImageWithGemini(ctx context.Context, prompt, mod
 	}
 
 	var results []*media.ImageResult
-	for _, part := range resp.Candidates[0].Content.Parts {
+	var respParts []*genai.Part
+	if content := resp.Candidates[0].Content; content != nil {
+		respParts = content.Parts
+	}
+	for _, part := range respParts {
 		if part.InlineData != nil && part.InlineData.Data != nil {
 			if part.Thought {
 				continue
@@ -194,7 +185,7 @@ func (p *MediaProvider) generateImageWithGemini(ctx context.Context, prompt, mod
 		}
 	}
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no image in gemini response")
+		return nil, noImageError(resp.Candidates[0])
 	}
 
 	// Convert format if requested and different from provider output
@@ -214,64 +205,18 @@ func (p *MediaProvider) generateImageWithGemini(ctx context.Context, prompt, mod
 	return results, nil
 }
 
-func (p *MediaProvider) generateImageWithImagen(ctx context.Context, prompt, model string, aspectRatio media.AspectRatio, config *media.Config) ([]*media.ImageResult, error) {
-	safetyFilter := genai.SafetyFilterLevelBlockOnlyHigh
-	if strings.HasPrefix(model, "imagen-4") {
-		safetyFilter = genai.SafetyFilterLevelBlockLowAndAbove
+// noImageError explains a Gemini image response that holds no image. The
+// model declines some prompts outright, for example with IMAGE_RECITATION when
+// the image would look too much like an existing one, and the finish reason
+// says so. genai keeps the finish message only on Vertex AI responses.
+func noImageError(candidate *genai.Candidate) error {
+	if candidate.FinishReason == "" || candidate.FinishReason == genai.FinishReasonStop {
+		return fmt.Errorf("no image in gemini response")
 	}
-
-	outputMIME := "image/png"
-	if config.OutputFormat != "" {
-		outputMIME = config.OutputFormat.MIMEType()
+	if candidate.FinishMessage != "" {
+		return fmt.Errorf("no image in gemini response (finish reason %s): %s", candidate.FinishReason, candidate.FinishMessage)
 	}
-
-	genConfig := &genai.GenerateImagesConfig{
-		OutputMIMEType:    outputMIME,
-		NumberOfImages:    int32(config.Count),
-		AddWatermark:      false,
-		PersonGeneration:  genai.PersonGenerationAllowAll,
-		SafetyFilterLevel: safetyFilter,
-		AspectRatio:       string(aspectRatio),
-	}
-
-	client := p.client
-	if p.imagenClient != nil {
-		client = p.imagenClient
-	}
-	response, err := client.Models.GenerateImages(ctx, model, prompt, genConfig)
-	if err != nil {
-		return nil, fmt.Errorf("imagen generation: %w", err)
-	}
-
-	var results []*media.ImageResult
-	for _, genImage := range response.GeneratedImages {
-		if genImage.RAIFilteredReason != "" {
-			continue
-		}
-		if genImage.Image == nil || len(genImage.Image.ImageBytes) == 0 {
-			continue
-		}
-		width, height := media.StandardImageDimensions(aspectRatio)
-		mimeType := genImage.Image.MIMEType
-		if mimeType == "" {
-			mimeType = "image/png"
-		}
-		format := media.FormatFromMIME(mimeType)
-		img := &media.ImageResult{
-			Data:     genImage.Image.ImageBytes,
-			Model:    model,
-			Format:   format,
-			MimeType: mimeType,
-			Width:    width,
-			Height:   height,
-			Metadata: map[string]any{"provider": "google"},
-		}
-		results = append(results, img)
-	}
-	if len(results) == 0 {
-		return nil, fmt.Errorf("no images generated (may have been filtered by safety)")
-	}
-	return results, nil
+	return fmt.Errorf("no image in gemini response (finish reason %s)", candidate.FinishReason)
 }
 
 // EditImage implements media.ImageEditor for Gemini models.

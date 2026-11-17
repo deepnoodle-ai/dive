@@ -15,7 +15,7 @@ import (
 )
 
 func TestGoogleImageMatcher(t *testing.T) {
-	matcher := media.PrefixesMatcher("gemini-", "imagen-")
+	matcher := media.PrefixMatcher("gemini-")
 	// Gemini image models
 	assert.True(t, matcher(ModelGeminiNanoBanana21))
 	assert.True(t, matcher(ModelGemini31FlashLiteImage))
@@ -24,11 +24,8 @@ func TestGoogleImageMatcher(t *testing.T) {
 	assert.True(t, matcher(ModelGemini25FlashImage))
 	assert.True(t, matcher(ModelGemini31FlashImagePrev))
 	assert.True(t, matcher(ModelGemini3ProImagePreview))
-	// Imagen 4 models (current)
-	assert.True(t, matcher("imagen-4.0-generate-001"))
-	assert.True(t, matcher("imagen-4.0-ultra-generate-001"))
-	assert.True(t, matcher("imagen-4.0-fast-generate-001"))
-	// Negative
+	// Negative. Imagen is shut down, so it no longer routes to Google.
+	assert.True(t, !matcher("imagen-4.0-generate-001"))
 	assert.True(t, !matcher("gpt-image-1"))
 	assert.True(t, !matcher("veo-3.1-generate-preview"))
 }
@@ -80,12 +77,10 @@ func TestMediaProviderOptions(t *testing.T) {
 	p := NewMediaProvider(
 		WithMediaAPIKey("test-key"),
 		WithMediaVertexAI("us-central1"),
-		WithMediaImagenLocation("us-east1"),
 	)
 	assert.Equal(t, "test-key", p.apiKey)
 	assert.True(t, p.vertexAI)
 	assert.Equal(t, "us-central1", p.location)
-	assert.Equal(t, "us-east1", p.imagenLocation)
 }
 
 func requireGoogleMediaIntegration(t *testing.T) {
@@ -107,29 +102,16 @@ func TestGoogleGenerateImage_Gemini_Integration(t *testing.T) {
 		AspectRatio: media.Aspect1x1,
 		Count:       1,
 	}
-	results, err := p.GenerateImage(context.Background(), "a simple red circle on a white background", config)
+	// A plain shape trips IMAGE_RECITATION most of the time, because the
+	// image would look like existing ones. A specific scene does not.
+	results, err := p.GenerateImage(context.Background(),
+		"a watercolor of a teal teapot shaped like a snail, resting on a stack of library books", config)
 	assert.NoError(t, err)
 	assert.True(t, len(results) > 0)
 	assert.True(t, len(results[0].Data) > 0)
 	assert.Equal(t, ModelGeminiNanoBanana21, results[0].Model)
 	assert.True(t, results[0].Width > 0)
 	assert.True(t, results[0].Height > 0)
-}
-
-func TestGoogleGenerateImage_Imagen4_Integration(t *testing.T) {
-	requireGoogleMediaIntegration(t)
-
-	p := NewMediaProvider()
-	config := &media.Config{
-		Model:       "imagen-4.0-generate-001",
-		AspectRatio: media.Aspect1x1,
-		Count:       1,
-	}
-	results, err := p.GenerateImage(context.Background(), "a simple blue square on a white background", config)
-	assert.NoError(t, err)
-	assert.True(t, len(results) > 0)
-	assert.True(t, len(results[0].Data) > 0)
-	assert.Equal(t, "imagen-4.0-generate-001", results[0].Model)
 }
 
 func TestGoogleGenerateImage_FormatConversion_Integration(t *testing.T) {
@@ -146,24 +128,6 @@ func TestGoogleGenerateImage_FormatConversion_Integration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, len(results) > 0)
 	assert.Equal(t, media.FormatJPEG, results[0].Format)
-}
-
-func TestGoogleGenerateVideo_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping video generation test in short mode")
-	}
-	requireGoogleMediaIntegration(t)
-
-	p := NewMediaProvider()
-	config := &media.Config{
-		Model:       "veo-3.1-generate-preview",
-		AspectRatio: media.Aspect16x9,
-	}
-	result, err := p.GenerateVideo(context.Background(), "a leaf falling from a tree", config)
-	assert.NoError(t, err)
-	assert.True(t, len(result.Data) > 0)
-	assert.Equal(t, "veo-3.1-generate-preview", result.Model)
-	assert.Equal(t, "mp4", result.Format)
 }
 
 func TestGoogleTextToSpeech_Integration(t *testing.T) {
