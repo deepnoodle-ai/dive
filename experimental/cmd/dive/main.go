@@ -1336,7 +1336,9 @@ func getDefaultImageModel() string {
 		return "gpt-image-2"
 	}
 	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
-		return "gemini-nano-banana-2.1"
+		// Not gemini-nano-banana-2.1: it declines plain prompts such as "a red
+		// circle" with IMAGE_RECITATION most of the time.
+		return "gemini-3.1-flash-image"
 	}
 	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
 		return "grok-imagine-image"

@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Dependency upgrades.** Wonton v0.14.2, openai-go v3.101.0, genai v1.77.0,
   a2a-go v2.9.0, and mcp-go v1.5.0. The `dive` CLI exits 2 on a usage error.
 - **`dive video` defaults to `grok-imagine-video`** and `dive image` with only a
-  Google key defaults to `gemini-nano-banana-2.1`.
+  Google key defaults to `gemini-3.1-flash-image`.
 - **`google.WithMediaImagenLocation` is deprecated** and does nothing.
 
 ### Fixed
