@@ -135,9 +135,10 @@ result, err := p.GenerateVideo(ctx, "a leaf falling from a tree", &media.Config{
 With Veo, `Config.ReferenceImages` sets the first frame of the video. Veo uses
 only the first reference image, and Veo 3 also generates audio.
 
+Veo 3 accepts durations of 4, 6, or 8 seconds; Veo 2 accepts 5 to 8.
+
 Google shut down Imagen on the Gemini API and on Vertex AI. An `imagen-` model
 returns an error. Use a Gemini image model instead.
-Veo 3 accepts durations of 4, 6, or 8 seconds; Veo 2 accepts 5 to 8.
 
 ## Text-to-Speech
 
