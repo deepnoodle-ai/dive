@@ -11,6 +11,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/termtest"
 	"github.com/deepnoodle-ai/wonton/tui"
+	"github.com/deepnoodle-ai/wonton/tui/tuitest"
 )
 
 // renderScreen renders the managed screen at a fixed size, the way the runtime
@@ -18,7 +19,7 @@ import (
 // viewport is flexible, so without one it would have no size to work from.
 func renderScreen(t *testing.T, app *App, width, height int) *termtest.Screen {
 	t.Helper()
-	return tui.SprintScreen(app.View(), tui.WithWidth(width), tui.WithHeight(height))
+	return tuitest.Screen(app.View(), tui.WithWidth(width), tui.WithHeight(height))
 }
 
 // newScreenApp returns an app in managed-screen mode holding n numbered
@@ -353,7 +354,7 @@ func TestFrameCostAtTwoHundredMessages(t *testing.T) {
 	renderScreen(t, app, 80, 40)
 
 	allocs := testing.AllocsPerRun(20, func() {
-		tui.SprintScreen(app.View(), tui.WithWidth(80), tui.WithHeight(40))
+		tuitest.Screen(app.View(), tui.WithWidth(80), tui.WithHeight(40))
 	})
 	// A viewport frame costs what a screenful costs. The inline renderer built
 	// every message every frame and ran to ~35k allocations at this size.
@@ -376,11 +377,11 @@ func BenchmarkScreenFrame200(b *testing.B) {
 		})
 	}
 	app.viewport.ScrollToBottom()
-	tui.SprintScreen(app.View(), tui.WithWidth(120), tui.WithHeight(40))
+	tuitest.Screen(app.View(), tui.WithWidth(120), tui.WithHeight(40))
 
 	b.ReportAllocs()
 	for b.Loop() {
-		tui.SprintScreen(app.View(), tui.WithWidth(120), tui.WithHeight(40))
+		tuitest.Screen(app.View(), tui.WithWidth(120), tui.WithHeight(40))
 	}
 }
 

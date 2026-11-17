@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/wonton/tui"
+	"github.com/deepnoodle-ai/wonton/tui/tuitest"
 )
 
 // /scrollback is the managed screen's answer to the two things the alternate
@@ -119,7 +120,7 @@ func (a *App) rawMessage(msg Message) string {
 
 // plainText renders a view and returns its text with the styling dropped.
 func plainText(view tui.View, width int) string {
-	screen := tui.SprintScreen(view, tui.WithWidth(width))
+	screen := tuitest.Screen(view, tui.WithWidth(width))
 	lines := strings.Split(screen.Text(), "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimRight(line, " ")

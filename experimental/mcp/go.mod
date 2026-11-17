@@ -6,8 +6,8 @@ toolchain go1.26.8
 
 require (
 	github.com/deepnoodle-ai/dive v1.44.0
-	github.com/deepnoodle-ai/wonton v0.10.2
-	github.com/mark3labs/mcp-go v1.0.0
+	github.com/deepnoodle-ai/wonton v0.14.2
+	github.com/mark3labs/mcp-go v1.5.0
 )
 
 require (
@@ -19,7 +19,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
 

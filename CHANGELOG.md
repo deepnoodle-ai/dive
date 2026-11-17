@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Verified reasoning controls.** GPT-6.1 Terra and Gemini 4 Carbon and
   Hydrogen now get unsupported effort levels and thinking budgets adjusted.
+- **Dependency upgrades.** Wonton v0.14.2, openai-go v3.101.0, genai v1.77.0,
+  a2a-go v2.9.0, and mcp-go v1.5.0. The `dive` CLI exits 2 on a usage error.
 
 ## [1.44.0] - 2026-11-12
 

@@ -11,6 +11,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/deepnoodle-ai/wonton/tui"
+	"github.com/deepnoodle-ai/wonton/tui/tuitest"
 )
 
 // The managed screen renders the transcript as application state inside the
@@ -586,7 +587,7 @@ func firstNonBlankLine(view tui.View, width int) string {
 	if view == nil {
 		return ""
 	}
-	screen := tui.SprintScreen(view, tui.WithWidth(width))
+	screen := tuitest.Screen(view, tui.WithWidth(width))
 	for _, line := range strings.Split(screen.Text(), "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed

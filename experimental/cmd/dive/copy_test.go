@@ -6,6 +6,7 @@ import (
 
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/tui"
+	"github.com/deepnoodle-ai/wonton/tui/tuitest"
 )
 
 func TestCodeBlocksReadsFencedBlocksInOrder(t *testing.T) {
@@ -91,7 +92,7 @@ func TestCopyWithNoSelectionListsTheBlocksToChooseFrom(t *testing.T) {
 
 	last := app.messages[len(app.messages)-1]
 	assert.Equal(t, last.Role, roleReport)
-	text := tui.SprintScreen(last.View, tui.WithWidth(80)).Text()
+	text := tuitest.Screen(last.View, tui.WithWidth(80)).Text()
 	assert.Contains(t, text, "func main() {}")
 	assert.Contains(t, text, "/copy 1-2")
 }
