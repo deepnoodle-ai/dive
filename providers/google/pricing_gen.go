@@ -253,6 +253,22 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 		UpdatedAt: "2026-09-17",
 	},
 	// Input covers text, image, and video. Generated images bill as output tokens
+	// at $30.00/1M: about $0.034 at 1K, $0.050 at 2K, and $0.113 at 4K. Input
+	// images are 1120 tokens each.
+	ModelGeminiNanoBanana21: {
+		Model: ModelGeminiNanoBanana21,
+		TokenPricing: &llm.PricingInfo{
+			Model:                 ModelGeminiNanoBanana21,
+			InputPrice:            1.50,
+			OutputPrice:           7.50,
+			OutputPriceByModality: map[string]float64{"image": 30.00},
+			Currency:              "USD",
+			UpdatedAt:             "2026-11-17",
+		},
+		Currency:  "USD",
+		UpdatedAt: "2026-11-17",
+	},
+	// Input covers text, image, and video. Generated images bill as output tokens
 	// at $30.00/1M, about $0.0336 for a 1K-resolution image.
 	ModelGemini31FlashLiteImage: {
 		Model: ModelGemini31FlashLiteImage,

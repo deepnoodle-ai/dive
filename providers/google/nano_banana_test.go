@@ -10,12 +10,14 @@ import (
 
 func TestNanoBananaModelCatalog(t *testing.T) {
 	models := []string{
+		ModelGeminiNanoBanana21,
 		ModelGemini31FlashLiteImage,
 		ModelGemini31FlashImage,
 		ModelGemini3ProImage,
 		ModelGemini25FlashImage,
 	}
 
+	assert.Equal(t, "gemini-nano-banana-2.1", ModelGeminiNanoBanana21)
 	assert.Equal(t, "gemini-3.1-flash-lite-image", ModelGemini31FlashLiteImage)
 	assert.Equal(t, "gemini-3.1-flash-image", ModelGemini31FlashImage)
 	assert.Equal(t, "gemini-3-pro-image", ModelGemini3ProImage)

@@ -275,8 +275,28 @@ func TestMuseWonderReasoning(t *testing.T) {
 	assert.True(t, AcceptsTemperature("meta", "muse-wonder-1.0"))
 }
 
-func TestGPT61SolReasoning(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol", "openai/gpt-6.1-sol-pro"} {
+// GPT-6.1 Terra keeps none, unlike Sol, but still rejects minimal.
+func TestGPT61TerraReasoning(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-terra", "openai/gpt-6.1-terra", "openai/gpt-6.1-terra-pro"} {
+		effort, send := ResolveEffort("openai", model, llm.ReasoningEffortNone, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortNone, effort)
+		effort, send = ResolveEffort("openai", model, llm.ReasoningEffortMinimal, nil)
+		assert.True(t, send)
+		assert.NotEqual(t, llm.ReasoningEffortMinimal, effort)
+		effort, send = ResolveEffort("openai", model, llm.ReasoningEffortMax, nil)
+		assert.True(t, send)
+		assert.Equal(t, llm.ReasoningEffortMax, effort)
+		assert.False(t, AcceptsTemperature("openai", model))
+	}
+}
+
+func TestGPT6LowToMaxReasoning(t *testing.T) {
+	for _, model := range []string{
+		"gpt-6.1-sol", "openai/gpt-6.1-sol", "openai/gpt-6.1-sol-pro",
+		"gpt-6.2-astra", "openai/gpt-6.2-astra", "openai/gpt-6.2-astra-pro",
+		"gpt-6.2-sol", "openai/gpt-6.2-sol", "openai/gpt-6.2-sol-pro",
+	} {
 		effort, send := ResolveEffort("openai", model, llm.ReasoningEffortNone, nil)
 		assert.True(t, send)
 		assert.Equal(t, llm.ReasoningEffortLow, effort)

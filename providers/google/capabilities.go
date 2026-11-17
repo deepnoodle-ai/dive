@@ -89,10 +89,22 @@ type capabilityEntry struct {
 // cannot, and the 2.5 generation has no thinking level at all.
 var modelCapabilityTable = []capabilityEntry{
 	// --- 4.x ---
-	// Gemini 4 Carbon and Hydrogen have not been probed live yet, so Dive
-	// forwards their thinking parameters untouched.
-	{prefix: "gemini-4-carbon", caps: modelCapabilities{unverified: true}},
-	{prefix: "gemini-4-hydrogen", caps: modelCapabilities{unverified: true}},
+	// Gemini 4 Carbon matches Argon: MINIMAL is rejected, budgets run [1,
+	// 65535], and thinkingBudget: 0 turns thinking off. Probed live against
+	// the public Gemini API on 2026-11-17.
+	{prefix: "gemini-4-carbon", caps: modelCapabilities{
+		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
+	}},
+	// Gemini 4 Hydrogen takes the same levels and budget range. It accepts
+	// thinkingBudget: 0 but still thinks a little, fewer tokens than at LOW,
+	// so 0 remains the closest request to "off". Probed live on 2026-11-17.
+	{prefix: "gemini-4-hydrogen", caps: modelCapabilities{
+		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
+	}},
 	// Gemini 4 Argon rejects MINIMAL ("Thinking level MINIMAL is not supported
 	// for this model"), takes budgets in [1, 65535], and accepts
 	// thinkingBudget: 0. Probed live against the public Gemini API on
