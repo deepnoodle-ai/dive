@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.46.0] - 2026-11-19
+
 ### Added
 
 - **Gemini 4 Neon and DeepInfra models.** Added `google.ModelGemini4Neon`

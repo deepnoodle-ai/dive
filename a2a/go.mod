@@ -6,7 +6,7 @@ toolchain go1.26.8
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.9.0
-	github.com/deepnoodle-ai/dive v1.45.0
+	github.com/deepnoodle-ai/dive v1.46.0
 	github.com/deepnoodle-ai/wonton v0.14.2
 )
 
