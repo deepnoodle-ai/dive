@@ -15,8 +15,8 @@ const (
 )
 
 // thinkingLevelFor maps Dive's provider-neutral effort onto Gemini's ladder.
-// Models whose capabilities stop at HIGH clamp xhigh and max before calling
-// this helper.
+// buildThinkingConfig clamps known models against their capability ladder and
+// caps unlisted models at high before calling this helper.
 func thinkingLevelFor(effort llm.ReasoningEffort) (genai.ThinkingLevel, bool) {
 	switch effort {
 	case llm.ReasoningEffortMinimal:
@@ -107,6 +107,11 @@ func buildThinkingConfig(model string, config *llm.Config) *genai.ThinkingConfig
 					"model", model, "requested", effort, "using", clamped)
 			}
 			effort = clamped
+		} else if effort == llm.ReasoningEffortXHigh || effort == llm.ReasoningEffortMax {
+			// Most Gemini models stop at HIGH, so keep unlisted models (preview
+			// IDs, tuned models, Vertex deployments) capped at HIGH rather than
+			// sending XHIGH/MAX without live verification.
+			effort = llm.ReasoningEffortHigh
 		}
 		level, ok := thinkingLevelFor(effort)
 		if !ok {
