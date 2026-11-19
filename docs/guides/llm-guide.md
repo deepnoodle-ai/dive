@@ -115,10 +115,12 @@ model := google.New() // defaults to gemini-3.8-flash
 **Models:** See `providers/google/models_gen.go` for available models.
 **Features:** Streaming, tool calling, multimodal
 
-Gemini 4 Argon (`google.ModelGemini4Argon`) is Google's flagship reasoning
-model. Like Gemini 3.8 Flash, it rejects the `minimal` thinking level, so Dive
-sends `low`. Gemini 3.5 Flash and 3.7 Flash are deprecated; Google routes them
-to 3.6 Flash and 3.8 Flash.
+Gemini 4 Carbon (`google.ModelGemini4Carbon`), Gemini 4 Neon
+(`google.ModelGemini4Neon`), and Gemini 4 Hydrogen
+(`google.ModelGemini4Hydrogen`) are Google's current Gemini 4 models. All three
+reject the `minimal` thinking level, so Dive sends `low`; Gemini 4 Neon also
+supports `xhigh` and `max` thinking levels. Gemini 3.5 Flash and 3.7 Flash are
+deprecated; Google routes them to 3.6 Flash and 3.8 Flash.
 
 ### Grok (X.AI)
 

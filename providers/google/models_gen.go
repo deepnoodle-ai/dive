@@ -4,6 +4,7 @@ package google
 
 const (
 	ModelGemini4Carbon   = "gemini-4-carbon"
+	ModelGemini4Neon     = "gemini-4-neon"
 	ModelGemini4Hydrogen = "gemini-4-hydrogen"
 	ModelGemini4Argon    = "gemini-4-argon"
 	ModelGemini38Flash   = "gemini-3.8-flash"

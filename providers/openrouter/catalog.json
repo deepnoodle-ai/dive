@@ -349,6 +349,13 @@
       "display_name": "Gemini 4 Carbon"
     },
     {
+      "go_name": "ModelGemini4Neon",
+      "id": "google/gemini-4-neon",
+      "kind": "text",
+      "context_window": 1048576,
+      "display_name": "Gemini 4 Neon"
+    },
+    {
       "go_name": "ModelGemini4Hydrogen",
       "id": "google/gemini-4-hydrogen",
       "kind": "text",
@@ -721,6 +728,15 @@
         "currency": "USD",
         "updated_at": "2026-09-30",
         "cache_read_price_per_1m_tokens": "1.25"
+      },
+      {
+        "model": "google/gemini-4-neon",
+        "input_price_per_1m_tokens": "3",
+        "output_price_per_1m_tokens": "15",
+        "currency": "USD",
+        "updated_at": "2026-11-19",
+        "cache_read_price_per_1m_tokens": "0.15",
+        "note": "OpenRouter public model listing, standard route."
       },
       {
         "model": "google/gemini-2.5-flash",

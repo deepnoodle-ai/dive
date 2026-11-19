@@ -19,8 +19,8 @@ type modelCapabilities struct {
 	// efforts lists the levels thinkingConfig.thinkingLevel accepts, expressed
 	// in Dive's provider-neutral terms. Empty means the model has no thinking
 	// level at all ("Thinking level is not supported for this model") and
-	// effort must be emulated with a budget. Gemini's ladder tops out at HIGH,
-	// so no model lists xhigh or max.
+	// effort must be emulated with a budget. Most models top out at HIGH;
+	// Gemini 4 Neon also accepts XHIGH and MAX.
 	efforts []llm.ReasoningEffort
 
 	// minBudget and maxBudget bound thinkingBudget. They vary by model: the 3.x
@@ -73,6 +73,16 @@ var effortsLowThroughHigh = []llm.ReasoningEffort{
 	llm.ReasoningEffortHigh,
 }
 
+// effortsLowThroughMax extends effortsLowThroughHigh with XHIGH and MAX for
+// models such as Gemini 4 Neon that accept extended thinking levels.
+var effortsLowThroughMax = []llm.ReasoningEffort{
+	llm.ReasoningEffortLow,
+	llm.ReasoningEffortMedium,
+	llm.ReasoningEffortHigh,
+	llm.ReasoningEffortXHigh,
+	llm.ReasoningEffortMax,
+}
+
 type capabilityEntry struct {
 	prefix string
 	caps   modelCapabilities
@@ -94,6 +104,16 @@ var modelCapabilityTable = []capabilityEntry{
 	// the public Gemini API on 2026-11-17.
 	{prefix: "gemini-4-carbon", caps: modelCapabilities{
 		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 65535,
+		canDisableThinking:        true,
+		imagesInFunctionResponses: true,
+	}},
+	// Gemini 4 Neon rejects MINIMAL, accepts LOW through MAX (including XHIGH
+	// and MAX), takes budgets in [1, 65535], accepts thinkingBudget: 0 (though
+	// it still thinks a little, like Hydrogen), and takes images inside
+	// function responses. Probed live against the public Gemini API on
+	// 2026-11-19.
+	{prefix: "gemini-4-neon", caps: modelCapabilities{
+		efforts: effortsLowThroughMax, minBudget: 1, maxBudget: 65535,
 		canDisableThinking:        true,
 		imagesInFunctionResponses: true,
 	}},

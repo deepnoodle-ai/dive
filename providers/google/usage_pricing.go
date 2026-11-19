@@ -14,6 +14,7 @@ import (
 // different billing shapes and intentionally remain unpriced here.
 var verifiedGoogleTextPricing = map[string]struct{}{
 	ModelGemini4Carbon:                 {},
+	ModelGemini4Neon:                   {},
 	ModelGemini4Hydrogen:               {},
 	ModelGemini4Argon:                  {},
 	ModelGemini38Flash:                 {},

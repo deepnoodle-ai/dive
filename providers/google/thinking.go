@@ -7,8 +7,16 @@ import (
 	"google.golang.org/genai"
 )
 
+// Extended thinking levels accepted by Gemini 4 Neon. The installed genai SDK
+// does not define named constants for them yet.
+const (
+	thinkingLevelXHigh genai.ThinkingLevel = "XHIGH"
+	thinkingLevelMax   genai.ThinkingLevel = "MAX"
+)
+
 // thinkingLevelFor maps Dive's provider-neutral effort onto Gemini's ladder.
-// Gemini stops at HIGH, so xhigh and max clamp there.
+// Models whose capabilities stop at HIGH clamp xhigh and max before calling
+// this helper.
 func thinkingLevelFor(effort llm.ReasoningEffort) (genai.ThinkingLevel, bool) {
 	switch effort {
 	case llm.ReasoningEffortMinimal:
@@ -17,8 +25,12 @@ func thinkingLevelFor(effort llm.ReasoningEffort) (genai.ThinkingLevel, bool) {
 		return genai.ThinkingLevelLow, true
 	case llm.ReasoningEffortMedium:
 		return genai.ThinkingLevelMedium, true
-	case llm.ReasoningEffortHigh, llm.ReasoningEffortXHigh, llm.ReasoningEffortMax:
+	case llm.ReasoningEffortHigh:
 		return genai.ThinkingLevelHigh, true
+	case llm.ReasoningEffortXHigh:
+		return thinkingLevelXHigh, true
+	case llm.ReasoningEffortMax:
+		return thinkingLevelMax, true
 	default:
 		return "", false
 	}
