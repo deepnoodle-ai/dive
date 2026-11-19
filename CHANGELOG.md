@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Gemini 4 Neon and DeepInfra models.** Added `google.ModelGemini4Neon`
+  (recommended, with `xhigh`/`max` thinking levels), `openrouter.ModelGemini4Neon`,
+  and DeepInfra's Qwen4-Max, Kimi-K3.1-Pro, DeepSeek-V4.1-Flash, DeepSeek-V4-Pro, and MiniMax-M3.
+
 ## [1.45.0] - 2026-11-17
 
 ### Added

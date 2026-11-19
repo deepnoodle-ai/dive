@@ -109,6 +109,55 @@ func TestGemini38FlashResolvesToItsOwnCapabilities(t *testing.T) {
 	assert.Equal(t, int32(65535), *budget.ThinkingBudget)
 }
 
+func TestGemini4NeonCapabilities(t *testing.T) {
+	// Probed live: Neon rejects MINIMAL, accepts LOW through MAX (including
+	// XHIGH and MAX), takes budgets up to 65535, and accepts thinkingBudget: 0.
+	clamped := buildThinking(t, ModelGemini4Neon,
+		llm.WithReasoningEffort(llm.ReasoningEffortMinimal))
+	assert.NotNil(t, clamped)
+	assert.Equal(t, genai.ThinkingLevelLow, clamped.ThinkingLevel)
+
+	for _, tt := range []struct {
+		effort llm.ReasoningEffort
+		want   genai.ThinkingLevel
+	}{
+		{llm.ReasoningEffortLow, genai.ThinkingLevelLow},
+		{llm.ReasoningEffortMedium, genai.ThinkingLevelMedium},
+		{llm.ReasoningEffortHigh, genai.ThinkingLevelHigh},
+		{llm.ReasoningEffortXHigh, thinkingLevelXHigh},
+		{llm.ReasoningEffortMax, thinkingLevelMax},
+	} {
+		t.Run(string(tt.effort), func(t *testing.T) {
+			thinking := buildThinking(t, ModelGemini4Neon, llm.WithReasoningEffort(tt.effort))
+			assert.NotNil(t, thinking)
+			assert.Equal(t, tt.want, thinking.ThinkingLevel)
+			assert.Nil(t, thinking.ThinkingBudget)
+		})
+	}
+
+	budget := buildThinking(t, ModelGemini4Neon, llm.WithReasoningBudget(1_000_000))
+	assert.NotNil(t, budget)
+	assert.Equal(t, int32(65535), *budget.ThinkingBudget)
+
+	disabled := buildThinking(t, ModelGemini4Neon,
+		llm.WithReasoningEffort(llm.ReasoningEffortNone))
+	assert.NotNil(t, disabled)
+	assert.Equal(t, int32(0), *disabled.ThinkingBudget)
+}
+
+func TestUnlistedModelCapsExtendedEffortAtHigh(t *testing.T) {
+	// Unlisted models (preview IDs, tuned models, Vertex deployments) stay
+	// capped at HIGH rather than sending XHIGH/MAX without live verification.
+	for _, effort := range []llm.ReasoningEffort{llm.ReasoningEffortXHigh, llm.ReasoningEffortMax} {
+		t.Run(string(effort), func(t *testing.T) {
+			thinking := buildThinking(t, "gemini-9-preview", llm.WithReasoningEffort(effort))
+			assert.NotNil(t, thinking)
+			assert.Equal(t, genai.ThinkingLevelHigh, thinking.ThinkingLevel)
+			assert.Nil(t, thinking.ThinkingBudget)
+		})
+	}
+}
+
 func TestGemini4ArgonCapabilities(t *testing.T) {
 	// Probed live: Argon rejects MINIMAL, takes budgets up to 65535, and
 	// accepts thinkingBudget: 0.

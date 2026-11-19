@@ -25,7 +25,7 @@ func TestIntegration_ModelSeesToolResultImage(t *testing.T) {
 	if os.Getenv("GEMINI_API_KEY") == "" && os.Getenv("GOOGLE_API_KEY") == "" {
 		t.Skip("GEMINI_API_KEY not set")
 	}
-	for _, model := range []string{DefaultModel, ModelGemini4Carbon, ModelGemini4Hydrogen, ModelGemini4Argon, ModelGemini25Flash} {
+	for _, model := range []string{DefaultModel, ModelGemini4Carbon, ModelGemini4Neon, ModelGemini4Hydrogen, ModelGemini4Argon, ModelGemini25Flash} {
 		for _, isError := range []bool{false, true} {
 			name := model
 			if isError {

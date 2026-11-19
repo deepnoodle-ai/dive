@@ -15,6 +15,14 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:       "USD",
 		UpdatedAt:      "2026-11-12",
 	},
+	ModelGemini4Neon: {
+		Model:          ModelGemini4Neon,
+		InputPrice:     3.00,
+		OutputPrice:    15.00,
+		CacheReadPrice: 0.15,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-19",
+	},
 	ModelGemini4Hydrogen: {
 		Model:          ModelGemini4Hydrogen,
 		InputPrice:     1.50,

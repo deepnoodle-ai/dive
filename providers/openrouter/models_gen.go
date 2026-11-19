@@ -51,6 +51,7 @@ const (
 	ModelO3Pro              = "openai/o3-pro"
 	ModelO4Mini             = "openai/o4-mini"
 	ModelGemini4Carbon      = "google/gemini-4-carbon"
+	ModelGemini4Neon        = "google/gemini-4-neon"
 	ModelGemini4Hydrogen    = "google/gemini-4-hydrogen"
 	ModelGemini4Argon       = "google/gemini-4-argon"
 	ModelGemini38Flash      = "google/gemini-3.8-flash"

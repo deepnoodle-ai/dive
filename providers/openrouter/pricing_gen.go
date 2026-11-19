@@ -253,6 +253,15 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:       "USD",
 		UpdatedAt:      "2026-09-30",
 	},
+	// OpenRouter public model listing, standard route.
+	ModelGemini4Neon: {
+		Model:          ModelGemini4Neon,
+		InputPrice:     3,
+		OutputPrice:    15,
+		CacheReadPrice: 0.15,
+		Currency:       "USD",
+		UpdatedAt:      "2026-11-19",
+	},
 	ModelGemini25Flash: {
 		Model:          ModelGemini25Flash,
 		InputPrice:     0.30,

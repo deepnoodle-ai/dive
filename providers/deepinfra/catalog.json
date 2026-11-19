@@ -44,14 +44,22 @@
       "cli_order": 3
     },
     {
+      "go_name": "ModelQwen4Max",
+      "id": "Qwen/Qwen4-Max",
+      "kind": "text",
+      "display_name": "Qwen4 Max",
+      "description": "Flagship Qwen 4 multimodal reasoning",
+      "context_window": 1000000,
+      "recommended": true,
+      "cli_order": 4
+    },
+    {
       "go_name": "ModelQwen38Max",
       "id": "Qwen/Qwen3.8-Max",
       "kind": "text",
       "display_name": "Qwen3.8 Max",
       "description": "Flagship Qwen reasoning",
-      "context_window": 256000,
-      "recommended": true,
-      "cli_order": 4
+      "context_window": 256000
     },
     {
       "go_name": "ModelQwen38A95B",
@@ -74,14 +82,39 @@
       "cli_order": 6
     },
     {
+      "go_name": "ModelKimiK31Pro",
+      "id": "moonshotai/Kimi-K3.1-Pro",
+      "kind": "text",
+      "display_name": "Kimi K3.1 Pro",
+      "description": "Multimodal long-horizon agent tasks",
+      "context_window": 1048576,
+      "recommended": true,
+      "cli_order": 7
+    },
+    {
       "go_name": "ModelKimiK3",
       "id": "moonshotai/Kimi-K3",
       "kind": "text",
       "display_name": "Kimi K3",
       "description": "Long-horizon agent tasks",
+      "context_window": 1048576
+    },
+    {
+      "go_name": "ModelDeepSeekV41Flash",
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "kind": "text",
+      "display_name": "DeepSeek V4.1 Flash",
+      "description": "Low-cost multimodal coding and agents",
       "context_window": 1048576,
       "recommended": true,
-      "cli_order": 7
+      "cli_order": 8
+    },
+    {
+      "go_name": "ModelDeepSeekV4Pro",
+      "id": "deepseek-ai/DeepSeek-V4-Pro",
+      "kind": "text",
+      "display_name": "DeepSeek V4 Pro",
+      "context_window": 1048576
     },
     {
       "go_name": "ModelDeepSeekV4Flash",
@@ -89,9 +122,14 @@
       "kind": "text",
       "display_name": "DeepSeek V4 Flash",
       "description": "Low-cost coding and agents",
-      "context_window": 1048576,
-      "recommended": true,
-      "cli_order": 8
+      "context_window": 1048576
+    },
+    {
+      "go_name": "ModelMiniMaxM3",
+      "id": "MiniMaxAI/MiniMax-M3",
+      "kind": "text",
+      "display_name": "MiniMax M3",
+      "context_window": 524288
     },
     {
       "go_name": "ModelMiMo26Pro",
